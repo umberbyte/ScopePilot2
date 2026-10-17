@@ -1,0 +1,12 @@
+<Window x:Class="ScopePilot.ProjectStartupWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ScopePilot — プロジェクトを選択" Width="720" Height="370" ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBackground}" Foreground="{DynamicResource TextPrimary}" FontFamily="Segoe UI, Yu Gothic UI" FontSize="14">
+    <Window.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="Styles/Controls.xaml" /></ResourceDictionary.MergedDictionaries></ResourceDictionary></Window.Resources>
+    <StackPanel Margin="28" Background="{DynamicResource WindowBackground}">
+        <TextBlock Text="プロジェクトを選択" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,10" />
+        <TextBlock Text="作業するプロジェクトフォルダーを選んでください。" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,24" />
+        <Button x:Name="OpenProjectFolderButton" Content="プロジェクトフォルダーを開く（プロジェクトファイルを含む）" Click="Open_Click" Height="48" Margin="0,0,0,12" HorizontalContentAlignment="Left" Style="{StaticResource PrimaryActionButton}" />
+        <Button x:Name="CreateProjectFolderButton" Content="新規プロジェクトフォルダーとプロジェクトファイルを作成" Click="Create_Click" Height="48" Margin="0,0,0,12" HorizontalContentAlignment="Left" />
+        <Button x:Name="CancelStartupButton" Content="キャンセルしてアプリを閉じる" IsCancel="True" Height="48" Margin="0" HorizontalContentAlignment="Left" />
+    </StackPanel>
+</Window>

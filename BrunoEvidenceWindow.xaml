@@ -1,0 +1,61 @@
+<Window x:Class="ScopePilot.BrunoEvidenceWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Brunoでの手動確認を記録"
+        Width="900" Height="740" MinWidth="680" MinHeight="600" WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackground}" Foreground="{DynamicResource TextPrimary}"
+        FontFamily="Segoe UI, Yu Gothic UI" FontSize="14" UseLayoutRounding="True">
+    <Window.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="Styles/Controls.xaml" />
+    </ResourceDictionary.MergedDictionaries></ResourceDictionary></Window.Resources>
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="2*" MinHeight="130" />
+            <RowDefinition Height="3*" MinHeight="230" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" Text="Brunoで送信した通信をZAP等のHAR出力に対応したプロキシで記録し、要求・応答を1件選択してください。［保存］で通信と確認結果をプロジェクトに保存します。"
+                   TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,12" />
+        <DockPanel Grid.Row="1" Margin="0,0,0,10">
+            <Button DockPanel.Dock="Right" Content="HARを選択" Click="ChooseHar_Click" />
+            <TextBlock x:Name="HarPathLabel" Text="HARファイル未選択" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </DockPanel>
+        <DataGrid x:Name="EntriesGrid" Grid.Row="2" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                  CanUserAddRows="False" Margin="0,0,0,12">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="45" />
+                <DataGridTextColumn Header="メソッド" Binding="{Binding Method}" Width="90" />
+                <DataGridTextColumn Header="応答" Binding="{Binding ResponseStatus}" Width="70" />
+                <DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="*" />
+            </DataGrid.Columns>
+        </DataGrid>
+        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="確認項目" />
+                <TextBox x:Name="TitleBox" MaxLength="200" Margin="0,3,0,10" />
+                <TextBlock Text="確認状態" />
+                <ComboBox x:Name="StatusBox" SelectedIndex="0" Margin="0,3,0,10">
+                    <ComboBoxItem Content="成立確認（担当者記録）" />
+                    <ComboBoxItem Content="実施済み・成立未確認" />
+                    <ComboBoxItem Content="未実施・中断" />
+                </ComboBox>
+                <TextBlock Text="認証ロール" />
+                <TextBox x:Name="RoleBox" MaxLength="200" Margin="0,3,0,10" />
+                <TextBlock Text="確認結果・観測した実際の効果" />
+                <TextBox x:Name="ResultBox" MaxLength="4000" Height="75" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Margin="0,3,0,10" />
+                <TextBlock Text="未実施・中断の理由（該当時）" />
+                <TextBox x:Name="ReasonBox" MaxLength="2000" TextWrapping="Wrap" AcceptsReturn="True" Margin="0,3,0,10" />
+                <TextBlock Text="再開に必要な入力・改善（該当時）" />
+                <TextBox x:Name="RequiredInputBox" MaxLength="2000" TextWrapping="Wrap" AcceptsReturn="True" Margin="0,3,0,10" />
+            </StackPanel>
+        </ScrollViewer>
+        <Grid Grid.Row="4" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <TextBlock x:Name="ErrorLabel" Grid.Column="0" Foreground="#E07070" TextWrapping="Wrap" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Content="キャンセル" Click="Cancel_Click" />
+                <Button x:Name="ImportButton" Content="通信と確認結果を保存" Click="Import_Click" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

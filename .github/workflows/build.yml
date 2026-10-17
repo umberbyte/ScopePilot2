@@ -1,0 +1,72 @@
+name: Build ScopePilot
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        runtime: [win-x64, win-arm64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+          cache-dependency-path: tools/playwright-runtime/package-lock.json
+
+      - name: Restore Playwright MCP runtime
+        working-directory: tools/playwright-runtime
+        run: npm ci
+
+      - name: Restore .NET packages
+        run: dotnet restore ScopePilot.csproj
+
+      - name: Build
+        run: dotnet build ScopePilot.csproj -c Release --no-restore
+
+      - name: Test
+        run: dotnet test Tests/ScopePilot.Tests.csproj -c Release
+
+      - name: Publish Windows package
+        shell: powershell
+        run: ./scripts/Publish.ps1 -Runtime ${{ matrix.runtime }} -SkipTests
+
+      - name: Build Windows installer
+        shell: powershell
+        run: |
+          nuget install Tools.InnoSetup -Version 6.7.3 -Source https://api.nuget.org/v3/index.json -OutputDirectory "$env:RUNNER_TEMP\inno" -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup restore failed.' }
+          ./scripts/Build-Installer.ps1 -Runtime ${{ matrix.runtime }} -SkipPublish -SkipTests -IsccPath "$env:RUNNER_TEMP\inno\Tools.InnoSetup.6.7.3\tools\ISCC.exe"
+
+      - name: Test installer lifecycle
+        if: matrix.runtime == 'win-x64'
+        shell: powershell
+        run: ./scripts/Test-Installer.ps1 -Runtime win-x64
+
+      - name: Upload publish artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScopePilot-${{ matrix.runtime }}
+          path: |
+            artifacts/ScopePilot-*-${{ matrix.runtime }}.zip
+            artifacts/ScopePilot-*-${{ matrix.runtime }}.zip.sha256
+            artifacts/ScopePilot-*-${{ matrix.runtime }}-Setup.exe
+            artifacts/ScopePilot-*-${{ matrix.runtime }}-Setup.exe.sha256
