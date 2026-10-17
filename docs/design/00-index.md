@@ -2,6 +2,10 @@
 
 本ディレクトリは [Burp Suite Professional 代替仕様案](../burp-professional-replacement-spec.md) を実装へ落とす概要設計である。言語・配布対象・旧版の扱いはリポジトリ直下の [AGENTS.md](../../AGENTS.md) を正本とし、本文書群は TypeScript、Electron、Windows/macOS を前提とする。
 
+実装モジュール、画面構成、状態遷移、単体テストIDとの対応は
+[機能別詳細設計](../detailed-design/00-index.md) を参照する。詳細設計は本文書群を具体化するものであり、
+概要設計の安全境界や確定事項を緩和しない。
+
 ## 設計の読み方
 
 | 文書 | 対応範囲 | 主な段階 |

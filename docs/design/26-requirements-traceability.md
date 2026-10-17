@@ -58,6 +58,13 @@
 | 診断項目Excelを直接実行すると出典・安全審査・再現性を失う | source座標付きの版固定catalogへ一方向変換し、review済みtemplateだけを実行（[15](15-authorization-business-logic.md)） |
 | AI支援が文書抽出と探索だけに限定 | 全作業taskへ共通`AiAssistService`を提供し、出力は権限を持たない提案として監査（[25](25-document-hints-ai.md)） |
 
+## 3.1 詳細設計・単体テストへの接続
+
+F01〜F21 の実装モジュール、画面/CLI公開範囲、状態遷移、失敗、証跡、単体テストIDは
+[詳細設計索引](../detailed-design/00-index.md) から追跡する。単体テストIDは `Fnn-UT-nnn` とし、
+外部エンジン・実DB・OS・ブラウザの保証は `CT` / `IT` / `FT` に分離する。実装時は同じIDを
+test名に含め、概要設計だけを参照してテスト対応を省略しない。
+
 ## 4. 設計ゲート
 
 - **A0 gate**: 本文書群で固定した基準シナリオ、engine capability、通信制御、HTTP/2 制約、性能基準を実測して記録する。実測失敗時は設計を実行時に緩和せず、該当能力を `Unsupported` にする。
