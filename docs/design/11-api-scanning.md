@@ -53,9 +53,23 @@ ApiSendJob（Orchestrator配下）:
 - API診断画面: 定義の取り込み→エンドポイント一覧（F03のAPI一覧と共通）→生成プレビュー→実行。
 - CLI: `scopepilot api import <file>` / `scopepilot run --api`。
 
-## 8. 未解決事項（A1〜A3）
+## 8. 確定事項
 
-1. Postman Collection の変数・環境の扱い（認証変数は08のVaultへ接続）
-2. GraphQL の introspection 不可環境でのSDL単独運用
-3. バイナリ要求（ファイル添付）の代表値生成の方針（アップロード禁止との両立）
-4. OpenAPI定義自体の検証（無効な定義・巨大定義の上限）
+1. Postman Collection v2.xはcollectionと、利用者が明示選択したenvironmentだけを取り込む。
+   変数解決順位はrequest/local、data、environment、collection、globalの順とし、ScopePilotが保持しない
+   scopeは空として扱う。pre-request/test script、動的関数、外部file読込は実行しない。auth fieldと
+   secret名辞書に一致する値は`SecretRef`へ移し、未解決必須変数があるrequestは`NeedsInput`で送信しない。
+2. GraphQLはSDL file単独でoperation catalogを作れる。introspectionを自動で試行せず、Queryは必須引数に
+   sampleまたはscalar既定があるものだけ生成する。Mutation/Subscriptionは既定除外し、operation個別allowlist、
+   `ApiSend`、必要に応じ`FormSubmit`がある場合だけ計画へ入れる。custom scalarに値mappingがなければ
+   `NeedsInput`とする。
+3. binary/file値を推測生成しない。optional partは省略し、required partは利用者が指定したfixture file、
+   media type、hash、長さを計画へ固定するまで`NeedsInput`とする。送信には`Upload`を追加要求し、既定上限
+   1 MiB、案件上限最大25 MiBとする。対象アプリから取得した実データを代表値として自動再利用しない。
+4. 定義入力は最大10 MiB、展開後10,000 operation、schema node 100,000、参照深度64、parse 30秒とする。
+   YAML alias expansionを禁止し、外部/network `$ref`を解決しない。同じ取込root内のlocal fileだけを
+   hash付きで許可する。OpenAPI 3.0/3.1 schema validationに失敗した定義は部分実行せず、source span付きの
+   errorを返す。上限超過は`DefinitionTooLarge`として証拠に残す。
+
+参照: [Postman Collection schema](https://schema.postman.com/) と
+[GraphQL specification](https://spec.graphql.org/) は入力形式の基準として版をruntime bundleへ固定する。

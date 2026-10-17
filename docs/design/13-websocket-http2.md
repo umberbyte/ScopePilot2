@@ -9,8 +9,8 @@ Host/接続先/SNI 等の扱い・正規化を伴わない編集経路を提供�
 
 ## 2. 前提（ZAP 2.17.0）
 
-- ZAP WebSocket API は message 一覧と text message 送信を提供する。binary、編集、停止、方向指定、
-  connection選択を含む必要操作を版固定した実機で検証し、能力表へ記録する。
+- ZAP WebSocket API は message 一覧と方向・channelを指定する text message 送信を提供する。
+  初期公開能力はこの文書の7節に固定し、版固定した実機fixtureに合格したruntimeだけで有効化する。
 - 記録ブラウザーで WebSocket を許可し、対象Origin、connection数、message数、byte数、時間上限を適用する。
 
 ## 3. コンポーネント構成
@@ -24,11 +24,11 @@ Http2Support:
   プロトコル選択: requestor/実行系の httpVersion 指定（HTTP/1.1/HTTP/2）を計画・再送で指定可能に
   Host/SNI/接続先: 生要求、authority、実接続先、TLS SNI を別フィールドで計画する。
     ZAP sendRequest や Node の通常HTTP APIがこれらを独立制御できるとは仮定しない。
-    header順、大文字小文字、重複header、pseudo-header、connection reuseを保持できる専用経路を
-    A0で比較し、保持できない操作は能力表で未対応とする
+    Node `http2` adapterは有効なHTTP/2 messageの意味的編集に使う。header順、大文字小文字、
+    不正pseudo-header、connection reuseなどwire忠実性を要求する操作は専用経路を追加するまで未対応とする
 ```
 
-- 対応するだけで完全互換とは扱わない。HTTP/3 は必要な業務シナリオが確定した時点で互換性表へ追加。
+- 対応するだけで完全互換とは扱わない。HTTP/3 は初期範囲外として能力表へ`Unsupported`を明記する。
 
 ## 4. データモデル
 
@@ -47,8 +47,26 @@ Http2Support:
 - 通信一覧に WS ペイン（フレーム列・方向・時刻）。フレームの再送・Fuzzer送出は要求ペインと
   同じ操作体系。
 
-## 7. 未解決事項（A0/A3）
+## 7. 確定事項
 
-1. ZAP WebSocket API の binary/方向/connection/停止操作の対応範囲
-2. ZAP、Node、専用transportの正規化と Host/connect/SNI 分離能力の実測
-3. WS の KeepAlive/再接続時のセッション扱い
+1. ZAP経路の初期公開能力はchannel/messageのpaged記録と、channel ID・方向を指定した**text message送信**
+   に限定する。binaryは記録・表示だけとし、binary送信、停止中frame編集、個別channel close/openは
+   `Unsupported`とする。停止はjobまたはZAP process単位で行う。能力を追加する場合はruntime bundleごとに
+   direction、channel選択、message byte一致、停止overshootのfixtureを要求する。
+2. transport能力を次のように固定する。
+
+   | 経路 | 保証する編集 | 保証しない編集 |
+   |---|---|---|
+   | ZAP | 通常のHTTP/1.xとZAPが正規化したHTTP/2 | header順/case、無効header、connect先とSNIの独立指定 |
+   | Node `http`/`https` | URL、method、header、body、connect先/SNIの検査 | wire上のheader順/caseの完全保持 |
+   | Node `http2` | `:method`/`:scheme`/`:authority`/`:path`、通常header、body、TLS servername | 無効pseudo-header、HPACK表現、frame分割、wire順序 |
+
+   Host/`:authority`、TCP connect先、TLS SNIは計画モデルで分離し、adapterが独立指定できない組合せを拒否する。
+   request smuggling等のwire忠実性が必要な機能は、専用transportとfixtureが追加されるまで公開しない。
+3. 各handshakeを独立`connectionId`とし、同じplan、role、origin、subprotocolによる再接続は
+   `logicalSessionId`で関連付ける。ping/pongはbyte/time budgetへ数えるが診断message数から分離する。
+   切断後にapplication messageを自動再送せず、未送信queueは`ConnectionLost`で停止する。再開は新しい
+   子計画とconnectionを作り、利用者または冪等性を宣言したruleだけが再送できる。
+
+根拠: [ZAP WebSocket API](https://www.zaproxy.org/docs/desktop/addons/websockets/api/) はmessage pagingと
+channel・方向を指定したtext送信を公開する。binary送信等は文書から推測して有効化しない。

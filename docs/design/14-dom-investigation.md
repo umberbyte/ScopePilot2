@@ -21,8 +21,8 @@ DomInstrumentation（BrowserAdapter配下）:
     innerHTML/outerHTML/insertAdjacentHTML/eval/Function/setTimeout(文字列)/
     postMessageハンドラ/属性setter 等の主な sink
   記録: source→sink のデータフロー（値の断片・スタック・要素のCSSセレクタ）をイベント列として記録
-  taint追跡は段階導入: 初期は「同じ値の文字列照合」で source/sink を結び付け、
-    変形をまたぐ追跡は後段（完全なtaint解析を約束しない）
+  taint追跡は初期の「同じ値の文字列照合」に限定する。変形をまたぐ追跡は`Unsupported`として
+    coverageへ残し、完全なtaint解析を提供すると表示しない
 DomReportJob: 記録したフローを診断観測（区分=DOM調査・実影響未確認）として整理。
   手動確認（ブラウザでの再現）への導線を添える
 ```
@@ -47,8 +47,20 @@ DomReportJob: 記録したフローを診断観測（区分=DOM調査・実影�
 - 「DOM調査」ペイン: ページごとの source/sink 一覧とフロー図（単純なリスト＋対応線）。
   フローを選ぶと該当要素のスクリーンショットと記録通信を表示。
 
-## 7. 未解決事項（A3）
+## 7. 確定事項
 
-1. 注入スクリプトの対象フレーム（iframe・shadow DOM・worker）の初期範囲
-2. CSP の strict 環境での注入可否と、注入できない場合の表示
-3. source/sink の初期辞書（重大度の付け方）と誤検出の抑制
+1. 初期対象はtop frame、許可origin内のchild frame、open shadow rootとする。許可origin外frameはURLと
+   境界だけを記録しDOMへ注入しない。closed shadow root、dedicated/shared/service worker、browser extension
+   worldは初期範囲外とし、coverageへ`Unsupported`を残す。動的に追加されたframeにも同じorigin判定を適用する。
+2. Playwrightのcontext init scriptでpage scriptより前に計測を登録し、対象のCSPを変更・無効化しない。
+   strict CSP、Trusted Types、sandboxed frame等でhookのself-test eventを観測できない場合は
+   `InstrumentationUnavailable`とし、DOM所見を生成しない。CSP回避を自動で試みず、未観測範囲として表示する。
+3. 初期sourceはURL/location/hash/search、referrer、cookie、storage、postMessage、form/input valueとする。
+   sinkは次のpriorityを持つ。
+
+   - High-priority review: `eval`、`Function`、文字列`setTimeout/setInterval`、script URL/`srcdoc`。
+   - Medium-priority review: `innerHTML`、`outerHTML`、`insertAdjacentHTML`、HTML属性setter、navigation URL。
+   - Context-required: `postMessage` receiver、storageからの表示、DOM write。
+
+   これはfinding重大度ではなく確認順である。同一値のsource→sink到達、stack、sanitizer有無をsignalとして
+   重複排除し、値一致だけ、sink出現だけ、静的code文字列だけでは所見を確定しない。

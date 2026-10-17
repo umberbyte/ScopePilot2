@@ -9,9 +9,12 @@ Burp Collaborator 相当。A3 で提供する。
 
 ## 2. 技術選定
 
-- 第一候補: ZAP OAST アドオン（BOAST/Interactsh 相当の機能を持つ）
-- 第二候補: Interactsh の自己ホスト（サーバー管理は利用者/管理者）
-- 公開サービスへの自動接続は無効（6.2）。使う場合は送信情報と保存条件を明示。
+- 基準構成は**利用者または組織が管理する Interactsh 1.3.0以上**をZAP OAST API経由で利用する。
+  DNS/HTTP/SMTPを同じfixtureで検証できるためである。ScopePilotは公開OASTサービスを運営しない。
+- BOASTは既存の自己ホスト環境を利用する任意adapterとし、DNS/HTTP/HTTPS能力だけを公開する。
+  SMTPが必要な計画へBOASTを選ばない。
+- 公開サービスのURLは製品既定に持たず、自動接続しない。利用者が明示登録する場合は運営者、送信情報、
+  retention、認証、利用条件を表示し、案件設定と監査イベントへ記録する。
 
 ## 3. コンポーネント構成
 
@@ -43,8 +46,19 @@ OastAdapter（01のアダプター）:
 - 診断実行画面に OAST セッション状態・受信一覧・対応要求へのリンク。
 - CLI: `scopepilot oast poll --wait <分>`。
 
-## 7. 未解決事項（A3）
+## 7. 確定事項
 
-1. ZAP OAST アドオンの自己ホスト構成（BOASTサーバー）の運用要件と費用（1.3の判断対象）
-2. プロトコル別（DNS/HTTP/SMTP）の自己ホスト環境での検証
-3. 長時間待機（遅延コールバック）と案件再開の整合（実行終了後の受信の扱い）
+1. OAST serverはScopePilot配布物に含めず、組織管理の外部runtimeとして扱う。必要条件はTLS、認証token、
+   固定base URL、時刻同期、保持期間、health check、export/delete手順である。これらを満たさない接続は
+   `Unsupported`とするため、ScopePilot側の継続的な公開server費用は完成条件に含めない。
+2. capabilityはDNS、HTTP、HTTPS、SMTPを別々に持ち、各protocolでpayload発行、対象fixtureからのcallback、
+   poll、request相関、重複排除、再起動後pollを確認する。未検証protocolはUIに出さない。Interactshと
+   BOASTの能力を合成して「OAST対応」と一括表示しない。
+3. 送信runとOAST待機sessionを分離する。送信完了後はrunを`CompletedAwaitingCallbacks`とし、既定24時間、
+   最大7日、既定60秒間隔でpollする。案件を閉じても期限内sessionは再開時にpollできる。遅延callbackは
+   元runの結果を遡及変更せず、元requestを参照する新しい`OastInteraction`とobservationを受信時刻で追加する。
+   期限後の受信は次回手動pollで`LateInteraction`として記録し、受信なしを陰性結果にしない。
+
+根拠: [ZAP OAST API](https://www.zaproxy.org/docs/desktop/addons/oast-support/api/)、
+[Interactsh support](https://www.zaproxy.org/docs/desktop/addons/oast-support/services/interactsh/)、
+[BOAST support](https://www.zaproxy.org/docs/desktop/addons/oast-support/services/boast/)。

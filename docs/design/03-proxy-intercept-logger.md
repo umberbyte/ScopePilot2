@@ -53,8 +53,20 @@ SiteMapQuery: サイトツリー＋API一覧＋パラメータ一覧。保存済
   サイトツリー＋フィルタ（ロール・元ツール・ステータス）。
 - CLI: 通信のJSONL/ndjson出力（19）。インターセプトはGUI限定。
 
-## 7. 未解決事項（A0）
+## 7. 確定事項
 
-1. ZAP Break API の要求/応答別操作、同時到着、timeout時の挙動
-2. 手動プロキシと診断実行のZAPプロセスを共用するか別立てか（共用ならモード切替の排他）
-3. 大量通信時の `core/view/messages` 取得方式（差分取得・HAR一括の選択）
+1. **Interceptは単一メッセージ直列キューとする。** ZAP Break API の `http-request` / `http-response`、
+   `httpMessage`、`setHttpMessage`、`step` / `continue` / `drop` を固定版fixtureで確認し、同時到着は
+   ZAPの現在メッセージを一つずつScopePilotのFIFOへ写す。requestの操作待ちは既定60秒でdrop、
+   responseは対象への送信後なので既定60秒で未編集のままcontinueし、どちらもtimeout監査イベントを残す。
+   UI切断時も同じ規則を使う。要求/応答種別またはdropを識別できない版ではInterceptを公開しない。
+2. **用途ごとにZAPプロセスを分離する。** Explore、Manual/Intercept、Resend、診断runは異なるhome、port、
+   API key、processを持つ。mode切替で共有しない。案件共有予算だけをcoreで共有し、あるprocessの停止や
+   addon状態が他用途へ波及しない構成を既定とする。
+3. **履歴取込はcursor差分取得を正本とする。** `core/view/messages` の `start` / `count` を使い、
+   既定page size 500、最大2,000でmessage ID昇順に取得する。最後に保存したZAP message IDと内容hashを
+   checkpointとし、重複は取込時に除外する。HAR一括は利用者exportと終了時の照合用であり、常時同期には
+   使わない。本文は一覧取得で展開せず、保存層へstreamしてUIは遅延読込する。
+
+根拠: [ZAP API Reference](https://www.zaproxy.org/docs/api/) はBreak操作とCore message APIを公開する。
+API schemaと実挙動はruntime bundleごとにfixtureで固定し、文書記載だけで能力を有効化しない。

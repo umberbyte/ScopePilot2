@@ -50,11 +50,22 @@ TriagePolicy/CandidateSelector（[27](27-security-guidelines.md)）: 観測を�
 
 ## 7. UI / CLI
 
+- Simpleは固定済み探索strategyの進行と介入要求を表示し、完了後に代表パターンの採用/除外だけを許す。
+  Advancedは操作者権限の範囲で開始点、深度、action/page上限、form方針、AI提案を編集できる。
+  どちらも同じExplorationPlanを作り、modeをengine挙動へ渡さない。
 - 探索画面: 進行状況・介入要求・探索経路ビュー・観測の代表パターン一覧。
 - CLI: `scopepilot explore`（19）。
 
-## 8. 未解決事項（A0〜A1）
+## 8. 確定事項
 
-1. フォーム種別判定の精度（検索/認証/更新/アップロードの分類）と送信戦略の初期セット
-2. 状態遷移追跡の深さ制限とループ検出
-3. 自動ログインとAI探索の併用時の主体表示（どのロールで何をしたか）
+1. フォーム分類は `Search`、`Authentication`、`Mutation`、`Upload`、`Unknown` の5種とし、action/method、
+   input type/name/autocomplete、button label、既知の認証routeを決定論的ruleで評価する。SearchはGET/HEADと
+   代表値1件、Authenticationは[08](08-authentication-session.md)の定義、Mutationは`FormSubmit`と
+   operation個別allowlist、Uploadはさらに`Upload`と明示fixtureを要求する。複数分類またはUnknownは
+   自動送信せず介入要求へ送る。分類のconfidenceは表示するが、AIの推定だけで送信可へ昇格しない。
+2. 状態遷移の既定深度は5、同一状態からのactionは50、1 role当たり500 pageとする（案件上限が小さければ
+   そちらを優先）。loop keyは正規化URL、role、DOM action signature、Cookie/storageのkeyed fingerprintを
+   組み合わせ、同じkeyの3回目の到達を展開しない。SPAのURL不変遷移もDOM action signatureで区別する。
+3. 全操作に `actorKind=CoreAutomation|UserIntervention|AiProposal`、`executedBy=BrowserAdapter|User`、role ID、
+   session ID、親action IDを記録する。AIは候補を提案できるだけで、実送信者は常にBrowserAdapterまたは
+   Userとして別フィールドに残す。画面・証拠・報告で「AIが実行した」と省略表示しない。

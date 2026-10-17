@@ -11,7 +11,8 @@
 
 - [08](08-authentication-session.md) のロール別sessionと通信分離。
 - 代表URLパターン、[04](04-repeater.md) の再送、[06](06-decoder-comparer-sequencer.md) の差分。
-- 診断テーマの手順は版付き RulePackage または checklist として取り込む。
+- 診断テーマの手順は版付き `DiagnosticTemplateCatalog`、RulePackage、checklistとして取り込む。
+  初期入力は[診断項目Excel](../WebAppPentestGuidelines_診断項目_ScopePilot_作業用.xlsx)とする。
 
 ## 3. コンポーネント構成
 
@@ -47,8 +48,22 @@ ExpectationCheck: 期待結果との突合結果を「要確認/期待どおり/
 - 「認可マトリクス」画面: 操作×ロールのグリッド、期待結果設定、一括実行（05の速度制御の内側）、
   差分ビューア（06）、確認状態の記録。
 
-## 7. 未解決事項（A2〜A3）
+## 7. 確定事項
 
-1. 期待結果の記述形式（ステータス/本文条件/所有者識別子の抽出方法）
-2. 状態戻し手順の表現と、戻し不能検証の限界の表示
-3. 元資料33テーマの手順との対応表の取り込み
+1. `Expectation` は任意codeを含まないJSON DSLとし、`allOf` / `anyOf` / `not` の下にstatus range、
+   header存在/literal、body literal/bounded regex、JSON Pointer、XML XPath、HTML selector、長さ範囲、
+   baselineとの差分を置く。owner識別子はJSON Pointer、XPath、HTML selector、header、Cookieから抽出し、
+   正規化後のkeyed fingerprintだけを比較できる。条件不能は失敗扱いにせず`Inconclusive`とする。
+2. 状態変更cellは`Setup → Exercise → Verify → Restore → VerifyRestore`の宣言的step列を必須とし、各stepは
+   [08](08-authentication-session.md)のrequest/extract/assertと同じ制約を使う。Restoreと復元確認がない場合は、
+   認可された使い捨て環境で`DisposableEnvironment=true`を固定した計画以外、自動実行しない。戻し不能な
+   本番検証は手動checklistへ送り、「自動化対象外・状態変更の影響を確認できない」と報告する。
+3. [診断項目Excel](../WebAppPentestGuidelines_診断項目_ScopePilot_作業用.xlsx)は一方向importerでversioned
+   `DiagnosticTemplateCatalog`と`CheckCatalog`へ変換する。ガイドライン6sheetの769行、ZAP診断rule sheetの
+   102行、ZAP非対応代替sheetの94行を入力候補とし、シミュレーション・クローリング・実行・手動操作の5sheetは
+   fixture/referenceに分離してproduction templateへ自動昇格しない。row番号をIDにせず、内容から割り当てた
+   stable `SPC-TEMPLATE-xxxxx` / `SPC-CHECK-xxxxx`、source file hash、sheet、元row、importer versionを保持する。
+   各templateはguideline item、OperationClass、parameter schema、request mutation、execution route、Expectation、
+   必要capability、復元要件、危険度、Simple可否へmappingする。任意codeは取り込まず、安全制御と矛盾するセルは
+   instructionとして実行しない。schema検査、license確認、人のreviewを通ったversionだけをruntime bundleへ入れ、
+   Excelを実行時依存にしない。

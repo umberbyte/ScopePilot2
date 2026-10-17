@@ -50,9 +50,15 @@ DB と manifest は相対参照を使う。書き込みは一つの storage serv
 
 ## 6. 性能と上限
 
-一覧 API は cursor pagination を使い、本文を返さない。本文は range/stream で遅延読込し、検索用に許可された派生テキストだけを FTS5 へ入れる。巨大応答は設定上限で打ち切り、保存済み byte 数、推定全長、打切り理由を記録する。
+一覧APIはcursor paginationを使い、既定100件、最大500件とし、本文を返さない。本文はrange/streamで
+64 KiBずつ遅延読込し、検索用に許可されたマスク済み派生テキストの先頭1 MiBだけをFTS5へ入れる。
+request/response bodyの保存既定は各10 MiB、案件設定でのhard maxは各100 MiBとする。超過時は打ち切り、
+保存済みbyte数、`Content-Length`等から分かる推定全長、打切り理由、末尾未取得を記録する。
 
-10万件 fixture で、初回表示、ページ移動、filter、本文表示、export、異常終了後の復旧を測る。基準値は A0 の基準端末と共に [26](26-requirements-traceability.md) へ固定する。
+A0基準端末はWindows 11 x64、4 logical CPU以上、16 GiB RAM、SSDとする。10万件fixtureでcase open 5秒以内、
+最初の一覧2秒以内、cursor page/filterのp95 1秒以内、選択本文の先頭64 KiBを1秒以内、metadata exportを
+60秒以内、crash recovery checkを60秒以内、desktop process合計1.5 GiB以下とする。macOS A4 gateでも
+同じfixtureと閾値を使う。閾値を満たさない場合は「推奨環境」を引き上げるのではなく、A1/A4を未達とする。
 
 ## 7. 移行と削除
 

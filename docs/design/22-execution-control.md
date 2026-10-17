@@ -8,9 +8,18 @@
 
 ## 2. 計画と状態遷移
 
-`ExecutionPlan` は対象、操作区分、role、ジョブ DAG、request/page/time/byte/concurrency/rate の各上限、engine capability、runtime bundle、入力証拠、認可 ID を正規化し hash 化する。
+`ExecutionPlan`は対象、`TargetRole`、操作者、操作区分、template、ジョブDAG、
+request/page/time/byte/concurrency/rateの各上限、engine capability、runtime bundle、入力証拠、認可IDを
+正規化しhash化する。
 
-状態は `Draft → Validated → Authorized → Running → Stopping → Completed|Stopped|Failed` とする。`Authorized` は計画hashを有効な認可へ結び付けた状態であり、runごとの手動承認を意味しない。有効な認可があれば既定の自動計画はそのまま実行へ進める。認可失効、計画差分、runtime 差分は Running への遷移前に拒否する。子ジョブが新しい対象を発見した場合は origin plan を変更せず、予算を引き継ぐ子計画へ追記する。
+状態は `Draft → Validated → Authorized → Confirmed → Running → Stopping → Completed|Stopped|Failed` とする。
+`Authorized`は計画hashを有効な案件認可へ結び付けた状態、`Confirmed`は操作者またはautomation grantが
+同じplan hash、対象、操作、上限、routeを確認した状態であり、両者を代用しない。desktopはSimple / Advanced
+とも送信開始前に`PlanConfirmation`を要求する。Simpleではこれが実行内容を変更しない最後の操作となる。
+非対話CLI/CIは認可内の`AutomationGrant`（許可command、上限、期限、operator、plan hashまたは固定生成条件）を
+必要とし、隠しoptionで確認を省略しない。認可失効、計画差分、runtime差分、AI提案採用による差分は
+Runningへの遷移前にConfirmationを無効化する。子ジョブが新しい対象を発見した場合はorigin planを変更せず、
+予算を引き継ぐ子計画へ追記し、grant外の操作なら再確認を要求する。
 
 ## 3. 通信の強制点
 
@@ -57,3 +66,5 @@ RateGovernor は origin ごとの token bucket と案件全体の concurrency �
 3. 429/5xx、認証切れ、証拠保存失敗、利用者停止で、理由が一意に記録される。
 4. 強制不能な engine/feature が plan validation で拒否される。
 5. crash 後に完了扱いにならず、再開前の再検証が働く。
+6. plan、runtime、認可、template、AI提案採用後のいずれかが変わると`PlanConfirmation`が失効する。
+7. 非対話実行は有効な`AutomationGrant`なしに開始できず、grant外の子計画で停止する。

@@ -28,7 +28,7 @@ Services:
     ログイン→認証状態の指標確認（_loggedInIndicator 相当）→セッション抽出
   SessionManager: ロール別セッション（Cookie/トークン）の保持・有効性監視・再認証。
     F04/F05/F11 の実行時にヘッダ/Cookie として適用（04の再送セッションと共通）
-  RefreshFlow（後段）: CSRFトークン・ワンタイム値の再取得マクロ（要求テンプレート列で定義）
+  RefreshFlow: CSRFトークン・ワンタイム値の再取得を宣言的な要求テンプレート列で定義
 ```
 
 - 認証情報は案件・ロール・対象範囲に紐付く。別Originへの認証ヘッダ送信は ScopeRule（02）で拒否。
@@ -51,8 +51,17 @@ Services:
 - 案件のロール設定に認証方式を関連付け（方式ごとの入力フォーム・Vault登録・到達テスト）。
 - 実行画面にロール別セッション状態（有効/期限/再認証ボタン）。
 
-## 7. 未解決事項（A0〜A1）
+## 7. 確定事項
 
-1. フォーム仕様の記述形式（セレクタ直書き vs 記録からの自動生成）
-2. Bearer/ApiKey の更新フローの一般化（RefreshFlow の初期構文）
-3. mTLS・企業プロキシは「必要な案件で再現シナリオを定める」（6.2）の具体化は後段
+1. フォーム仕様は版付き `LoginFlow` とし、記録から自動生成した候補を利用者が保存して確定する。
+   locator優先順位はARIA role+accessible name、label、安定したtest id、CSSの順とし、DOM位置依存selectorと
+   XPathはfallbackに限定する。password値を記録せず`SecretRef`へ置換する。再記録しても過去runのflowを
+   書き換えず新versionを作る。
+2. `RefreshFlow` は最大10 stepの宣言的DAGとし、`HttpRequest`、`BrowserNavigate`、`Extract`、`Assert`、
+   `AssignSecret`を持つ。抽出はheader/Cookie/JSON Pointer/HTML form fieldのみに限定し、任意JavaScriptを
+   実行しない。各requestはEgressPolicyとbudgetを通り、最大redirect 5、最大実行60秒、retry 1回とする。
+   更新失敗は古いtokenで続行せず`AuthenticationExpired`で停止する。
+3. mTLSはoriginごとのclient certificate `SecretRef`とfingerprint、企業proxyはscheme/host/port、認証
+   `SecretRef`、bypass allowlistを案件設定に持つ。Playwright、管理HTTP client、ZAPごとにfixtureを通った
+   組合せだけをcapability manifestで公開する。proxy経由でも最終origin、CONNECT先、SNIを検査し、
+   secretをcommand lineへ渡す必要があるadapterや検証不能な組合せは`Unsupported`として実行を拒否する。

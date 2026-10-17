@@ -22,8 +22,12 @@
 
 ## 3. ガイドラインカタログと版
 
-- `GuidelineCatalog`: ガイドラインごとに、出典 URL、版、ScopePilot が作成した**短い運用要約**、項目対応（例: `OWASP Top 10:2025 A01`、`WSTG-INFO-06`）を持つ。原文は複製せず要約と参照のみを保持する（9章のライセンス確認。再配布可否は版ごとに記録）。
+- `GuidelineCatalog`: ガイドラインごとに、出典 URL、版、ScopePilot が作成した**短い運用要約**、項目対応（例: `OWASP Top 10:2025 A01`、`WSTG-INFO-06`）を持つ。原文は複製せず要約と参照のみを保持し、配布物ごとにlicense、attribution、改変表示を記録する。
 - カタログは [21](21-update-management.md) の runtime bundle に「ガイドライン要約・項目対応表」として版固定する。上流で項目番号が変わりうるため、実行記録に使用版を残し、版をまたいで番号を仮定しない（5.1）。
+- 初期の項目・template対応入力は[診断項目Excel](../WebAppPentestGuidelines_診断項目_ScopePilot_作業用.xlsx)とする。
+  source hash、sheet、row、importer versionを保持するが、workbookをruntimeで直接解釈しない。ガイドライン6sheetの
+  769行を`CheckCatalog`へ、ZAP対応/非対応sheetを`DiagnosticTemplateCatalog`の候補へ変換し、実行記録sheetは
+  A0 fixtureとして分離する。上流licenseと出典の検証済み部分だけを配布bundleへ昇格する。
 
 ## 4. コンポーネント構成
 
@@ -70,14 +74,35 @@ CandidateSelector（core）:
 
 ## 8. UI / CLI
 
-- 案件設定にガイドライン選択パネル（有効/無効・版・出典）。
+- 案件設定にガイドライン選択パネル（有効/無効・版・出典）。Simple / Advancedの両方で利用できる。
 - 候補一覧に分類・signal・参照基準・caution を表示し、observation/finding とは別層であることを明示する。
 - SelectionGuidance（運用要約）を探索前に提示する。
+- Simpleではガイドラインと探索後対象だけを選び、review済みtemplateはcoreが能力・認可・適用条件から組み立てる。
+  Advancedではガイドライン項目からtemplateを選択・編集できるが、review状態と安全制御を越えて昇格できない。
 - CLI: `scopepilot guideline list|show`、候補出力（`candidates`）に guidelineBasis を含める。
 
-## 9. 未解決事項（A1）
+## 9. 確定事項
 
-1. 項目対応表の初期セットと、旧資料 769 診断項目（[17](17-organizer-reporting.md)）との対応付け。
-2. 各ガイドラインの「適用対象のみ」判定（AI 機能・クラウドネイティブ・DS-221）の精度。
-3. カタログ要約・項目対応表の配布ライセンス（WSTG/ASVS/Top 10/AISVS/Cloud Native Top 10/WebAppPentestGuidelines/DS-221 の再配布可否）と、原文へのリンク方式（9章）。
-4. 版更新で項目番号が変わった場合の、過去 run の参照整合（遡及変更しない記録方法）。
+1. 初期bundleの必須catalogはWSTG、ASVS、OWASP Top 10とし、build時点のstable releaseをversion/hash固定する。
+   WebAppPentestGuidelinesは項目IDと公式linkだけを含め、licenseが明示されるまで本文・要約を再配布しない。
+   AISVS、Cloud Native Top 10、DS-221はconditional catalogとする。旧769項目は[17](17-organizer-reporting.md)の
+   `CheckCatalog`へ一方向変換し、guideline itemとはmany-to-many mappingにする。旧件数を初期catalogの完成条件にせず、
+   source座標、根拠、reviewer、catalog versionがあるmappingだけを公開する。
+2. `ApplicabilityFact`を案件資産に追加し、`WebApplication`、`HasAiFeature`、`CloudNativeAssetInScope`、
+   `GovernmentProcurementContext`を`True|False|Unknown`、根拠source、確認者、日時付きで持つ。WSTG/ASVS/Top10は
+   WebApplication=Trueで、AISVSはHasAiFeature=True、Cloud NativeはCloudNativeAssetInScope=True、DS-221は
+   GovernmentProcurementContext=Trueでだけ有効化する。UnknownはAI提案を表示できるが、自動有効化しない。
+   DS-221は調達・実施範囲の確認観点であり、単独で攻撃requestを生成しない。
+3. OWASP由来の要約・mapping packageは原典ごとのlicenseを記録し、CC BY-SA対象の派生dataはcodeと分離して
+   CC BY-SA 4.0、出典、版、変更表示を同梱する。デジタル庁DS-221はPDL 1.0/CC BY互換条件に従い出典と加工表示を
+   付ける。license不明のWebAppPentestGuidelinesはlink-onlyとする。どのcatalogも原文全文をbundleへ複製せず、
+   `sourceUrl`はversion固有の公式URL、`retrievedAt`、`sourceHash`を持つ。
+4. run作成時に`GuidelineRefSnapshot`（catalog ID/version/hash、item ID、当時の短いlabel、source URL）を不変保存する。
+   updateは新catalogを追加するだけで過去snapshotを書き換えない。項目番号変更は
+   `Supersedes|SplitInto|MergedInto|NoMapping`の明示relationで表し、自動的に新番号へ置換しない。
+   再診断は旧・新版を並べ、比較不能を表示できる。
+
+公式参照: [OWASP WSTG](https://github.com/OWASP/wstg)、[OWASP ASVS](https://owasp.org/projects/asvs)、
+[OWASP Top 10](https://owasp.org/projects/top-ten)、[デジタル庁 DS-221](https://www.digital.go.jp/resources/standard_guidelines)、
+[デジタル庁コピーライトポリシー](https://www.digital.go.jp/copyright-policy)、
+[WebAppPentestGuidelines](https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines)。

@@ -28,9 +28,9 @@
 | [20 保存モデル・証拠](20-storage-evidence.md) | 6.3、6.5 | A1 |
 | [21 更新管理](21-update-management.md) | 5章、配布物の版固定 | A0–A2 |
 | [22 実行制御](22-execution-control.md) | 6.1、6.2、6.5 | A0–A1 |
-| [23 UI・移行](23-ui-and-migration.md) | 8章、Windows/macOS | A1–A4 |
+| [23 UI 2モード・移行](23-ui-and-migration.md) | 8章、Windows/macOS | A1–A4 |
 | [24 証明書・秘密情報](24-certificate-secrets.md) | 6.2、6.4 | A0–A1 |
-| [25 文書ヒント・AI](25-document-hints-ai.md) | 7章 | A1 |
+| [25 文書ヒント・全作業AI支援](25-document-hints-ai.md) | 7章 | A1 |
 | [26 要求トレーサビリティ](26-requirements-traceability.md) | F01–F21、横断要件 | 全段階 |
 | [27 ガイドライン参照・候補選定](27-security-guidelines.md) | F03、F08、F19、6.3、5.1 | A1 |
 
@@ -42,13 +42,21 @@
 4. 通信原本、表示用マスク、共有用派生物を別の証拠として扱う。観測、エンジンの判定、人の確認、文書の記載を混同しない。
 5. 外部バイナリ、ルール、ペイロード、npm 依存、実行時ランタイムは版とハッシュを固定し、実行記録へ残す。
 6. 旧 ScopePilot のソースは実装の依存先にしない。安全制御や ZAP 運用上の知見だけを、テストと契約に置き換えて継承する。
+7. UI は Simple / Advanced の2モードを持つ。モードは表示と編集可能範囲を変えるが、利用者権限、対象認可、
+   scope、実行上限を付与・緩和しない。対象サイトの role と ScopePilot 操作者の権限を別モデルにする。
+8. 利用者が選択した AI は全作業を支援できるが、出力は提案として扱う。AI は認可、計画、権限、実行制御を
+   変更できず、AIなしでも必須workflowを完走できる。
 
 ## 設計上の決定と検証課題
 
-「未解決事項」は実装時の自由選択ではない。各項目に決定期限、検証方法、採否、制約を記録し、[26](26-requirements-traceability.md) から参照する。A0 では特に次を確定する。
+各機能文書の「確定事項」は実装時の自由選択ではない。外部エンジンの版に依存する事項は、設計を
+保留するのではなく、製品既定、能力を公開するための fixture、未達時の無効化条件を記録する。
+[26](26-requirements-traceability.md) を決定台帳とし、A0 では特に次を実測する。
 
 - ZAP の Safe/standard 境界、`sendRequest`、Spider、Active Scan、停止処理、`URL Does not Exist` 回避。
 - Playwright、ZAP、Nuclei を含む通信範囲と共有上限の、経路別の保証等級（Enforced/Delegated/Unsupported）と、固定版での実測・開示方法。
 - HTTP/2、Host、接続先、SNI を別々に扱える送信経路。
 - TypeScript シミュレーションハーネスによる「探索→能動診断→所見」の自動完走。
 - 10万件の通信索引、本文遅延読込、異常終了後の復旧。
+- Simple / Advanced が同じ契約・計画を使い、Simpleから非公開操作へ到達できないこと。
+- 診断項目Excelから生成した版付きcatalogのsource座標、hash、権限、実行route、復元要件の完全性。

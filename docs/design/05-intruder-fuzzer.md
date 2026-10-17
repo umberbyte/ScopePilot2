@@ -26,7 +26,8 @@ A1 は (a) を採用する。(a)(b) とも送信は ZAP が行うため egress �
 送信前の入力 scope 検査・followRedirects 無効・逐次ペーシング・即時停止を課せるため overshoot が小さく
 実測しやすい。(b) は個別送信の直前制御が弱い。(b) は [22](22-execution-control.md) の Delegated 条件
 （固定版での最大 overshoot 実測・開示）と性能上の効果を fixture で示せた場合だけ最適化として追加する。
-redirect/DNS まで Enforced にしたい場合は ZAP ではなく Node 管理 HTTP client 経路を選ぶ（A0 で要否を判断）。
+redirect/DNSまで送信前拒否を要求する計画は、初期FuzzerのZAP経路では`Unsupported`として拒否する。
+将来Node管理HTTP client経路を追加する場合は別capabilityとして計画に明示し、暗黙に切り替えない。
 どちらの経路でも送る文字列は次の4.の集合管理から供給する。
 
 ## 4. ペイロード集合の管理（PayloadSet）
@@ -41,8 +42,9 @@ Services:
   PayloadSetStore: 同期・審査状態・版固定。実行開始時に集合hashを計画へ固定（21の更新管理と接続）
 ```
 
-- 既定の供給元は**ZAP同梱のfuzzers（fuzzDB/JBroFuzzファイル群）**を第一候補とし、
-  審査済み公開辞書と利用者指定ファイルを続ける。Nuclei template は実行規則でありpayload集合へ
+- 基準実装の供給元は、runtime bundleでライセンスとhashを確認済みのpayload fileと利用者指定fileとする。
+  ZAP同梱fuzzers（fuzzDB/JBroFuzz由来を含む）はインストール済みaddonから参照できるが、製品へ再配布する
+  のはファイル単位のライセンス台帳が完成した集合だけとする。Nuclei template は実行規則でありpayload集合へ
   流用しない。製品独自の攻撃辞書は初期には作らない。
 - 上流の取得・審査・固定は 21（UpdateManager）と同じ手順・表示で扱う（供給元ごとの
   最終確認・最終成功・使用中の版・保留件数）。
@@ -77,9 +79,22 @@ FuzzerJob（JobOrchestrator配下）:
 - 「Fuzzer」画面: 基準要求選択→位置指定（グリッド上のハイライト）→集合選択→判定条件→
   事前試算→実行→結果表（抽出列・差分ビューア）。
 
-## 9. 未解決事項（A0）
+## 9. 確定事項
 
-1. sendRequest loop のbatch size、数万要求規模の速度、ZAP履歴取込時間
-2. ZAP同梱fuzzersのライセンス・再配布条件の確認（fuzzアドオン配下のファイル群）
-3. 抽出式（grep/正規表現/位置指定）の構文の初期セット
-4. レート制御の単位（Origin別RPS・並列数・間隔）と予算leaseの大きさ
+1. 基準実装はAPI呼出し1回につき1要求、同時実行1、scheduler window 25件、checkpoint 100件とする。
+   ZAP履歴は100送信または5秒ごとに差分取得する。10,000件fixtureで送信数・履歴数・取込数の一致、
+   停止overshoot、メモリ上限を検証する。速度値は端末・対象に依存するため完成条件にせず、実測値を能力表へ
+   記録する。window拡大やrequestor batchは、正確性とovershootが同じfixtureで改善した場合だけ追加する。
+2. ZAP addon本体がApache-2.0でも、JBroFuzz/fuzzDB由来fileを一括して同じ条件と仮定しない。
+   `PayloadSet` manifestにfileごとのsource URL、copyright、SPDX、hashを要求し、不明なfileは再配布物から
+   除外する。runtimeに既に存在するfileの利用とScopePilotによる再配布を別状態で記録する。
+3. 初期抽出式は `status`、headerのexact/literal、body literal、bounded regex、JSON Pointer、
+   byte range（0-based half-open）、body length、RTT thresholdとする。regexはpattern 1 KiB、対象1 MiB、
+   worker実行100 msを上限とし、timeoutはnon-matchではなく`ExtractorError`にする。任意scriptは許可しない。
+4. RateGovernorはorigin別token bucketを使い、既定2 request/秒、burst 1、案件全体concurrency 1、
+   最小間隔500 msとする。leaseは25件または残予算の小さい方で払い出し、429/`Retry-After`、5xx増加、
+   latency悪化で縮小する。利用者が引き上げる場合も認可と案件上限内で計画hashへ固定する。
+
+根拠: [ZAP Fuzzer documentation](https://www.zaproxy.org/docs/desktop/addons/fuzzer/) はJBroFuzzとfuzzdb由来
+fileを含むことを明示し、[zap-extensions license](https://github.com/zaproxy/zap-extensions/blob/main/LICENSE)
+はaddon repositoryをApache-2.0で公開する。由来の異なるpayload fileは個別台帳で扱う。

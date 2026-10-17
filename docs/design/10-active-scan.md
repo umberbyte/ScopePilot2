@@ -56,9 +56,16 @@ AutoPlanComposer（新規）: 案件の認可・スコープ・上限から「�
   ジョブ/ルール単位の進行→結果。
 - CLI: `scopepilot scan --active` / `scopepilot run`（全自動。19）。
 
-## 8. 未解決事項（A0〜A1）
+## 8. 確定事項
 
-1. Spiderジョブの初期パラメータ（深度・同時・期限）と対象URL上限の調整
-2. ZAP history/context への seed 登録方式と、登録失敗時の分類
-3. 強度既定の維持確認と「Lowでは発火しないルールがある」注記の引き継ぎ
-   （docs/detection-improvement-policy.md F1-1）
+1. Spiderの製品既定は深度5、同時2、origin別2 request/秒、期限30分、採用URL上限5,000とする。
+   robots/sitemap/redirectを含む全通信を共有予算へ数え、案件上限が小さい場合はそちらを優先する。
+   adapterはこれらをZAPの版固有parameterへ写し、表現できない上限があるbundleではSpiderを公開しない。
+2. seed登録は、同じZAP processの既存message ID再利用、審査済みHAR import、`sendRequest`（redirect無効）の
+   順とする。登録後にhistoryのmessage IDとcontext所属を照合できたURLだけをscanへ渡す。失敗理由は
+   `ScopeRejected`、`AuthorizationRejected`、`BudgetExhausted`、`TransportFailed`、`HistoryNotObserved`、
+   `ContextRejected`、`UnsupportedProtocol`に固定し、`Unscannable`の詳細として保存する。
+3. ZAP active scanの既定policyはLow、host単位同時2、request間隔100 ms以上を維持する。
+   Lowで実行されない、または十分な入力を生成しないruleをruntime bundleのrule capabilityへ列挙し、
+   coverageを`NotRunByStrength`として報告する。「Lowで警告0件」は当該ruleで脆弱性なしを意味しない。
+   強度変更は認可と計画hashへ固定し、実行中に変更しない。

@@ -44,8 +44,12 @@ RuleQualityChannel（21と接続）: 受動ルールの品質チャネル選択�
 - 診断ジョブ一覧に「受動（再送なし）」バッジ。警告一覧はルール品質でフィルタ可能。
 - CLI: `scopepilot scan --passive`（19）。
 
-## 7. 未解決事項（A1）
+## 7. 確定事項
 
-1. 取込HARの大量化時の受動queue待機時間、timeout、未解析件数の記録
-2. 手動プロキシ（03）での準リアルタイム受動（ZAPの逐次受動はプロキシ経由で自動。警告の
-   引き取り方法を A1 で確認）
+1. HARは1,000 messageまたは25 MiBの小さい方でsegment化して取り込み、segmentごとに入力件数、ZAP登録数、
+   passive queue開始/終了値を記録する。待機はqueueが5秒連続で0になるまでとし、timeoutは
+   `max(5分, 1秒×登録message数)`、上限60分とする。timeout時はrunを`Partial`にし、登録済み、解析済み、
+   queue残数、未解析推定数を保存する。未解析分を検出なしとして扱わない。
+2. Manual proxyではZAP alertを2秒または100 messageごとにID cursorで差分取得し、終了時にqueue drainと
+   最終取得を行う。alert ID、plugin ID、message ID、evidence hashで冪等取込する。準リアルタイム表示は
+   provisionalとし、session終了時の確定取込と件数が不一致なら警告を残す。

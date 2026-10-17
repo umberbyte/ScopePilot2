@@ -25,7 +25,10 @@ scopepilot db check|migrate|export
 scopepilot runtime verify
 ```
 
-送信系の簡易コマンドも内部では plan を生成し、`--dry-run` で正規化済み対象、操作、想定通信数、上限、ランタイム版、計画ハッシュを表示する。
+送信系の簡易コマンドも内部ではplanを生成し、`--dry-run`で正規化済み対象、操作、template、想定通信数、
+上限、ランタイム版、計画hashを表示する。対話実行はplan確認を要求する。非対話実行は期限、操作者、
+許可command、上限、plan hashまたは固定生成条件を持つ`AutomationGrant`を明示指定し、desktopの確認を
+単なる`--yes`で迂回しない。
 
 ## 3. 機械可読出力
 

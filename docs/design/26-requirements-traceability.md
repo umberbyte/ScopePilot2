@@ -32,6 +32,9 @@
 | 5章/9章 | [21](21-update-management.md) | bundle 検証、atomic 切替、rollback |
 | 7章 | [25](25-document-hints-ai.md) | hint/observation 分離、prompt injection fixture |
 | F03/F08/F19・6.3（ガイドライン対応） | [27](27-security-guidelines.md) | 案件ごとの有効ガイドライン、分類と参照項目、参照基準の報告、triage/所見の分離 |
+| AGENTS UI 2モード | [23](23-ui-and-migration.md) | Simpleの操作限定、Advancedの権限制御、同一plan/schema、確認失効fixture |
+| AGENTS 全作業AI支援 | [25](25-document-hints-ai.md) | provider選択、redaction、提案監査、安全制御迂回拒否、AIなしfallback |
+| AGENTS 診断template | [15](15-authorization-business-logic.md)・[17](17-organizer-reporting.md) | Excel source座標→catalog→plan→証拠→coverageの追跡 |
 
 ## 3. 今回のレビューで解消した設計不整合
 
@@ -51,13 +54,48 @@
 | OperationClass（許可操作区分）が各文書で命名ばらつき・散在 | [02](02-case-scope-authorization.md) を正本とし初期集合を固定（Passive/Browse/FormSubmit/Upload/ActiveCrawl/ActiveScan/Fuzz/ApiSend/WebSocketSend/NucleiScan/CrossRoleTest） |
 | `PlanBuilder`(02) と `PlanService`(01) の二重名 | `PlanService` に統一し、生成の正本を [01](01-architecture.md)・[22](22-execution-control.md) に置く |
 | AI provider 送信が案件 egress と未区別 | 外部 egress チャネルとして明示・記録、local-only 可（[25](25-document-hints-ai.md)） |
+| UI modeと権限を同一視するとAdvanced切替が権限昇格になる | `UiMode`、`OperatorPermission`、対象`TargetRole`を分離し、coreで再検証（[02](02-case-scope-authorization.md)・[23](23-ui-and-migration.md)） |
+| 診断項目Excelを直接実行すると出典・安全審査・再現性を失う | source座標付きの版固定catalogへ一方向変換し、review済みtemplateだけを実行（[15](15-authorization-business-logic.md)） |
+| AI支援が文書抽出と探索だけに限定 | 全作業taskへ共通`AiAssistService`を提供し、出力は権限を持たない提案として監査（[25](25-document-hints-ai.md)） |
 
 ## 4. 設計ゲート
 
-- **A0 gate**: 基準シナリオ、engine capability、通信制御、HTTP/2 制約、性能基準を実測して記録する。
+- **A0 gate**: 本文書群で固定した基準シナリオ、engine capability、通信制御、HTTP/2 制約、性能基準を実測して記録する。実測失敗時は設計を実行時に緩和せず、該当能力を `Unsupported` にする。
 - **A1 gate**: 認可済み自動診断、証拠、CLI、固定 runtime bundle、rollback が揃う。
 - **A2 gate**: 手動 proxy/repeater、Nuclei、報告が同じ制約と証拠モデルで動く。
 - **A3 gate**: OAST、WebSocket、DOM、拡張 worker の不足を能力表へ反映し、未保証機能を公開しない。
 - **A4 gate**: 必須業務シナリオ、移行、Windows/macOS 配布・署名・復旧を検証する。
 
 脆弱アプリケーションでの検出件数や全脆弱性の再現は、明示的に依頼されない限り gate に含めない。fixture は workflow、安全制御、証拠、取込を検証するために使う。
+
+## 5. 設計決定台帳
+
+2026-10-18時点で、機能文書に残っていた選択肢は次のとおり確定した。`Fixture pending`は実装・実測が
+未完了であることを表し、設計判断が未決であることを表さない。fixtureに失敗した能力は公開しない。
+
+| ID | 設計 | 確定した内容 | 実装gate |
+|---|---|---|---|
+| D-02 | [02](02-case-scope-authorization.md) | OperationClass対応、語彙検査の補助的位置付け、認可添付の暗号化copy | A0 |
+| D-03 | [03](03-proxy-intercept-logger.md) | 用途別ZAP process、Intercept timeout、message cursor取込 | A0/A2 |
+| D-04 | [04](04-repeater.md) | 履歴を証拠正本、H1/H2 editor分離、redirectは管理client | A0/A2 |
+| D-05 | [05](05-intruder-fuzzer.md) | 1要求単位loop、25件lease、2 RPS、payload file単位license | A0/A1 |
+| D-06 | [06](06-decoder-comparer-sequencer.md) | 統計項目、binary表示1 MiB、採取既定100/最小30 | A2/A3 |
+| D-07 | [07](07-exploration-browser.md) | 5種form分類、深度5、loop key、actor/role記録 | A0/A1 |
+| D-08 | [08](08-authentication-session.md) | versioned LoginFlow、宣言的RefreshFlow、mTLS/proxy能力拒否 | A1 |
+| D-09 | [09](09-passive-scan.md) | segmented import、queue timeout、alert cursor取込 | A1 |
+| D-10 | [10](10-active-scan.md) | Spider既定、seed優先順、Low coverageの限界表示 | A0/A1 |
+| D-11 | [11](11-api-scanning.md) | Postman変数、SDL単独運用、binary要入力、定義上限 | A1/A3 |
+| D-12 | [12](12-oast.md) | self-host Interactsh基準、protocol別能力、24時間待機 | A3 |
+| D-13 | [13](13-websocket-http2.md) | ZAP text WSのみ、transport能力表、再接続は新connection | A0/A3 |
+| D-14 | [14](14-dom-investigation.md) | same-origin frame/open shadow、CSP非回避、source/sink初期辞書 | A3 |
+| D-15 | [15](15-authorization-business-logic.md) | Expectation DSL、復元必須、診断項目Excelの一方向template catalog化 | A1/A2/A3 |
+| D-16 | [16](16-known-vulns-nuclei.md) | HTTP-only AST allowlist、bundle上限、severity原文保持 | A2 |
+| D-17 | [17](17-organizer-reporting.md) | 769項目catalog化、再診断fingerprint、TypeScript `docx` | A1/A2 |
+| D-18 | [18](18-extension-api.md) | REST+SSE最小API、ScriptはUnsupported、Ed25519 trust登録 | A3 |
+| D-20 | [20](20-storage-evidence.md) | body 10 MiB既定/100 MiB hard max、10万件性能閾値 | A0/A1/A4 |
+| D-23 | [23](23-ui-and-migration.md) | Simple/Advanced、操作者権限分離、全desktop実行の最終確認 | A0/A1 |
+| D-25 | [25](25-document-hints-ai.md) | 利用者選択providerによる全作業支援、提案境界、AIなしfallback | A1 |
+| D-27 | [27](27-security-guidelines.md) | 初期catalog、適用fact、license分離、immutable run snapshot | A1 |
+
+対外入力が必要なコード署名名義、費用比較値、実OAST接続情報は[仕様書10.2](../burp-professional-replacement-spec.md)の
+実装入力であり、設計上の選択肢ではない。入力がなくてもfixtureと未実施表示で開発を継続する。

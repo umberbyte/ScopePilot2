@@ -48,8 +48,24 @@ ReportComposer:
 - 「所見と証拠」画面: 重複グループ・確認状態のカンバン/リスト、観測→証拠→報告の導線。
 - CLI: `scopepilot report --format markdown|word|json`。
 
-## 7. 未解決事項（A1〜A2）
+## 7. 確定事項
 
-1. 元資料769診断項目との対応付け（CoverageRecord の初期辞書）の作成方法
-2. 再診断（前回所見との差分）の比較単位（同一パターン・同一ルール）
-3. Word出力libraryの選定と、Windows/macOSで同じlayoutを検証するgolden fixture
+1. [診断項目Excel](../WebAppPentestGuidelines_診断項目_ScopePilot_作業用.xlsx)のガイドライン6sheet・769行は
+   runtimeで直接読まず、[15](15-authorization-business-logic.md)と共通の一方向importerで`CheckCatalog`へ変換する。
+   各`CheckItem`はstable `SPC-CHECK-xxxxx`、日本語表示名、確認目的、必要能力、OperationClass、
+   source file hash/sheet/row、license状態、guideline mapping、対応template IDを持つ。重複・空欄・参照切れを
+   schema検査し、人がreviewしたcatalog versionだけをbundleへ入れる。769件はこのsource versionの取込照合値であり、
+   将来版の固定件数、全項目の自動実行、脆弱性網羅の保証にしない。
+2. 再診断の機械比較keyは`ruleFamily + normalized endpoint pattern + method + parameter location/name +
+   role + owner context + protocol`の`FindingFingerprint`とする。同じengine rule versionならExact、版だけが
+   変わればComparableRuleChanged、endpoint/parameterが変われば候補として提示し自動同一視しない。
+   `New|Persistent|Resolved|Regressed|NotRetested|Incomparable`を表示し、証拠hashの一致だけでResolvedにしない。
+3. DOCX生成はTypeScript-firstの`docx` libraryをversion/hash固定して採用し、Word automationやOS固有COMを
+   使わない。生成元はMarkdown変換ではなく共通ReportModelとし、A4 landscapeを含むpage geometry、style、
+   font fallbackをtemplateとして固定する。CIはOOXML schema、paragraph/table/link構造、抽出text、page-break
+   landmarkを比較し、固定LibreOffice rendererによるPDFのpage数とvisual diffを補助fixtureにする。
+   release gateではWindows/macOSのWordで同じ必須内容、表の欠落なし、許容範囲内の改ページを確認する。
+   font engine差があるためpixel完全一致は保証しない。
+
+根拠: [`docx`公式documentation](https://github.com/dolanmiu/docx/blob/master/docs/README.md) はNode対応の
+TypeScript/JavaScript生成libraryであり、[MIT license](https://github.com/dolanmiu/docx/blob/master/LICENSE)で公開される。

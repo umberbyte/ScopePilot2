@@ -53,7 +53,8 @@ preload (contextBridge、薄い変換のみ)
 Electron main ─ ApplicationService ─ core ─ storage
                                   ├─ PlaywrightAdapter
                                   ├─ ZapAdapter ─ ZAP/Java
-                                  └─ NucleiAdapter ─ nuclei
+                                  ├─ NucleiAdapter ─ nuclei
+                                  └─ AiProviderAdapter ─ 利用者選択provider
 
 CLI process ─ ApplicationService ─ 同じ core / storage / adapters
 外部利用者 ─ opt-in loopback Product API ─ ApplicationService
@@ -71,6 +72,12 @@ renderer は `nodeIntegration=false`、`contextIsolation=true`、sandbox 有効�
 - `EgressPolicy`: 送信直前とリダイレクトごとに範囲・認証情報・上限を判定する。
 - `EvidenceService`: 原本、派生物、ハッシュ、監査イベントを一貫して保存する。
 - `EngineAdapter`: 能力、強制可能な制約、起動、停止、進捗、結果を統一する。
+- `AiAssistService`: 作業種別ごとの最小入力をredactionし、利用者が選択したAIへ渡して版付き提案を返す。
+  提案をcommandや`ExecutionPlan`へ直接変換せず、通常のvalidation、操作者権限、認可、確認を通す。
+
+`UiMode`はrendererの表示・編集範囲でありcoreの権限境界ではない。coreは対象サイトで使う`TargetRole`と、
+ScopePilotを操作する`OperatorIdentity` / `OperatorPermission`を別々に検証する。Simple / Advanced、desktop、CLI、
+Product APIのどこから呼んでも同じApplicationServiceで拒否結果になる。
 
 各アダプターは `CapabilityManifest` を返す。機能の有無だけでなく、範囲、通信数、速度、停止、プロトコルを、ScopePilot が送信前に強制（Enforced）するのか、エンジンへ委譲して入力 scope・推測・停止・開示で扱う（Delegated）のかを、固定した版ごとの実測値とともに表す（[22](22-execution-control.md)§3）。内部挙動を制御できない ZAP/Nuclei は Delegated を既定とする。入力 scope もライフサイクル停止も保証できないジョブは計画時に拒否する。
 

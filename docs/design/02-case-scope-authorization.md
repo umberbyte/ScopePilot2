@@ -18,6 +18,9 @@
 
 ```text
 Domain:
+  OperatorProfile {
+    Id, 表示名, Permission集合, 既定UiMode, 状態, 作成・更新日時
+  }
   AuthorizationRecord {
     Id, 案件Id, 認可者, 認可日時, 有効期限(任意), 対象Origin一覧, 許可操作区分(OperationClass集合),
     状態(Active/Expired/Revoked), 失効日時・失効理由, 添付参照(診断依頼書等の証跡), SHA-256 }
@@ -38,6 +41,8 @@ Services:
   （10.1受入基準）。期限未設定の常設認可は作成時に明示警告する。
 - GET による削除などメソッドだけで読み取りと決めない（仕様書6.1）。操作区分は
   「実行するジョブ種別」単位で計画に載せ、URL・メソッド・本文の禁止語彙検査と二重にかける。
+- 対象アプリ上の権限は`TargetRole`、ScopePilot利用者の権限は`OperatorPermission`として分離する。
+  `UiMode=Advanced`へ切り替えてもPermissionを増やさず、権限外commandはcoreで拒否する。
 
 ## 4. データモデル
 
@@ -49,16 +54,58 @@ Services:
 
 - スコープ検査は scheme/host/port/パス/操作/接続先（リダイレクト先・DNS解決結果・IPv6・
   別ホストへの認証情報転送）まで扱う。`ScopeRule` は [22](22-execution-control.md) の
-  `EgressPolicy` が送信時に強制する（F15のHost/SNI検討と接続）。
+  `EgressPolicy` が送信時に強制する（F15のHost/SNI能力表と接続）。
 - 認証用外部IdPは「認証専用ポリシー」として診断対象Originとは別管理。
 
 ## 6. UI / CLI
 
 - 案件画面に認可パネル（一覧・新規・失効・有効期限・添付）。実行開始時に使う認可を表示。
+- 画面上は操作者と対象roleを別ラベルで常時表示し、監査eventに両方を記録する。
 - CLI: `scopepilot auth list|revoke|create`（19参照）。
 
-## 7. 未解決事項（A0）
+## 7. 確定事項
 
-1. 許可操作区分の初期辞書（ジョブ種別との対応表）
-2. 禁止語彙検査の精度と「保証しない」表示の文言
-3. 認可添付の原本は暗号化証拠として案件内に保存し、外部原本は参照元として記録する
+### 7.1 OperationClass とジョブの対応
+
+| OperationClass | 許可するジョブ | 追加条件 |
+|---|---|---|
+| `Passive` | HAR取込、保存済み通信の受動解析 | 対象への追加通信ゼロ |
+| `Browse` | GET/HEAD巡回、SPA遷移 | 状態変更フォームを含まない |
+| `FormSubmit` | 検索、ログイン、更新フォーム送信 | [07](07-exploration-browser.md) の分類と送信戦略に従う |
+| `Upload` | multipart/file送信 | `FormSubmit` も必要。明示fixture以外を送らない |
+| `ActiveCrawl` | ZAP Spider等 | Delegated能力表と対象URL上限が必要 |
+| `ActiveScan` | ZAP能動診断 | Delegated能力表と固定rule setが必要 |
+| `Fuzz` | Fuzzer、Sequencer採取 | 組合せ数と速度を計画へ固定 |
+| `ApiSend` | 定義から生成したAPI要求 | 破壊的operationは個別allowlistも必要 |
+| `WebSocketSend` | WS text再送・fuzz | connection/message/byte予算が必要 |
+| `NucleiScan` | 審査済みHTTP template実行 | [16](16-known-vulns-nuclei.md) の静的検査に合格した集合のみ |
+| `CrossRoleTest` | role/owner切替、業務ロジック差分 | 状態復元可能または使い捨て環境であること |
+
+複数区分に該当するジョブはすべてを要求する。たとえばファイル添付APIは `ApiSend`、
+`FormSubmit`、`Upload` のすべてを必要とする。分類不能なジョブは未listedとして拒否する。
+
+### 7.2 禁止語彙検査
+
+語彙検査は method、NFKC正規化したURL path/query key、form field名、JSON key、operationId、
+button labelを対象にし、辞書項目ごとに `Block` または `Review` を持つ。二重URL decodeや本文全体の
+意味推定は行わない。`Block` は個別allowlistがない限り計画から除外し、`Review` は根拠を計画へ残す。
+画面と報告では次の固定文言を使う。
+
+> 禁止操作の語彙検査は補助的な判定であり、安全性や非破壊性を保証しません。許可操作区分、
+> scope、上限、実行経路の制御を優先し、分類できない操作は送信しません。
+
+fixtureは既知の同義語、Unicode表記、誤検出、未知語を含める。検出率を安全保証として表示しない。
+
+### 7.3 認可添付
+
+添付は取得時のbyte列を暗号化証拠へコピーし、SHA-256、媒体名、取得日時、外部参照元URIを記録する。
+外部ファイルへのpathだけを認可根拠にせず、外部原本を変更・削除しない。共有exportには添付を既定で
+含めず、明示選択時もマスク済み派生物と出典情報だけを含める。
+
+### 7.4 操作者権限
+
+初期Permissionは`CaseAdmin`、`ScopeEdit`、`AuthorizationManage`、`GuidelineSelect`、`CrawlConfigure`、
+`CandidateSelect`、`PlanEdit`、`TemplateUse`、`TemplateEdit`、`Execute`、`EvidenceReveal`、`Export`とする。
+Simple modeは`GuidelineSelect`、`CandidateSelect`、`Execute`の許可された操作だけをUIに露出する。
+Advanced modeは保持するPermissionの範囲で設定・テンプレート・計画編集を露出する。認可の操作区分と
+OperatorPermissionの両方が揃わなければcommandを拒否し、mode切替を権限昇格として扱わない。
