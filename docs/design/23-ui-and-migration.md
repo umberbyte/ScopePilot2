@@ -4,7 +4,7 @@
 
 ## 1. 目的
 
-Electron renderer に React/TypeScript のデスクトップ UI を実装し、案件、通信、診断、所見を同じ文脈で移動できるようにする。旧 WPF 画面の移植ではなく、[18](18-extension-api.md) の契約を利用する新規 UI とする。
+Electron renderer に React/TypeScript のデスクトップ UI を実装し、案件、通信、診断、所見を同じ文脈で移動できるようにする。UI のコンポーネント・デザインシステムは [Fluent UI](https://developer.microsoft.com/en-us/fluentui) を採用し、React + Fluent UI React v9 (`@fluentui/react-components`) で構築する。Simple/Advanced 両モードを同じコンポーネント・design token 基盤の上に置き、版は [21](21-update-management.md) の規律で固定する。旧 WPF 画面の移植ではなく、[18](18-extension-api.md) の契約を利用する新規 UI とする。
 
 ## 2. UIモード
 

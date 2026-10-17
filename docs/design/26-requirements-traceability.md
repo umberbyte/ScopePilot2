@@ -103,6 +103,7 @@ test名に含め、概要設計だけを参照してテスト対応を省略し�
 | D-23 | [23](23-ui-and-migration.md) | Simple/Advanced、操作者権限分離、全desktop実行の最終確認 | A0/A1 |
 | D-25 | [25](25-document-hints-ai.md) | 利用者選択providerによる全作業支援、提案境界、AIなしfallback | A1 |
 | D-27 | [27](27-security-guidelines.md) | 初期catalog、適用fact、license分離、immutable run snapshot | A1 |
+| D-28 | [23](23-ui-and-migration.md) | UI に Fluent UI (React v9 `@fluentui/react-components`) を採用。Simple/Advanced 共通のコンポーネント・token 基盤とし、版は [21](21-update-management.md) の規律で固定 | A1 |
 
 対外入力が必要なコード署名名義、費用比較値、実OAST接続情報は[仕様書10.2](../burp-professional-replacement-spec.md)の
 実装入力であり、設計上の選択肢ではない。入力がなくてもfixtureと未実施表示で開発を継続する。

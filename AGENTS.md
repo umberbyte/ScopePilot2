@@ -17,6 +17,7 @@
 - フロントからバックエンドまで **TypeScript に統一**する。記述言語を 1 つに保ち、既に複雑な構成（外部エンジンの併用）の明快さを優先する。
 - 構成:
   - UI は Web 技術 (TypeScript)。デスクトップシェルは Electron（main/renderer が同一の JS ランタイムで動く単一ランタイム構成）。対応 OS は Windows / macOS。
+  - UI のコンポーネント・デザインシステムには [Fluent UI](https://developer.microsoft.com/en-us/fluentui) を使う。renderer は React + Fluent UI React v9 (`@fluentui/react-components`) とし、Simple/Advanced 両モードを同じコンポーネント・トークン基盤の上に作る。版は他の npm 依存と同じく更新管理 (`docs/design/21`) の規律で固定する。
   - コアは TypeScript (Node)。案件・認可・計画・実行制御・証跡・アダプターを置くヘッドレス層とし、CLI (仕様書 F21) と UI の双方から使う。
   - ブラウザ操作は Playwright を TypeScript から直接呼ぶ（別言語の子プロセスにしない）。
   - ZAP (Java)・Nuclei (Go) は HTTP API / CLI 越しに起動する**外部バイナリ**として扱う。ソースを本リポジトリに持たないため、使用言語には数えない。

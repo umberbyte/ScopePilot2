@@ -1,5 +1,9 @@
 # 画面構成と情報設計
 
+## 0. UI 技術基盤
+
+UI コンポーネント・デザインシステムは [Fluent UI](https://developer.microsoft.com/en-us/fluentui) を使う。`packages/ui` は React + Fluent UI React v9 (`@fluentui/react-components`) で構築し、Simple/Advanced 両モード・共通 shell を同じコンポーネントと design token の上に置く。layout は v9 の token で表現し、scope 外・認可期限切れ・未確認の表示に色以外の文言・icon を必ず併記する要件（6章）は token のみで満たさない。`@fluentui/react-components` の版は他の npm 依存と同じく `docs/design/21` の規律で固定する。
+
 ## 1. 共通シェル
 
 全画面上部に `案件`, `対象ロール`, `操作者`, `モード`, `認可状態`, `実行状態` を表示する。scope 外・認可期限切れ・未確認を色だけでなく文言と icon で示す。右側に通知、AI アシスト drawer、停止操作を配置する。
