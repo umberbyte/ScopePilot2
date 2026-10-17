@@ -22,6 +22,8 @@
     }
   },
   "include": [
+    "apps/*/src/**/*.ts",
+    "apps/*/test/**/*.ts",
     "packages/*/src/**/*.ts",
     "packages/*/test/**/*.ts",
     "tools/*/src/**/*.ts",
