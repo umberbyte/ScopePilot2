@@ -1,20 +1,14 @@
-bin/
-obj/
-TestResults/
-artifacts/
-*.user
-*.suo
-*.userprefs
+# Node / TypeScript build and dependency artifacts.
+node_modules/
+dist/
+out/
+build/
+coverage/
 .cache/
+*.tsbuildinfo
 
-# Published installers and archives are generated artifacts.
-../ScopePilot-publish-*/
-../ScopePilot-MVP-*.zip
-
-# Playwright's installed browser/runtime dependencies are restored separately.
-tools/playwright-runtime/node_modules/
-tools/playwright-runtime/.cache/
-tools/mcp-proxy-all.jar
+# Playwright's installed browsers are restored separately.
+.playwright/
 
 # Local run data and secrets.
 engagement.json
