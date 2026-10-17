@@ -1,51 +1,53 @@
 # 19 CLI・自動処理 概要設計
 
-対応要件: 仕様書 F21（自動処理）・2.1（GUI専用ロジックの分離）
+対応要件: 仕様書 F21、A0/A1
 
 ## 1. 目的
 
-同一コアのCLIを提供し、JSON結果出力・CI・ジョブ待ち・終了理由を扱えるようにする。
-「GUIでしかできない診断」をなくすことが系列Aの一貫目標。
+UI に依存しない TypeScript CLI で、計画作成、実行、待機、停止、JSON 出力、CI 利用を提供する。CLI と desktop は同じ `ApplicationService` と core を使い、画面状態や Electron IPC を経由しない。
 
-## 2. 再利用する現行資産
+## 2. 構成
 
-- `scripts/simulation/ScopePilot.Simulation`（実績: open/explore/candidates/zap の各フェーズで
-  GUIと同一のViewModelコマンドをヘッドレス実行。進捗ログの整列を同期コンテキストで解決済み）
-- MainViewModel/Services（GUIとCLIで同一コードパス）
+`apps/cli` は Node の薄い entry point とし、引数解析、標準入出力、OS signal の変換だけを担う。ユースケースは `packages/core`、外部エンジンは `packages/adapters`、保存は `packages/storage` が実行する。
 
-## 3. コンポーネント構成
+主要コマンドは次とする。
 
 ```text
-ScopePilot.Cli（新規プロジェクト・コンソール）:
-  コマンド: auth(02) / explore(07) / candidates / scan --passive|--active(09,10) /
-    api import+run(11) / fuzz(05) / resend(04・対話以外は計画ファイルから) /
-    oast poll(12) / report(17) / rule(18) / run(全自動パイプライン) / auth/status
-  実装: MainViewModelをコンソールで駆動（シミュレーションハーネスの正式化）。
-    進捗は行ログ＋--json でイベントストリーム
-  出力: 結果JSON（観測・所見・実行記録の要約＋証跡パス）をstdoutまたはファイル。
-    終了コード: 0=完了 2=警告あり 3=上限停止 4=範囲違反 5=認証失敗 6=エンジン失敗（10.1と整合）
-JobRunner: 複数フェーズの連続実行（AutoPlanComposerの計画に従う）とジョブ待ち・中断再開
+scopepilot case create|open|status
+scopepilot auth create|list|revoke
+scopepilot plan create|show|validate
+scopepilot run start|status|wait|cancel|resume
+scopepilot explore
+scopepilot scan --passive|--active|--nuclei
+scopepilot fuzz
+scopepilot report --format markdown|docx|json
+scopepilot db check|migrate|export
+scopepilot runtime verify
 ```
 
-- CI利用: `scopepilot run --project <dir> --authorization <id> --report out/ --json`。
-  更新確認はオフライン指定可（21）。
+送信系の簡易コマンドも内部では plan を生成し、`--dry-run` で正規化済み対象、操作、想定通信数、上限、ランタイム版、計画ハッシュを表示する。
 
-## 4. データモデル
+## 3. 機械可読出力
 
-- CLIの入出力スキーマをOpenAPI/JSON Schemaとしてdocsに同梱し、拡張API（18）と整合させる。
+`--json` は最終結果を stdout に一つだけ出す。進捗は `--events ndjson` で stderr または指定ファイルへ出し、通常ログと混ぜない。すべての出力に `schemaVersion`、`runId`、`status`、`stopReason`、証拠参照を含める。
 
-## 5. 安全制御と証跡
+終了コードは最低限、完了、所見あり、上限停止、範囲違反、認証失敗、エンジン失敗、入力不正、中断を区別する。所見の有無と実行成否を同じ終了コードに押し込めず、CI ポリシーがどちらを失敗とするか選べる。
 
-- CLIも認可（02）・上限（22）の内側。無認可での送信系コマンドは拒否し、その旨と終了コードを返す。
-- すべての実行はGUIと同じ runs/ 証跡を残す（ログは simulation/logs 方式＝ファイル＋stdout）。
+## 4. 中断と再開
 
-## 6. UI / CLI
+Ctrl+C/SIGINT は第一段階で協調停止を要求し、猶予後の二回目で子プロセスツリーを強制停止する。終了前に run state と証拠の flush 結果を記録する。再開可能なのは、計画ハッシュ、認可、runtime bundle、入力証拠が一致し、ジョブが冪等または明示的な resume point を持つ場合だけである。
 
-- GUIはCLIを内包する関係（同一ViewModel）。GUI専用になるのはインターセプト（03）と
-  手動編集（04のエディタ）のみで、その旨を能力表に明示。
+## 5. シミュレーションハーネス
 
-## 7. 未解決事項（A1）
+`tools/simulation` は ZAP API、Playwright 対象、Nuclei JSONL の固定 fixture を提供する。A0 の基準シナリオは「案件作成→認可→探索→候補採用→能動診断→取込→所見→報告」である。実サービスへの検出率ベンチマークは既定の受け入れ条件にしない。
 
-1. コマンド体系の最終形（エイリアス・--dry-run の共通オプション）
-2. 進捗イベントの形式（NDJSON）と、CIでの中断（SIGINT相当）の扱い
-3. シミュレーションハーネスのビルドを本プロジェクトへ正式に組み込む方法
+## 6. 安全制御
+
+CLI に安全制御を無効化する隠し option を設けない。無認可、期限切れ、計画差分、範囲外、保証不足の engine capability は実行前に拒否する。CI 用 token や秘密値はコマンドライン引数で受けず、OS secret store の参照または標準入力の secret channel を使う。
+
+## 7. A0/A1 受け入れ条件
+
+1. 基準シナリオが UI なしで自動完走し、同じ入力から安定した計画ハッシュを作る。
+2. 中断、上限停止、認証切れ、エンジン異常を別の終了理由と証拠で再現できる。
+3. JSON/NDJSON が [18](18-extension-api.md) の schema validation を通る。
+4. Windows と macOS で子プロセスが残らず、案件ロックを回収できる。

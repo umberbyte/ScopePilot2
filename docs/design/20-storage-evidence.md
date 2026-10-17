@@ -1,62 +1,65 @@
 # 20 保存モデル・証拠 概要設計
 
-対応要件: 仕様書 6.3（保存モデル）・6.5（応答性）・4.3（案件の移動）
+対応要件: 仕様書 6.3、6.5、8章
 
 ## 1. 目的
 
-SQLite（索引・状態・関係）＋ファイル（大きい本文・証拠原本）の二層保存へ移行し、
-10万件規模の通信と全機能横断の追跡性を実現する。現行 `project.scopepilot.json`
-（単一JSON・メモリ一括）からの移行を含む。
+SQLite を索引・状態・関係に、ファイルを大きい本文と証拠に使う。10万件の通信を全件メモリへ載せず、要求から報告まで追跡でき、原本と共有用データを混同しない保存モデルを定める。
 
-## 2. 再利用する現行資産
-
-- `Services/ProjectStore`（案件の保存・読込・版確認）→ SQLiteストアへ置換
-- `Services/ProjectPaths` / `EvidenceReference`（証跡のパス・hash・ポインタ管理）→ そのまま活用
-- runs/ フォルダー構成（engagement・HAR・計画・ログ・承認証跡）→ 原本置き場として維持
-
-## 3. コンポーネント構成
+## 2. 案件レイアウト
 
 ```text
-EvidenceStore（新規）:
-  SQLite DB（案件フォルダー内 scopepilot.db）:
-    案件・認可・ロール・エンドポイント・通信索引・診断計画・ジョブ・ルール版・観測・所見・
-    確認状態・実施範囲・タグ・メモ の表と相互参照
-  ファイル層: 通信の要求・応答原本（圧縮可）・HAR・スクリーンショット・DOM断片・レポート。
-    DBは本文のファイル参照＋hashを持つ。原文と表示用整形を分離
-  アクセス: ページング・遅延読込・全文検索（FTS5）をService層のAPIとして提供。
-    全件をメモリに保持する実装は採らない（6.5）
-MigrationTool: 現行 project.scopepilot.json → scopepilot.db（版を確認しバックアップして変換。
-  変換は冪等で、失敗時は旧形式を読み続けられる）
+case/
+  scopepilot.db
+  evidence/
+    blobs/<sha256>          暗号化した原本または派生物
+  runs/<run-id>/
+    manifest.json           計画、認可、runtime bundle、停止理由への参照
+    engine/                 上限付き stdout/stderr と engine 固有成果物
+  exports/                  利用者が明示生成した共有用成果物
+  locks/
 ```
 
-- 同時書込防止: 案件は1プロセスで開く（ロックファイル）。異常終了後は復旧フロー（6.5）。
+DB と manifest は相対参照を使う。書き込みは一つの storage service に集約し、SQLite transaction と temp file→fsync→atomic rename の順で DB と blob の不整合を避ける。案件は writer 一つ、reader 複数とし、異常終了後は WAL と blob index を検査する。
 
-## 4. データモデル（主要表）
+## 3. 主要モデル
 
-| 表 | 内容 |
+| モデル | 内容 |
 |---|---|
-| engagements / authorizations | 案件・認可（02） |
-| endpoints / exchanges | エンドポイント集計・通信（元ツール・ロール・プロトコル） |
-| plans / jobs / run_records | 計画（hash）・ジョブ・実行記録（エンジン版・停止理由） |
-| observations / findings / coverage | 観測（発生元別）・所見（確認状態）・実施範囲（17） |
-| evidence | 証跡ファイル（種別・hash・保管先・マスク済み派生物の参照） |
-| payload_sets / rule_packages | 集合・ルールの版管理（05・18・21） |
+| cases / roles / authorizations | 案件、ロール、認可と失効履歴 |
+| plans / jobs / runs | 正規化計画、状態遷移、runtime、停止理由 |
+| endpoints / exchanges | URL pattern、通信索引、role、source、protocol |
+| observations / findings / coverage | 機械観測、人の確認、実施・未実施範囲 |
+| evidence_objects | 種別、機密区分、SHA-256、長さ、暗号方式、blob 参照 |
+| evidence_links | 原本、表示用派生物、共有用派生物の関係 |
+| payload_sets / rule_packages / runtimes | 供給元、版、hash、審査状態 |
+| document_sources / document_hints | 文書原本と未確認ヒント |
+| audit_events | 秘密表示、export、認可変更、実行、削除 |
 
-## 5. 安全制御と証拠
+## 4. 原本、表示、共有
 
-- 秘密値: 通信原本は案件ロック（OSの保護機構と連動）で保護。共有エクスポートは
-  マスク済み派生物＋原本hash参照のみ。保持期間・容量上限・削除・バックアップ・復旧を提供。
-- 案件移動（OS間含む）: ファイル層は相対パス。Vault由来の秘密は再認証か暗号化エクスポート（4.3）。
-- スキーマ移行前のバックアップを必ず作る。
+- **原本**: 実際に送受信または取得したバイト列。暗号化して保存し、後から内容を書き換えない。
+- **表示用派生物**: UI でマスク・整形した内容。派生元 hash、マスク規則版、生成時刻を持つ。
+- **共有用派生物**: export ごとに生成し、対象、除外、マスク結果の manifest を付ける。
 
-## 6. UI / CLI
+パスワードなど、取得自体が不要な秘密は原本へ複写しない。取得済み通信をマスクして原本と称することもしない。証拠参照は content hash と DB ID の両方を持ち、hash は完全性の根拠、暗号化は秘匿の手段として分ける。
 
-- 現行の画面はストアのAPI経由に置換（ViewModelの変更は最小）。
-- CLI: `scopepilot db migrate|export|vacuum`。
+## 5. 暗号化と鍵
 
-## 7. 未解決事項（A0〜A1）
+案件ごとに data encryption key を生成し、Windows DPAPI または macOS Keychain で保護した key envelope を保存する。portable export は利用者が設定した passphrase から導出した鍵で別に包み直す。鍵、passphrase、secret store の値を DB、ログ、manifest に平文保存しない。詳細は [24](24-certificate-secrets.md) に従う。
 
-1. SQLite採用のタイミング（A1の通信保存から先行 vs 全表一括）— 段階案: A1で通信・実行記録から
-   置換し、案件設定・所見は移行ツールで後から
-2. FTS5の可用性（同梱SQLiteランタイムの選定: Microsoft.Data.Sqlite でのFTS5有効化）
-3. 応答容量上限の初期値（6.5）と超過時の保存方針（打切り＋未保存分の記録）
+## 6. 性能と上限
+
+一覧 API は cursor pagination を使い、本文を返さない。本文は range/stream で遅延読込し、検索用に許可された派生テキストだけを FTS5 へ入れる。巨大応答は設定上限で打ち切り、保存済み byte 数、推定全長、打切り理由を記録する。
+
+10万件 fixture で、初回表示、ページ移動、filter、本文表示、export、異常終了後の復旧を測る。基準値は A0 の基準端末と共に [26](26-requirements-traceability.md) へ固定する。
+
+## 7. 移行と削除
+
+本リポジトリに削除済みの C#/WPF 形式を起点とする段階移行は設けない。旧 ScopePilot 案件の import は独立した one-way importer とし、元データを変更しない。schema migration は開始前バックアップ、事前容量確認、適用履歴、失敗時 rollback を備える。
+
+削除は DB row と blob の参照数を分け、retention job が未参照 blob を消す。削除、export、原本表示は audit event に残す。
+
+## 8. CLI と受け入れ条件
+
+`scopepilot db check|migrate|export|vacuum` を提供する。A1 では、クラッシュ後に完了扱いの run が生まれないこと、hash 不一致を検出すること、マスク済み export から原本秘密値が除外されること、OS 間 portable export を復号できることを検証する。

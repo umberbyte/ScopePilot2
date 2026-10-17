@@ -7,11 +7,10 @@
 Nuclei による既知製品・脆弱性の実検査を診断パイプラインの構成要素として追加する。
 CVE情報DBとの照合・優先付け情報は任意拡張（仕様書1.3）であり、代替完了条件に入れない。
 
-## 2. 再利用する現行資産
+## 2. 共通基盤
 
-- `Services/ZapAddonService` の版・SHA-256 記録と検証の仕組み（zap-environment.json）→
-  Nucleiランタイム・テンプレート集合の固定に同じ形式を使う
-- `Services/RunHistoryService`・`ZapResultImporter` の取込・重複除外の考え方
+- [21](21-update-management.md) の runtime bundle で Nuclei とtemplate集合を固定する。
+- [20](20-storage-evidence.md) のrun/evidenceと [17](17-organizer-reporting.md) の重複整理を使う。
 
 ## 3. コンポーネント構成
 
@@ -31,13 +30,15 @@ TemplateStore（21と共通）: 審査済みテンプレートID・ファイル�
 
 ## 4. データモデル
 
-- `EngineRuntime`（一般化）: 種別（ZAP/Nuclei/…）・版・取得元・SHA-256・互換条件（5.2手順3）。
+- `EngineRuntime`: 種別（ZAP/Nuclei/…）・版・取得元・SHA-256・互換条件（5.2手順3）。
 - 照合情報（構成推定）: バナー・URL・ファイル名による推定は「候補」扱いとし、実検査結果と区別して
   表示（5.1）。ライブラリ同梱・影響版該当・到達性を分けて記録。
 
 ## 5. 安全制御と証跡
 
-- Nucleiの送信も案件の通信上限・速度制御の内側（22）。並列数は制御可能な範囲に固定。
+- Nuclei の実行には認可の許可操作区分 `NucleiScan`（[02](02-case-scope-authorization.md)）が必須。
+- Nucleiの送信も案件の通信上限・速度制御の内側（22）。Nuclei は Delegated 経路であり、capability fixture で
+  最大overshootを測定できない構成は有効化しない。
 - 実行ごとに「使ったテンプレート集合のhash」を実行記録へ残し、再現性を保証。
 
 ## 6. UI / CLI

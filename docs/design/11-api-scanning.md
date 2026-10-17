@@ -5,13 +5,13 @@
 ## 1. 目的
 
 OpenAPI・Postman・GraphQL の定義から要求を生成し、未観測の要求も許可範囲内で自動送信・診断する。
-バイナリ等の現行の未対応を解消する。
+JSON/XML/multipart/binaryを型と容量上限付きで扱う。
 
-## 2. 再利用する現行資産
+## 2. 旧版から継承する知見
 
-- `Services/ApiDocumentService`（API文書の解析・結果検証）と `ApiDocumentAiRunner`（AI抽出）
-- `Domain` の `ApiRequest`（下書きモデル）と `Services/ApiRequestFormatter`（.http 形式化・検査）
-- `Services/ApiRequestExportService`（requests/*.http 出力）
+- API 文書の parser と AI 抽出を分け、抽出結果を schema validation する。
+- 生成した要求は `.http` へ export できるが、export と送信を別操作にする。
+- 文書の記載、定義からの生成、実際の通信観測を別の provenance として保持する。
 
 ## 3. 方針の切り替え（現行からの差分）
 
@@ -31,8 +31,9 @@ RequestGenerator（新規）:
   認証（08のSessionManager）・Content-Type（JSON/XML/multipart/binary）
   組合せが爆発する場合は代表値1件＋探索でのバリエーション（document hints の apiVariations 併用）
 ApiSendJob（Orchestrator配下）:
-  実行経路は05と同じ2案（requestor計画 / sendRequestループ）を共用。送信前に許可Origin検査・
-  禁止語彙検査。応答は HttpExchange（20）へ。以降は受動（09）・能動（10）と同一経路
+  管理HTTP clientまたは検証済みZAP sendRequestを使い、1件ごとに予算lease・許可Origin・
+  禁止語彙を検査。応答は Exchange（20）へ保存し、ZAP診断時は履歴への登録を確認してから
+  受動（09）・能動（10）と同一経路へ渡す
 ```
 
 ## 5. データモデル
@@ -57,4 +58,4 @@ ApiSendJob（Orchestrator配下）:
 1. Postman Collection の変数・環境の扱い（認証変数は08のVaultへ接続）
 2. GraphQL の introspection 不可環境でのSDL単独運用
 3. バイナリ要求（ファイル添付）の代表値生成の方針（アップロード禁止との両立）
-4. OpenAPI定義自体の検証（无効な定義・巨大定義の上限）
+4. OpenAPI定義自体の検証（無効な定義・巨大定義の上限）

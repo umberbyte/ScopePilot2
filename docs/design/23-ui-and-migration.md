@@ -1,58 +1,60 @@
-# 23 UI構成と移行 概要設計
+# 23 UI・移行 概要設計
 
-対応要件: 仕様書 8章（UI と移行）・4.1（系列BのUI）・1.1（対応状態の管理）
+対応要件: 仕様書 8章、6.5、Windows/macOS 配布
 
 ## 1. 目的
 
-主要画面の情報設計と、現行ScopePilot案件・Burp資産の移行、対応状態の透明化を定める。
-系列Aは現行WPF画面の発展形、系列BはAvalonia移植（B0/B1）。
+Electron renderer に React/TypeScript のデスクトップ UI を実装し、案件、通信、診断、所見を同じ文脈で移動できるようにする。旧 WPF 画面の移植ではなく、[18](18-extension-api.md) の契約を利用する新規 UI とする。
 
-## 2. 再利用する現行資産
-
-- 現行 MainWindow.xaml の構成（探索・採用・診断タブ・アプリ設定）とStyles、テーマ
-- `ViewModels`（WPF非依存規則の下でそのまま）
-- 案件の新規作成・開始ウィザード（NewProjectFolderWindow / ProjectStartupWindow）
-
-## 3. 画面構成（目標形）
+## 2. 画面構成
 
 ```text
-案件とスコープ: 案件一覧・スコープ（Origin/パス/操作）・認可パネル（02）・ロールと認証（08）
-ブラウザと通信: プロキシセッション（03）・履歴グリッド（ページング/仮想化/遅延読込）・
-  サイトツリー・API一覧・介入（認証待ち）インジケータ
-リクエスト編集: 再送ワークベンチ（04）・Fuzzer（05）・Decoder/Comparer（06）・Sequencer
-診断ジョブ: 計画プレビュー（想定通信数）・実行進行（ジョブ/ルール/通信カウンタ）・
-  結果（受動/能動/Fuzzer/API/Nuclei/DOMの発生元別）
-所見と証拠: 重複グループ・確認状態（17）・証拠ビューア（マスク表示）・実施範囲
-レポート: 診断条件付きの日本語報告（Markdown/Word）
-更新と実行環境: 供給元状態（21）・エンジン版・オフライン指定
-拡張: RulePackage・ProductApi（18）
+案件: 案件、scope、認可、role、runtime bundle
+ブラウザと通信: 探索、proxy session、通信履歴、site map、API、介入要求
+要求ツール: Repeater、Fuzzer、Decoder、Comparer、Sequencer
+診断: plan preview、認可との対応、job progress、停止理由、engine logs
+所見と証拠: observation、finding、確認状態、重複 group、coverage、evidence
+報告: 条件、実施/未実施範囲、export preview
+設定: engine、certificate、secret、update、extension
 ```
 
-- 任意の通信から「再送・比較・採用・診断・メモ」へ直接移動できる共通コンテキストメニュー。
-  操作時には対象範囲とロールを確認表示（8章）。
-- 対応状態（1.1）: 機能ごとに 未実装/部分対応/外部UIで対応/統合UIで対応/検証済み を
-  画面（機能一覧）とdocsの互換性表で管理。
+画面上部に現在の案件、role、対象 scope、認可状態、実行状態を常時表示する。送信操作の直前には対象、操作区分、想定通信数、共有上限への影響を同じ位置で確認できる。
 
-## 4. 移行
+## 3. 大量データ
 
-- 現行ScopePilot案件: 読込時に版を確認しバックアップして scopepilot.db へ（20のMigrationTool）。
-- Burpからの移行: `.burp` 直接読込は前提にしない。HTTPメッセージ（エクスポート形式）・HAR・
-  所見（CSV/Markdown）・設定の対応表を定めて取込。BChecks等は個別評価。
-- 現行Burp連携（Scope正規表標出力・.http）は移行用の任意機能として残す（2.1）。
+通信表は row virtualization と server-side cursor pagination を使い、初期取得に本文を含めない。選択行の本文、diff、screenshot を遅延読込し、読み込み中・打切り・取得失敗を区別する。filter/sort は DB query へ渡し、renderer で10万件を保持・並べ替えない。
 
-## 5. 安全制御と証拠
+長い処理は progress event を購読し、renderer の再読み込み後も run ID から復元する。UI の破棄でジョブを止めず、停止は明示 command として扱う。
 
-- 秘密値の画面マスク（既定）と「表示」操作の記録。共有エクスポートはマスク済み派生物のみ。
-- 外部ZAP UIへの遷移で提供する機能は「外部UIで対応」と明示（統合UIとの区別、8章）。
+## 4. Electron の境界
 
-## 6. 系列B（B0/B1）
+renderer は local packaged content だけを表示する。対象サイトは Playwright の独立 browser profile で開き、Electron の BrowserWindow/WebView に読み込まない。外部 link は allowlist と利用者操作を経て OS browser へ渡す。
 
-- Avalonia OSS部品で 6.5 の一覧要件（10万件索引）を満たせるかをB0で検証。
-- XAML移植ではなく画面単位の再実装。Domain/Services・ViewModelをそのまま使う（4.3の分離規則）。
-- OS別配布（署名・公証・パッケージ）は9章・B1で扱う。
+preload API は機能別に限定し、入力を schema validation する。HTML、Markdown、engine message、対象 response は untrusted data として sanitize し、CSP で inline script と任意 network を禁止する。DevTools と debug endpoint は production で既定無効とする。
 
-## 7. 未解決事項（A2〜B1）
+## 5. 秘密値と誤解防止
 
-1. 履歴グリッドの仮想化方式の選定（系列A: WPFの仮想化＋遅延読込でまず検証）
-2. Burpエクスポート形式の実調査（項目対応表の作成）
-3. 機能一覧（対応状態）画面の情報源（docs互換性表との同期方法）
+秘密値は既定マスクとし、原本表示は再認証または OS session の確認、目的入力、audit event を要求する。コピーと export は表示とは別権限にする。
+
+観測の source と状態を badge だけに頼らず文言で示す: `文書の記載・未確認`、`通信で観測`、`エンジン検出・実影響未確認`、`人が確認済み`。0件の場合も未実施、失敗、対象外、検出なしを分ける。
+
+## 6. 移行
+
+ScopePilot2 に旧 C#/WPF コードは持ち込まない。移行対象は案件データと利用者 workflow である。
+
+- 旧案件 import は read-only の one-way tool とし、変換前後の件数、欠落、警告、hash を report する。
+- Burp project の直接 import は完成条件に含めない。HAR、JSON、CSV、Markdown、`.http` など公開形式を対象にする。
+- 旧版の画面名や ViewModel 構造を新 UI の API に反映しない。
+- Windows を A0/A1 の主検証環境とし、macOS は同じ契約・シナリオを配布前に通す。機能差は capability として表示する。
+
+## 7. アクセシビリティと状態保存
+
+キーボード操作、focus、screen reader label、拡大、light/dark theme を共通 component の受け入れ条件にする。window size や column 設定は利用者設定として保存するが、secret や対象 response は UI state に入れない。
+
+## 8. 受け入れ条件
+
+1. 10万件 fixture で scroll、filter、本文表示中に UI が操作可能である。
+2. renderer compromise を想定しても、汎用 fs/process/network API に到達できない。
+3. desktop と CLI が同じ計画と結果 schema を扱う。
+4. Windows/macOS で同じ必須 workflow を通し、OS 差を文書化する。
+5. observation、finding、document hint、未実施範囲が視覚・読み上げの両方で区別される。

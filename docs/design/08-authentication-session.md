@@ -8,13 +8,12 @@
 範囲だけ人手に切り替える。ScopePilot は認証情報の保持・注入を管理するが、対象外への
 認証情報転送は拒否する。
 
-## 2. 再利用する現行資産
+## 2. 旧版から継承する知見
 
-- `Services/AuthenticationFlow` / `ViewModels/AuthenticationViewModel`: 認証後URL到達確認の考え方
-- `Services/ZapAuthenticationVerifier`: 記録済みCookieでの到達事前確認
-- `ZapHandoffService` の replacer によるCookie注入（認証付き診断）
-- `tools/fast-crawl.js` の human-intervention / resume.signal（人手ログイン→再開）
-- Bruno/Playwright 記録のロール分離（BrowserContext・Cookieの分離）
+- 認証後URLとログイン済み指標の両方で到達状態を確認する。
+- 保存済み Cookie を使う前に有効性を検査し、認証切れを実行停止理由へ接続する。
+- role ごとに Playwright BrowserContext、Cookie、token、証拠を分離する。
+- 人手ログインが必要な場合は介入要求を保存し、同じ run を明示的に再開する。
 
 ## 3. コンポーネント構成
 
@@ -23,11 +22,11 @@ Domain:
   AuthMethod { 種別(Form/Bearer/Basic/ApiKey/Cookie), ロール, 入力欄対応, トークン更新方法,
                有効期限目安, 保存区分(Vault/都度入力/記録HARのみ) }
 Services:
-  CredentialVault（Platform Services）: ISecretStore（Windows: DPAPI / macOS: Keychain / Linux:
-    Secret Service。4.3の規定。利用不可時は平文へ降格せず都度入力）
-  AutoLoginService（新規）: フォーム仕様（セレクタ or 記録）に従い BrowserAdapter 経由で
+  SecretStore（24）: Windows DPAPI/Credential Manager、macOS Keychain。
+    利用不可時は平文へ降格せず都度入力
+  AutoLoginService: フォーム仕様（セレクタ or 記録）に従い BrowserAdapter 経由で
     ログイン→認証状態の指標確認（_loggedInIndicator 相当）→セッション抽出
-  SessionManager（新規）: ロール別セッション（Cookie/トークン）の保持・有効性監視・再認証。
+  SessionManager: ロール別セッション（Cookie/トークン）の保持・有効性監視・再認証。
     F04/F05/F11 の実行時にヘッダ/Cookie として適用（04の再送セッションと共通）
   RefreshFlow（後段）: CSRFトークン・ワンタイム値の再取得マクロ（要求テンプレート列で定義）
 ```
@@ -43,8 +42,8 @@ Services:
 
 ## 5. 安全制御と証跡
 
-- 記録・送信される通信に秘密値が含まれる場合、保存時マスク（04と同一）。認証ログイン操作自体は
-  観測として残すがパスワード欄は必ずマスク。
+- 認証通信の原本は暗号化し、表示・共有派生物をマスクする。password入力値はブラウザ操作証拠や
+  traceへ複写せず、SecretRef と注入成否だけを記録する（20・24）。
 - 自動ログイン失敗のリトライは回数上限（ロックアウトを誘発しない）。失敗は介入へ切り替え。
 
 ## 6. UI / CLI

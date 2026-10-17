@@ -7,34 +7,34 @@
 要確認通信・メモ・タグ・所見の重複整理・日本語報告・再診断を一元化する。
 「スキャナ警告」と「人の確認結果」を明確に区別する表示の中核。
 
-## 2. 再利用する現行資産
+## 2. 旧版から継承する知見
 
-- `Services/FindingReportService`（参照ガイドライン・所見レポート）と
-  `Services/JapaneseDiagnosticReportService`（日本語診断レポート）
-- Word出力（`Services/WordReports`・`WordReportViewModel`）
-- `DiagnosticObservation` / `DiagnosticFinding` の二層（観測と所見）と確認状態
-- Bruno手動確認記録（`BrunoEvidenceReportFormatter`）とチェックリスト運用
+- observation と finding を分け、機械の検出と人の確認状態を混同しない。
+- 日本語Markdown/Word報告、手動確認記録、checklist を共通の report model から生成する。
+- report はガイドライン、実行条件、証拠参照、未実施範囲を含む。
 
 ## 3. コンポーネント構成
 
 ```text
 OrganizerService（新規）:
   要確認トレイ: 通信・観測・フローを「要確認」として束ねる。担当・期限・メモ・タグ
-  重複整理: 同一ルール×同一パラメータ×同系URLの観測をグループ化（代表1件＋件数）。
-    元資料の「同一テンプレートは代表1件」規約を自動適用
+  重複整理: engine/rule版×role×owner context×method×同系URL×parameter location×payload classを
+    候補keyとする。確認状態や実影響の異なる観測は自動統合せず、代表1件＋件数＋差分を保持
   確認状態: 未確認→調査中→確認済み/誤検出/受容/修正確認（6.3）。
     状態変更は確認者・日時・根拠（観測参照）付きで記録
-ReportComposer（既存の拡張）:
+ReportComposer:
   診断条件（エンジン版・ルール版・強度・上限・認可）を必ず冒頭に記載
+  参照ガイドライン: 案件で有効化したガイドラインと版の一覧を記載（[27](27-security-guidelines.md)）
   未実施領域（実施範囲モデル）の可視化: 対象×検査項目の実施済/非該当/未対応/禁止/認証失敗/
     時間切れ/エラー（6.3）を報告に含める
   発生元別の明示: Passive/Active/Fuzzer/Manual/API/Nuclei/DOM/文書記載を区別表示
+  候補・所見ごとの参照基準（guidelineBasis）を triage 根拠として示し、実影響の確定と混同しない
 ```
 
 ## 4. データモデル
 
-- `Finding`（既存DiagnosticFindingを拡張）: 確認状態・確認者・重複グループId・タグ・関連観測列。
-- `CoverageRecord`（実施範囲）: 検査項目（元資料の診断項目・ガイドライン対応）×実施状態。
+- `Finding`: 確認状態・確認者・重複グループId・タグ・関連観測列。
+- `CoverageRecord`（実施範囲）: 検査項目（元資料の診断項目・ガイドライン対応、[27](27-security-guidelines.md)）×実施状態。
 - 報告物: Markdown（現行）＋Word。共有用エクスポートはマスク済み派生物のみ。
 
 ## 5. 安全制御と証跡
@@ -52,4 +52,4 @@ ReportComposer（既存の拡張）:
 
 1. 元資料769診断項目との対応付け（CoverageRecord の初期辞書）の作成方法
 2. 再診断（前回所見との差分）の比較単位（同一パターン・同一ルール）
-3. Word出力のOS非依存化（4.3: WPF画像API置換。系列Bで必須）
+3. Word出力libraryの選定と、Windows/macOSで同じlayoutを検証するgolden fixture

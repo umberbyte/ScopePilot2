@@ -6,23 +6,23 @@
 
 URL・HTML・Base64・hex 等の変換（Decoder相当）、テキスト・バイナリの差分（Comparer相当）、
 トークンの採取と統計解析（Sequencer相当）をローカルユーティリティとして提供する。
-いずれも追加の対象通信を発生させない。
+Decoder と Comparer は通信を発生させない。Sequencer の標本採取は対象通信を発生させる。
 
-## 2. 再利用する現行資産
+## 2. 共通部品
 
 - 差分表示: 04（再送ワークベンチ）の DiffRenderer を共通部品化
-- バイナリ取扱: HAR/原本ファイルの読み込み（`ProjectPaths`・証拠参照）
+- バイナリ取扱: EvidenceService からの範囲読込と証拠参照
 
 ## 3. コンポーネント構成
 
 ```text
-CodecService（新規・Domain層で実装可能な純関数集）:
+CodecService（core の純関数集）:
   変換: URL encode/decode（部分指定可）・HTML entity・Base64/Base64URL・hex・
   hash表示(SHA-256/MD5は指紋確認用と明記)・日時/タイムスタンプ変換
   連続変換: 変換履歴をスタックで保持し、段階的に適用・巻き戻しできる
 ComparerService（新規）:
   2入力（テキスト/バイナリ/通信2件）の行差分・バイト差分・長さ・類似度。
-  通信指定の場合は HttpExchange（20）から本文を遅延読込
+  通信指定の場合は Exchange（20）から本文を遅延読込
 SequencerService（新規・A3）:
   採取: ログイン応答等からトークン（Cookie/hidden/bearer）をN回採取。
   採取は「採取専用の再送計画」として認可・上限の内側で実行（採取も通信を発生させる）
@@ -39,7 +39,8 @@ SequencerService（新規・A3）:
 ## 5. 安全制御と証跡
 
 - Codec/Comparer は通信を発生させないため制御対象外。Sequencer の採取のみ認可・上限の内側。
-- Sequencer の対象が認証トークンの場合、値そのものは画面マスク表示・保存時にマスク（指紋と統計値のみ保存）。
+- Sequencer の対象が認証トークンの場合、値は画面でマスクし、解析用一時領域から保存しない。
+  保存するのは keyed fingerprint、統計値、標本数、取得条件である。
 
 ## 6. UI
 

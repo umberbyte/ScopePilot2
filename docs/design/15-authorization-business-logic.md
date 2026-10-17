@@ -7,11 +7,11 @@
 ロール・所有者別の要求比較と期待結果の突合で、認可不備・業務ロジック不備の「確認作業」を
 支援する。差分のみで認可不備を確定しない（仕様書3.1の維持事項）。
 
-## 2. 再利用する現行資産
+## 2. 共通基盤
 
-- 複数ロールの記録と通信の分離（Roles/ActiveRole、ロール別HAR）
-- 代表パターン（`CandidateSelector`）と再送（04）・差分（06）
-- 元資料のZAP非対応テーマ（No.1 認証回避・No.10 IDOR・No.20 業務ロジック等）の手順定義
+- [08](08-authentication-session.md) のロール別sessionと通信分離。
+- 代表URLパターン、[04](04-repeater.md) の再送、[06](06-decoder-comparer-sequencer.md) の差分。
+- 診断テーマの手順は版付き RulePackage または checklist として取り込む。
 
 ## 3. コンポーネント構成
 

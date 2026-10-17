@@ -1,56 +1,59 @@
 # 22 実行制御・上限・障害復旧 概要設計
 
-対応要件: 仕様書 6.1（計画と通信の制御）・6.2・6.5（応答性と障害復旧）・10.1（受入基準）
+対応要件: 仕様書 6.1、6.2、6.5、10.1
 
 ## 1. 目的
 
-全ジョブ（探索・受動・能動・Fuzzer・API送信・再送・OAST待機）に共通の実行制御を置く。
-計画の確定→実行→監視→停止→証跡の一連を Orchestrator が唯一の経路として担う。
+探索、受動診断、能動診断、Fuzzer、API、再送、Nuclei、WebSocket、OAST の実行を一つの計画・認可・予算モデルで制御する。ScopePilot 自身が発する通信は実際の送信経路で範囲と上限を強制する。ZAP や Nuclei のように内部挙動を制御できない外部エンジンは、scope を入力として与え、起動・停止を握り、出力から挙動を推測し、保証範囲を経路別に開示する。外部エンジンの内部実装は我々の権限外（版更新で変化しうる）であり、個々の送信を傍受・拒否して制御しようとしない。
 
-## 2. 再利用する現行資産
+## 2. 計画と状態遷移
 
-- `ZapCliRunner` の実行前検査（計画hash一致・HAR/計画のSHA-256・観測URL一致・上書き拒否）
-- `_runCancellation`（MaxMinutesによる打切り）と取消時のログ保全
-- 進捗のライブ表示（ZapOutputSummarizer）と run status JSON（prepared/running/completed/failed/cancelled）
+`ExecutionPlan` は対象、操作区分、role、ジョブ DAG、request/page/time/byte/concurrency/rate の各上限、engine capability、runtime bundle、入力証拠、認可 ID を正規化し hash 化する。
 
-## 3. コンポーネント構成
+状態は `Draft → Validated → Authorized → Running → Stopping → Completed|Stopped|Failed` とする。`Authorized` は計画hashを有効な認可へ結び付けた状態であり、runごとの手動承認を意味しない。有効な認可があれば既定の自動計画はそのまま実行へ進める。認可失効、計画差分、runtime 差分は Running への遷移前に拒否する。子ジョブが新しい対象を発見した場合は origin plan を変更せず、予算を引き継ぐ子計画へ追記する。
 
-```text
-JobOrchestrator（01）:
-  計画: 対象・ロール・操作区分・エンジン・ルール・上限・想定通信数と未算定部分を確定（6.1）。
-    計画hashを計算し承認証跡（02）に紐付ける
-  実行: ジョブ種別ごとのExecutor（探索/受動/能動/Fuzzer/API送信/再送）を順次・並列制御付きで実行
-  監視（案件全体の共有状態）:
-    通信数・Origin別速度・同時接続・ページ数・実行時間・応答容量のカウンタ
-    停止条件: 上限到達 / 429・5xx率の上昇 / 認証切れ（08の監視） / エンジン停止 /
-      証拠保存失敗 / 利用者停止
-    停止時: 新規通信を止め、送信済み要求は取り消せないことを記録に明示
-RateGovernor: Origin別の速度・間隔・同時数の実装（FuzzerとAPI送信と能動診断で共用）
-RecoveryManager（6.5）: クラッシュ後に完了扱いにしない。中断位置と保存済み証拠を復旧。
-  要求の再送を伴うジョブは自動再開しない（二重実行防止の再開計画を作る）
-```
+## 3. 通信の強制点
 
-## 4. データモデル
+`EgressPolicy` は送信ごとに次を判定する。
 
-- `ExecutionPlan`（計画オブジェクト: 対象・上限・認可Id・構成ジョブ・hash）。
-- `RunState`: 進行中のカウンタとジョブ状態。run_records（20）への逐次書込。
-- 外部エンジンの全通信を制限するための二重構え: 管理された送信経路（プロキシ/アダプター経由）と
-  直接通信を行う機能の別扱い（6.1）。共通制約を強制できない能力は有効化しない。
+- scheme、正規化 host、port、path、method、操作区分。
+- DNS 解決後の IPv4/IPv6 と再解決結果。loopback、link-local、private range の許否。
+- Host、接続先、SNI の組合せと、redirect ごとの再評価。
+- 別 origin への Cookie、Authorization、client certificate の転送拒否。
+- 案件共有予算からの lease 取得。lease のない送信は行わない。
 
-## 5. 安全制御と証拠
+通信経路別の保証は次の三段階で表す。これは送信元が ScopePilot か外部エンジンかで分かれる。
 
-- GET等のメソッドだけで読み取りと決めず、操作区分で制御（02）。
-- リダイレクト先・DNS解決結果・IPv6・別ホストへの認証情報転送も制御対象。
-- 停止理由・時刻・カウンタの最終値を必ず実行記録へ。
+| 等級 | 保証の主体 | 内容 | 利用条件 |
+|---|---|---|---|
+| Enforced | ScopePilot | 各送信と redirect を送信前に判定し、範囲外を拒否する | Node 送信、管理 proxy、Playwright route など、ScopePilot 自身が発する通信 |
+| Delegated | 外部エンジン | ScopePilot は scope/mode/rule/対象を入力として与え、起動・停止を握り、出力（history/message 数/report）から挙動を推測する。個々の送信は傍受・拒否しない。範囲遵守はエンジンの scope 機能へ委譲し、逸脱は事後検知して停止する | ZAP、管理 proxy を通せない Nuclei 経路など内部挙動を制御できないエンジン。固定した版ごとに挙動と最大 overshoot を実測し manifest へ記録した場合のみ |
+| Unsupported | — | 入力 scope もライフサイクル停止も保証できない | 機能を公開しない |
 
-## 6. UI / CLI
+ZAP、Nuclei、Playwright ごとに capability manifest へ各制約の等級と最大 overshoot を記録する。共有上限から engine へ小分けの lease を渡し、Delegated 経路では最大 overshoot 分を lease 内に予約する。予約内に収められない経路は Unsupported とする。**Delegated では「範囲外の送信前拒否」を保証しない**。入力 scope の付与、出力からの事後検知と停止、当該版での実測結果の開示でこれに代える。停止検知だけに依存して無制限の送信を許さない。外部エンジンを ScopePilot で完全制御しようとすると連携する利点（枯れた診断エンジンの活用）を失い、かつエンジン更新で壊れるため、制御ではなく委譲・推測・開示として扱う。
 
-- 実行画面: 計画プレビュー（想定通信数）→進行（ジョブ・通信カウンタ・速度）→停止（理由）。
-- 10.1の受入基準（上限超過の拒否・複数エンジン並行での案件上限共有・診断途中の異常扱い）を
-  自動テストとして維持。
+## 4. 経路別の設計
 
-## 7. 未解決事項（A0〜A1）
+- Node の再送/API/Fuzzer: 管理 HTTP client を通し、redirect を自動追従せず一段ずつ判定する。
+- Playwright: browser context の request interception で各 navigation、subresource、redirect を判定する。service worker を制御できない構成では無効化するか管理 proxy を必須にする。
+- ZAP（Delegated）: context include/exclude、mode、rule、thread、delay、duration を入力として固定し、対象を ZAP history/context に登録してから実行する。個々の送信の傍受・拒否・書き換えはしない（ZAP 更新で壊れる結合を作らない）。予算 lease、API progress、ZAP message 増分を照合し、乖離時は停止する。範囲遵守は与えた context と当該版の実測挙動に依拠し、保証範囲を能力表へ開示する。
+- Nuclei: target list、rate/concurrency、redirect、template 能力を固定し、可能なら管理 proxy を通す。直接 DNS/OAST/code 等を使う template は別 capability として既定無効にする。
+- WebSocket/OAST: HTTP request 数と別に connection/message/callback budget を持ち、案件全体の time budget を共有する。
 
-1. 429/5xx率の検出式（窓幅・しきい値）と一時停止→再開の条件
-2. 「未算定部分」（リダイレクト・OAST・外部リソース取得）の計画上の表現方法
-3. エンジン（ZAP）クラッシュ検知のタイムアウト値と回収処理のUnix対応（4.3のプロセスツリー）
+## 5. 過負荷と停止
+
+RateGovernor は origin ごとの token bucket と案件全体の concurrency を管理する。429、Retry-After、5xx、latency、認証切れ、保存失敗、disk 空き容量低下を監視し、段階的に減速、一時停止、停止する。既定閾値と再開条件は計画に固定する。
+
+停止時は新規 lease を止め、engine に協調停止を要求し、期限後に process tree を終了する。停止要求時刻、最後に観測した送信、停止後の overshoot、保存完了を run record へ残す。
+
+## 6. 復旧
+
+起動時に Running/Stopping の run を `Interrupted` として検出し、子プロセス、port、lock、temp blob を照合する。自動再開は行わない。利用者が再開を選んだ場合も、認可、plan hash、runtime、入力 hash、resume point を再検証する。冪等でない状態変更ジョブは新規計画として扱う。
+
+## 7. A0/A1 受け入れ条件
+
+1. Enforced 経路（Node/管理 proxy/Playwright）で、redirect、DNS rebinding、IPv6、別 origin credential 転送を送信前に拒否できる。Delegated 経路（ZAP/Nuclei）では、固定した版の fixture で、与えた scope の外への送信が観測されないことと、逸脱時に停止・記録することを実測・開示できる（送信前拒否は保証しない）。
+2. 並行する複数 engine が案件共有上限を超えない。Delegated の overshoot が宣言値以内である。
+3. 429/5xx、認証切れ、証拠保存失敗、利用者停止で、理由が一意に記録される。
+4. 強制不能な engine/feature が plan validation で拒否される。
+5. crash 後に完了扱いにならず、再開前の再検証が働く。

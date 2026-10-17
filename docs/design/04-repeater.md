@@ -15,20 +15,19 @@
 - **Safe モードでは `mode_violation` で拒否**。standard モードが必要。
 - `-config api.port` は別ポートを開かない。API URL は実行時に既定リスナーで確認する。
 
-## 3. 再利用する現行資産
+## 3. 旧版から継承する知見
 
-- `Services/ZapProxyApi`（API呼出の土台）→ `SendRequestAsync` を追加
-- `Services/ManagedZapProxy`（セッション起動引数）→ standard モードの「再送セッション」
-- `Services/ApiRequestFormatter`（許可Origin検査）
-- HARエントリ→生リクエスト文字列化（`ApiRequestFormatter.Format` の逆変換）
+- ZAP `sendRequest` は standard モード専用の再送セッションから呼ぶ。
+- HAR と保存済み通信から編集可能な要求表現を作り、送信前に scope を再検査する。
+- Safe モード拒否、API endpoint、ZAP履歴への記録を起動時 probe で確認する。
 
 ## 4. コンポーネント構成
 
 ```text
 ResendSession: 案件 runs/resend-<時刻>/zap-home。UIで明示開閉。開く時に認可（02）を要求
-ZapResendService:
+ResendService:
   SendAsync(project, rawRequest, followRedirects, themeNo, token)
-    1) EnsureAllowed  2) 禁止語彙警告（保証しない旨を表示）  3) 案件の通信上限カウント
+    1) EgressPolicy  2) 禁止語彙警告（保証しない旨を表示）  3) 案件予算lease取得
     4) sendRequest  5) 元要求（必要時再送）との差分生成  6) 証跡追記・観測取込
 DiffRenderer: ステータス行・ヘッダ・本文・RTT の差分表示（06のComparerと共通部品を使う）
 ```
@@ -42,7 +41,9 @@ DiffRenderer: ステータス行・ヘッダ・本文・RTT の差分表示（06
 ## 6. 安全制御と証跡
 
 - 送信は1件ずつ・利用者の操作による（ボタン）。一括送信は本機能の範囲外（05が担う）。
-- 編集欄の Cookie 等の秘密値は既定マスク表示。保存時に `Cookie` / `Set-Cookie` / `Authorization` 等をマスク。
+- 編集欄の Cookie 等は既定マスク表示とする。マスク文字列を送信値として扱わず、変更されていない
+  secret token は SecretStore または暗号化原本から送信直前に復元する。送受信原本は暗号化保存し、
+  表示・共有用派生物で `Cookie` / `Set-Cookie` / `Authorization` 等をマスクする（20・24）。
 - テーマ（元資料ZAP非対応33テーマ）を選ぶと手順・「注意（安全制御・事前合意）」を表示し、
   記録にテーマNo.を残す。
 

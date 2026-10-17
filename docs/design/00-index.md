@@ -1,49 +1,54 @@
-# 概要設計 一覧（ScopePilot2）
+# ScopePilot2 概要設計一覧
 
-`docs/burp-professional-replacement-spec.md`（以下「仕様書」）の必須機能 F01〜F21 と横断要件に対する概要設計。
-各文書は概要設計（コンポーネント構成・データ・安全制御・証跡・未解決事項）までを定め、
-詳細設計・実装は段階計画（仕様書10章）の順で行う。段階表記 A0〜A4 は仕様書10章に対応する。
+本ディレクトリは [Burp Suite Professional 代替仕様案](../burp-professional-replacement-spec.md) を実装へ落とす概要設計である。言語・配布対象・旧版の扱いはリポジトリ直下の [AGENTS.md](../../AGENTS.md) を正本とし、本文書群は TypeScript、Electron、Windows/macOS を前提とする。
 
-| 文書 | 対応要件 | 主な段階 |
+## 設計の読み方
+
+| 文書 | 対応範囲 | 主な段階 |
 |---|---|---|
-| [01-architecture.md](01-architecture.md) | 2章・4章（共通アーキテクチャ・移植分離） | 全段階 |
-| [02-case-scope-authorization.md](02-case-scope-authorization.md) | F01＋6.1（案件・スコープ・認可モデル） | A0〜A1 |
-| [03-proxy-intercept-logger.md](03-proxy-intercept-logger.md) | F02＋F03（プロキシ・インターセプト・サイトマップ・ロガー） | A2 |
-| [04-repeater.md](04-repeater.md) | F04（再送ワークベンチ） | A2 |
-| [05-intruder-fuzzer.md](05-intruder-fuzzer.md) | F05（Fuzzer相当・ペイロード集合管理） | A0〜A1 |
-| [06-decoder-comparer-sequencer.md](06-decoder-comparer-sequencer.md) | F06＋F07（変換・差分・トークン解析） | A2〜A3 |
-| [07-exploration-browser.md](07-exploration-browser.md) | F08（自動探索・ブラウザ） | A1 |
-| [08-authentication-session.md](08-authentication-session.md) | F09（認証とセッション） | A1 |
-| [09-passive-scan.md](09-passive-scan.md) | F10（受動診断） | A1 |
-| [10-active-scan.md](10-active-scan.md) | F11（能動診断の自動実行） | A0〜A1 |
-| [11-api-scanning.md](11-api-scanning.md) | F12（API診断） | A1〜A3 |
-| [12-oast.md](12-oast.md) | F13（OAST・コールバック検知） | A3 |
-| [13-websocket-http2.md](13-websocket-http2.md) | F14＋F15（WebSocket・HTTP/2） | A3 |
-| [14-dom-investigation.md](14-dom-investigation.md) | F16（DOM調査） | A3 |
-| [15-authorization-business-logic.md](15-authorization-business-logic.md) | F17（認可と業務ロジック） | A2〜A3 |
-| [16-known-vulns-nuclei.md](16-known-vulns-nuclei.md) | F18（既知脆弱性・Nuclei） | A2 |
-| [17-organizer-reporting.md](17-organizer-reporting.md) | F19（整理と報告） | A1〜A2 |
-| [18-extension-api.md](18-extension-api.md) | F20（拡張と独自検査） | A3 |
-| [19-cli-automation.md](19-cli-automation.md) | F21（CLI・自動処理） | A1 |
-| [20-storage-evidence.md](20-storage-evidence.md) | 6.3（保存モデル・証拠） | A1 |
-| [21-update-management.md](21-update-management.md) | 5章（更新管理） | A1〜A2 |
-| [22-execution-control.md](22-execution-control.md) | 6.1・6.2・6.5（実行制御・上限・障害復旧） | A0〜A1 |
-| [23-ui-and-migration.md](23-ui-and-migration.md) | 8章（UI構成・移行） | A2〜B1 |
+| [01 共通アーキテクチャ](01-architecture.md) | プロセス、パッケージ、依存方向、信頼境界 | 全段階 |
+| [02 案件・スコープ・認可](02-case-scope-authorization.md) | F01、6.1 | A0–A1 |
+| [03 Proxy・Intercept・Logger](03-proxy-intercept-logger.md) | F02、F03 | A2 |
+| [04 Repeater](04-repeater.md) | F04 | A2 |
+| [05 Fuzzer](05-intruder-fuzzer.md) | F05 | A0–A1 |
+| [06 Decoder・Comparer・Sequencer](06-decoder-comparer-sequencer.md) | F06、F07 | A2–A3 |
+| [07 自動探索・ブラウザ](07-exploration-browser.md) | F08 | A1 |
+| [08 認証・セッション](08-authentication-session.md) | F09 | A1 |
+| [09 受動診断](09-passive-scan.md) | F10 | A1 |
+| [10 能動診断](10-active-scan.md) | F11 | A0–A1 |
+| [11 API 診断](11-api-scanning.md) | F12 | A1–A3 |
+| [12 OAST](12-oast.md) | F13 | A3 |
+| [13 WebSocket・HTTP/2](13-websocket-http2.md) | F14、F15 | A0、A3 |
+| [14 DOM 調査](14-dom-investigation.md) | F16 | A3 |
+| [15 認可・業務ロジック](15-authorization-business-logic.md) | F17 | A2–A3 |
+| [16 Nuclei 統合](16-known-vulns-nuclei.md) | F18 | A2 |
+| [17 整理・報告](17-organizer-reporting.md) | F19 | A1–A2 |
+| [18 拡張 API](18-extension-api.md) | F20、UI–コア契約 | A3 |
+| [19 CLI・自動処理](19-cli-automation.md) | F21 | A0–A1 |
+| [20 保存モデル・証拠](20-storage-evidence.md) | 6.3、6.5 | A1 |
+| [21 更新管理](21-update-management.md) | 5章、配布物の版固定 | A0–A2 |
+| [22 実行制御](22-execution-control.md) | 6.1、6.2、6.5 | A0–A1 |
+| [23 UI・移行](23-ui-and-migration.md) | 8章、Windows/macOS | A1–A4 |
+| [24 証明書・秘密情報](24-certificate-secrets.md) | 6.2、6.4 | A0–A1 |
+| [25 文書ヒント・AI](25-document-hints-ai.md) | 7章 | A1 |
+| [26 要求トレーサビリティ](26-requirements-traceability.md) | F01–F21、横断要件 | 全段階 |
+| [27 ガイドライン参照・候補選定](27-security-guidelines.md) | F03、F08、F19、6.3、5.1 | A1 |
 
-## 共通テンプレート
+## 全文書に適用する規則
 
-各概要設計は次の節で構成する。
+1. コアは UI 非依存の TypeScript とし、Electron renderer、Electron main、CLI、外部 API を契約で分離する。
+2. 送信を伴う処理は `ExecutionPlan` と有効な認可を必要とし、[22](22-execution-control.md) の実行制御を迂回しない。
+3. 外部エンジン（ZAP・Nuclei）の内部挙動は制御せず、我々の権限外（版更新で変化しうる）として扱う。scope を入力として与え、起動・停止を握り、出力から挙動を推測する（Delegated、[22](22-execution-control.md)）。送信前拒否を保証するのは ScopePilot 自身が発する通信（Enforced）だけで、外部エンジン由来の通信は入力 scope・事後検知・停止・版ごとの実測・開示で扱う。入力 scope もライフサイクル停止も保証できない能力は公開しない。
+4. 通信原本、表示用マスク、共有用派生物を別の証拠として扱う。観測、エンジンの判定、人の確認、文書の記載を混同しない。
+5. 外部バイナリ、ルール、ペイロード、npm 依存、実行時ランタイムは版とハッシュを固定し、実行記録へ残す。
+6. 旧 ScopePilot のソースは実装の依存先にしない。安全制御や ZAP 運用上の知見だけを、テストと契約に置き換えて継承する。
 
-1. 目的と対応要件（仕様書の該当機能・段階）
-2. 再利用する現行資産（ScopePilot からの複製対象と変更方針）
-3. コンポーネント構成（新規サービス・アダプター・ViewModel）
-4. データモデル（Domain の拡張）
-5. 安全制御と証跡（許可範囲・認可・上限・証拠・秘密値）
-6. UI / CLI
-7. 未解決事項と A0 検証項目
+## 設計上の決定と検証課題
 
-## 用語の確認事項（実装時の混乱防止）
+「未解決事項」は実装時の自由選択ではない。各項目に決定期限、検証方法、採否、制約を記録し、[26](26-requirements-traceability.md) から参照する。A0 では特に次を確定する。
 
-- ZAP対応表の「Requester」（ZAP画面の手動再送機能）と、Automation Framework の `requestor` ジョブ
-  （計画ファイルから要求を送るジョブ）は別物。本設計では F04 を「再送（Repeater相当）」、
-  F05 の実行経路候補を「requestorジョブ」と呼び分ける（仕様書119行目の注意を踏襲）。
+- ZAP の Safe/standard 境界、`sendRequest`、Spider、Active Scan、停止処理、`URL Does not Exist` 回避。
+- Playwright、ZAP、Nuclei を含む通信範囲と共有上限の、経路別の保証等級（Enforced/Delegated/Unsupported）と、固定版での実測・開示方法。
+- HTTP/2、Host、接続先、SNI を別々に扱える送信経路。
+- TypeScript シミュレーションハーネスによる「探索→能動診断→所見」の自動完走。
+- 10万件の通信索引、本文遅延読込、異常終了後の復旧。

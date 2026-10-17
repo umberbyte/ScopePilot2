@@ -9,31 +9,32 @@ Host/接続先/SNI 等の扱い・正規化を伴わない編集経路を提供�
 
 ## 2. 前提（ZAP 2.17.0）
 
-- ZAP は WebSocket の記録・再送（UI）と HTTP/2 の中継に対応する。外部制御用の API の有無は
-  機能ごとに A0/A3 で確認する（仕様書119行目の原則）。
-- 現行の記録ブラウザーは WebSocket をブロックしている。対象の許可Originと上限を適用したうえで
-  解除する（3.1 F14行）。
+- ZAP WebSocket API は message 一覧と text message 送信を提供する。binary、編集、停止、方向指定、
+  connection選択を含む必要操作を版固定した実機で検証し、能力表へ記録する。
+- 記録ブラウザーで WebSocket を許可し、対象Origin、connection数、message数、byte数、時間上限を適用する。
 
 ## 3. コンポーネント構成
 
 ```text
 WebSocketSupport:
-  記録: 手動プロキシ（03）経由で WS フレームを HttpExchange と同じ保存モデルへ（種別=WS）
-  再送: ZAP UI（外部UI対応）または API があれば再送ワークベンチ（04）へ統合。能力表に反映
+  記録: 手動プロキシ（03）経由で WS フレームを Exchange と同じ保存モデルへ（種別=WS）
+  再送: 検証済みの ZAP API 操作を再送ワークベンチ（04）へ統合。未対応操作は能力表へ明示
   診断: WS メッセージへのペイロード再送（05と同じジョブ体系でトランスポートだけ拡張）
 Http2Support:
   プロトコル選択: requestor/実行系の httpVersion 指定（HTTP/1.1/HTTP/2）を計画・再送で指定可能に
-  Host/SNI/接続先: F15の「正規化を伴わない編集経路」は ZAP sendRequest の生要求（04）が本体。
-    通常のHTTPクライアント（.NET HttpClient系）が行う正規化（ヘッダ順・大文字・keep-alive等）で
-    診断意図が失われないかを A0 の技術検証で確認（仕様書121行目）
+  Host/SNI/接続先: 生要求、authority、実接続先、TLS SNI を別フィールドで計画する。
+    ZAP sendRequest や Node の通常HTTP APIがこれらを独立制御できるとは仮定しない。
+    header順、大文字小文字、重複header、pseudo-header、connection reuseを保持できる専用経路を
+    A0で比較し、保持できない操作は能力表で未対応とする
 ```
 
 - 対応するだけで完全互換とは扱わない。HTTP/3 は必要な業務シナリオが確定した時点で互換性表へ追加。
 
 ## 4. データモデル
 
-- `HttpExchange` をトランスポート非依存に拡張: プロトコル（HTTP/1.1, HTTP/2, WS）・フレーム列（WS）・
-  ストリーム情報。wire情報が取得できない部分は推測で補わない（6.3）。
+- `Exchange` は protocol（HTTP/1.1、HTTP/2、WS）、connection、stream、frame/messageを区別する。
+  HTTP/2 を HTTP/1.1 の start-line/header text に可逆変換できるとは扱わない。wire情報が取得できない
+  部分は `Unavailable` とし、推測で補わない。
 
 ## 5. 安全制御と証跡
 
@@ -48,6 +49,6 @@ Http2Support:
 
 ## 7. 未解決事項（A0/A3）
 
-1. ZAP WebSocket API（メッセージ取得・再送）の有無確認
-2. .NET HTTPスタックの正規化が診断に与える影響の実測（F15の早期技術検証）
+1. ZAP WebSocket API の binary/方向/connection/停止操作の対応範囲
+2. ZAP、Node、専用transportの正規化と Host/connect/SNI 分離能力の実測
 3. WS の KeepAlive/再接続時のセッション扱い

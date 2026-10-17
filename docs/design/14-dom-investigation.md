@@ -7,15 +7,15 @@
 DOM の入力元（source）と危険な出力先（sink）を調査し、ブラウザ上の証拠として残す。
 DOM Invader と同一能力は前提にしない（仕様書121行目の難所の一つ）。A3。
 
-## 2. 再利用する現行資産
+## 2. 共通基盤
 
-- Playwright runtime（tools/playwright-runtime）と `zap-browser-record.js`（ブラウザ記録）
-- `Services/ZapBrowserRecordingService`（HAR・trace・履歴の対応づけ）
+- [07](07-exploration-browser.md) の TypeScript PlaywrightAdapter と独立 BrowserContext を使う。
+- HAR、trace、画面操作、ZAP履歴を run ID と request ID で対応付ける。
 
 ## 3. コンポーネント構成
 
 ```text
-DomInstrumentation（新規・BrowserAdapter配下）:
+DomInstrumentation（BrowserAdapter配下）:
   注入: 記録ブラウザの各ページへ計測スクリプトを注入（init script）。
     監視対象: location/hash/documentURI/document.cookie/referrer 等の入力源、
     innerHTML/outerHTML/insertAdjacentHTML/eval/Function/setTimeout(文字列)/
@@ -32,14 +32,14 @@ DomReportJob: 記録したフローを診断観測（区分=DOM調査・実影�
 
 ## 4. データモデル
 
-- `DomFlow`: ページURL・source種別・値の断片（秘密値マスク）・sink種別・要素セレクタ・
+- `DomFlow`: ページURL・source種別・値の keyed fingerprint・sink種別・要素セレクタ・
   スタック要約・スクリーンショット参照。
 - 証跡: 記録セッションのHAR・trace・スクリーンショット（runs/ 内）。
 
 ## 5. 安全制御と証跡
 
-- 計測は対象ページ内のみ（拡張機能の一般インストールはしない）。取得した DOM 値には
-  個人情報・トークンが入りうるため保存時マスクと確認表示。
+- 計測は対象ページ内のみ（拡張機能の一般インストールはしない）。DOM値は一致判定に必要な
+  最短時間だけ保持し、証拠には既定で値そのものではなく keyed fingerprint と型・長さを残す。
 - 証拠（スクリーンショット・DOM断片）の共有エクスポートはマスク済み派生物のみ（6.3）。
 
 ## 6. UI
