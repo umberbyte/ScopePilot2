@@ -12,6 +12,7 @@ import {
 } from '@scopepilot2/core';
 import type {
   EngineCapabilitySnapshot,
+  OperatorPermission,
   OperatorProfile,
   PageObservation,
   OperationClass,
@@ -107,17 +108,18 @@ export interface BootstrapOptions {
   readonly allowedOperationClasses?: readonly OperationClass[];
   readonly validFrom?: string;
   readonly validUntil?: string;
+  readonly operatorPermissions?: readonly OperatorPermission[];
 }
 
-export interface BootstrappedFlow {
+export interface TestFlow {
   readonly service: BaselineFlowService;
   readonly explorer: FakeExplorer;
   readonly scanEngine: FakeScanEngine;
   readonly operator: OperatorProfile;
 }
 
-/** 案件作成と認可付与まで済ませた flow を組み立てる。 */
-export async function bootstrapFlow(options: BootstrapOptions = {}): Promise<BootstrappedFlow> {
+/** 案件作成前の状態から使える service を組み立てる。 */
+export function createTestService(options: Pick<BootstrapOptions, 'operatorPermissions'> = {}): TestFlow {
   const explorer = new FakeExplorer();
   const scanEngine = new FakeScanEngine();
   const service = new BaselineFlowService({
@@ -129,7 +131,17 @@ export async function bootstrapFlow(options: BootstrapOptions = {}): Promise<Boo
     capabilities: testCapabilities(),
     runtimeBundleHash: 'test-runtime-bundle',
   });
-  const operator = TEST_OPERATOR;
+  const operator: OperatorProfile = {
+    ...TEST_OPERATOR,
+    ...(options.operatorPermissions === undefined ? {} : { permissions: options.operatorPermissions }),
+  };
+  return { service, explorer, scanEngine, operator };
+}
+
+/** 案件作成と認可付与まで済ませた flow を組み立てる。 */
+export async function bootstrapFlow(options: BootstrapOptions = {}): Promise<TestFlow> {
+  const flow = createTestService(options);
+  const { service, operator } = flow;
   service.createCase(operator, {
     name: 'unit test case',
     allowedOrigins: options.allowedOrigins ?? ['http://fixture.target.test'],
@@ -143,7 +155,7 @@ export async function bootstrapFlow(options: BootstrapOptions = {}): Promise<Boo
     validUntil: options.validUntil ?? '2026-10-19T00:00:00.000Z',
     evidence: { label: '認可(unit test)', content: 'unit test authorization evidence' },
   });
-  return { service, explorer, scanEngine, operator };
+  return flow;
 }
 
 export const DEFAULT_PLAN_LIMITS_FOR_TEST: PlanLimits = {

@@ -4,6 +4,8 @@ import type { StopReason } from '../common/runtime.ts';
 
 export type BaselineFlowEvent =
   | { readonly type: 'CaseCreated'; readonly at: string; readonly caseId: string; readonly revision: number }
+  | { readonly type: 'CaseScopeUpdated'; readonly at: string; readonly caseId: string; readonly revision: number; readonly narrowed: boolean }
+  | { readonly type: 'ConfirmationsInvalidated'; readonly at: string; readonly caseId: string; readonly confirmationIds: readonly string[]; readonly reason: string }
   | { readonly type: 'AuthorizationGranted'; readonly at: string; readonly authorizationId: string; readonly caseId: string }
   | { readonly type: 'PlanValidated'; readonly at: string; readonly planHash: string }
   | { readonly type: 'PlanAuthorized'; readonly at: string; readonly planHash: string; readonly authorizationId: string }

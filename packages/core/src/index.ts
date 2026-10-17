@@ -1,4 +1,5 @@
 export * from './domain/scope-policy.ts';
+export * from './domain/case-aggregate.ts';
 export * from './domain/plan-service.ts';
 export * from './domain/finding-importer.ts';
 export * from './domain/report-builder.ts';

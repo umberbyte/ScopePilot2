@@ -32,6 +32,7 @@ import {
   type ActiveScanRequest,
 } from '@scopepilot2/contracts';
 import { ScopePolicy } from '../domain/scope-policy.ts';
+import { CaseAggregate } from '../domain/case-aggregate.ts';
 import {
   buildPlan,
   confirmationMatches,
@@ -95,7 +96,7 @@ export interface ActiveScanRunResult {
 const MAX_POLL_ITERATIONS = 1000;
 
 export class BaselineFlowService {
-  private caseRecord: CaseRecord | null = null;
+  private aggregate: CaseAggregate | null = null;
   private authorization: AuthorizationRecord | null = null;
   private readonly eventsLog: BaselineFlowEvent[] = [];
   private readonly importer = new FindingImporter();
@@ -118,10 +119,10 @@ export class BaselineFlowService {
   }
 
   currentCase(): CaseRecord {
-    if (this.caseRecord === null) {
+    if (this.aggregate === null) {
       throw domainError('ValidationFailed', 'case has not been created yet');
     }
-    return this.caseRecord;
+    return this.aggregate.record;
   }
 
   currentAuthorization(): AuthorizationRecord {
@@ -143,15 +144,57 @@ export class BaselineFlowService {
     if (allowed.length === 0) {
       throw domainError('ValidationFailed', 'case must have at least one allowed origin');
     }
-    this.caseRecord = {
+    this.aggregate = CaseAggregate.open({
       caseId: this.deps.ids.next('case'),
       name: input.name,
       revision: 1,
       scope: { allowedOrigins: [...new Set(allowed)], deniedOrigins: [...new Set(denied)], limits: input.limits },
       createdAt: this.deps.clock.now().toISOString(),
-    };
-    this.record({ type: 'CaseCreated', at: this.deps.clock.now().toISOString(), caseId: this.caseRecord.caseId, revision: this.caseRecord.revision });
-    return this.caseRecord;
+    });
+    this.record({ type: 'CaseCreated', at: this.deps.clock.now().toISOString(), caseId: this.aggregate.record.caseId, revision: 1 });
+    return this.aggregate.record;
+  }
+
+  /**
+   * scope 更新。expectedRevision 必須 (f01 §4)。狭くなる更新は既存 confirmation を無効化し、
+   * 無効化 event を監査記録へ残す。進行中 job への停止要求は run 管理の実装時に接続する。
+   */
+  updateCaseScope(
+    operator: OperatorProfile,
+    input: {
+      expectedRevision: number;
+      allowedOrigins: readonly string[];
+      deniedOrigins: readonly string[];
+      limits: ScopeLimits;
+    },
+  ): { revision: number; narrowed: boolean; invalidatedConfirmationIds: readonly string[] } {
+    this.requirePermission(operator, 'case.manage');
+    const aggregate = this.aggregate;
+    if (aggregate === null) {
+      throw domainError('ValidationFailed', 'case has not been created yet');
+    }
+    const allowed = input.allowedOrigins.map((origin) => this.canonicalOriginOrThrow(origin));
+    const denied = input.deniedOrigins.map((origin) => this.canonicalOriginOrThrow(origin));
+    if (allowed.length === 0) {
+      throw domainError('ValidationFailed', 'case must have at least one allowed origin');
+    }
+    this.requirePositiveLimits(input.limits, 'case');
+    const outcome = aggregate.updateScope({
+      expectedRevision: input.expectedRevision,
+      scope: { allowedOrigins: [...new Set(allowed)], deniedOrigins: [...new Set(denied)], limits: input.limits },
+    });
+    const at = this.deps.clock.now().toISOString();
+    this.record({ type: 'CaseScopeUpdated', at, caseId: outcome.record.caseId, revision: outcome.revision, narrowed: outcome.narrowed });
+    if (outcome.invalidatedConfirmationIds.length > 0) {
+      this.record({
+        type: 'ConfirmationsInvalidated',
+        at,
+        caseId: outcome.record.caseId,
+        confirmationIds: [...outcome.invalidatedConfirmationIds],
+        reason: 'case scope narrowed',
+      });
+    }
+    return outcome;
   }
 
   /** 認可の付与。証跡原本は hash 参照のみ持ち、秘密値は保持しない。 */
@@ -277,9 +320,10 @@ export class BaselineFlowService {
     return { planHash };
   }
 
-  /** 計画確認。確認内容の写しと hash の両方を残す。 */
+  /** 計画確認。確認内容の写しと hash の両方を残し、案件 aggregate へ登録する。 */
   confirmPlan(plan: ExecutionPlan, operator: OperatorProfile): PlanConfirmation {
     this.requirePermission(operator, 'run.manage');
+    const aggregate = this.currentAggregate();
     const confirmation: PlanConfirmation = {
       confirmationId: this.deps.ids.next('confirm'),
       planHash: planHashOf(plan),
@@ -287,6 +331,7 @@ export class BaselineFlowService {
       confirmedAt: this.deps.clock.now().toISOString(),
       confirmedView: plan.steps.map((step) => ({ kind: step.kind, targets: step.targetSnapshot, limits: step.limits })),
     };
+    aggregate.registerConfirmation({ confirmationId: confirmation.confirmationId, planHash: confirmation.planHash });
     this.record({
       type: 'PlanConfirmed',
       at: this.deps.clock.now().toISOString(),
@@ -558,9 +603,20 @@ export class BaselineFlowService {
   }
 
   private requireMatchingConfirmation(plan: ExecutionPlan, confirmation: PlanConfirmation): void {
+    const aggregate = this.currentAggregate();
+    if (aggregate.isConfirmationInvalidated(confirmation.confirmationId)) {
+      throw domainError('ConfirmationRequired', `plan confirmation was invalidated: ${aggregate.invalidationReason(confirmation.confirmationId) ?? 'unknown reason'}`);
+    }
     if (!confirmationMatches(plan, confirmation)) {
       throw domainError('ConfirmationRequired', 'plan confirmation does not match the current plan');
     }
+  }
+
+  private currentAggregate(): CaseAggregate {
+    if (this.aggregate === null) {
+      throw domainError('ValidationFailed', 'case has not been created yet');
+    }
+    return this.aggregate;
   }
 
   private canonicalOriginOrThrow(origin: string): string {
