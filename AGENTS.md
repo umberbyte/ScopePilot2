@@ -1,5 +1,36 @@
 # ScopePilot 開発方針
 
+本リポジトリ (ScopePilot2) は、`docs/burp-professional-replacement-spec.md`（以下「仕様書」）に基づく Burp Suite Professional 代替の新規実装である。概要設計は `docs/design/**`。旧版 (ScopePilot・C#/WPF) の実装は本リポジトリから削除済みで、本方針に沿って TypeScript で作り直す。
+
+
+
+## プロジェクトのゴール
+
+- 予算的制約、スキル的制約を排除し、誰でもBurpSuite Professionalをプロが扱い、脆弱性診断を行ったものと同じ結果が得られることを目的とする。
+- ZAP及び他のツールのラッパーとして、「検証したいこと」を選ぶと「結果」が返ってくるインタフェースとする。ただし、何の目的でどのようなHTTPリクエストを発信したかはログ等で確認ができる。
+- ユーザーに足りない能力は、生成AI(zcode, claude, codex)が補う
+- 開発完了後、DVWAを用いてテストを行う。
+
+## 実装方針（言語・フレームワーク）
+
+- フロントからバックエンドまで **TypeScript に統一**する。記述言語を 1 つに保ち、既に複雑な構成（外部エンジンの併用）の明快さを優先する。
+- 構成:
+  - UI は Web 技術 (TypeScript)。デスクトップシェルは Electron（main/renderer が同一の JS ランタイムで動く単一ランタイム構成）。対応 OS は Windows / macOS。
+  - コアは TypeScript (Node)。案件・認可・計画・実行制御・証跡・アダプターを置くヘッドレス層とし、CLI (仕様書 F21) と UI の双方から使う。
+  - ブラウザ操作は Playwright を TypeScript から直接呼ぶ（別言語の子プロセスにしない）。
+  - ZAP (Java)・Nuclei (Go) は HTTP API / CLI 越しに起動する**外部バイナリ**として扱う。ソースを本リポジトリに持たないため、使用言語には数えない。
+  - 保存は SQLite ＋ファイル原本（`docs/design/20-storage-evidence.md`）。大量通信の一覧 (仕様書 6.5) は Web の仮想化で表示する。
+- **UI とコアはローカル API 契約で分離する**。契約（OpenAPI / JSON Schema。`docs/design/18`・`19`）を介してのみ結合し、UI をコア無改修で差し替えられる状態・将来のコア言語移行を契約の内側で段階的に行える状態を保つ。コアとフロントで型定義を共有する。
+- 外部エンジン（ZAP・Nuclei）の内部挙動は制御せず、我々の権限外（版更新で変化しうる）として扱う。ScopePilot が握るのは入力パラメータ・scope・起動と停止であり、エンジンが実際に何をしたかは与えた入力と観測可能な出力から**推測**して記録する。個々の送信を傍受・拒否してエンジンを制御しようとしない（そうするとエンジン連携の利点を失い、更新で壊れる）。安全保証は経路別に線引きし、ScopePilot 自身が発する通信だけ送信前拒否を保証する。外部エンジン由来の通信は入力 scope・事後検知・停止・版ごとの実測・開示で扱い、これらを満たせない機能は公開しない（詳細は `docs/design/22-execution-control.md`）。
+- 技術的負債の主因は npm / ビルドツールの陳腐化である。依存は最小限にし、標準・プラットフォーム API を優先し、版は更新管理 (`docs/design/21`) の規律で固定する。
+- `docs/design/**` の概要設計は旧 C# 資産の再利用を前提に書かれた箇所がある。**再利用対象・クラス名・層割りの記述は本「実装方針」が優先**し、設計文書からは安全制御・データモデル・アダプター境界・証跡の**意図**を踏襲する（設計文書は追って TypeScript 前提へ改訂する）。
+- 移植で最も大きいリスクは、ZAP 連携に蓄積した運用知識（Safe/standard モード境界、`URL Does not Exist` の回避、計画 hash 検証、取込時の重複除外）を落とすこと。シミュレーションハーネス（旧 `docs/SIMULATION-GUIDE.md` 相当）を TypeScript で先に用意し、「探索→能動診断→所見」の自動完走を回帰テストの基準にしてから本体を書く。
+
+## 旧版の参照
+
+- 旧版 ScopePilot (C#/WPF) の実装・資産を参照する必要がある場合は、別リポジトリ **ScopePilot**（既定の所在: `C:\Users\GoSugawara\src\ScopePilot`）を見る。本リポジトリには複製しない。
+- `docs/` 配下に残る旧版由来の文書（`PROJECTS-AND-HANDOFF.md`・`SIMULATION-GUIDE.md`・`UI-DESIGN.md`・`JAPANESE-MARKDOWN-REPORT.md`・`MARKDOWN-WORD-REPORT.md`・`ZAP-RESEND-WORKBENCH-PROPOSAL.md`・`detection-improvement-policy.md`・`required-service-spec.md`）は、旧版の実装詳細を含む参考資料である。ScopePilot2 で権威を持つのは仕様書・`docs/design/**`・`docs/work-logs/**`・本 AGENTS.md であり、矛盾する場合はこちらを優先する。
+
 ## ベンチマークについて
 
 - このプロジェクトでは、DVWAなどの脆弱なアプリケーションを使った脆弱性検出率のベンチマークを、既定では求めない。明示的な依頼がある場合は実施してよい。
