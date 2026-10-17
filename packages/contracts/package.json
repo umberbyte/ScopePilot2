@@ -1,0 +1,8 @@
+{
+  "name": "@scopepilot2/contracts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

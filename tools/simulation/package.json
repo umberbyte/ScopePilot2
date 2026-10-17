@@ -1,0 +1,16 @@
+{
+  "name": "@scopepilot2/simulation",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/unit/**/*.test.ts\"",
+    "test:fixture": "node --test \"test/fixture/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@scopepilot2/contracts": "*",
+    "@scopepilot2/core": "*"
+  }
+}
