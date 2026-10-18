@@ -59,6 +59,8 @@ export interface BaselineFlowDeps {
   readonly scanEngine: ActiveScanEnginePort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   readonly runtimeBundleHash: string;
+  /** run 記録の永続化 (任意)。開始時 (Running) と終了時の両方へ保存する。 */
+  readonly runSink?: import('../ports/infra.ts').RunSinkPort;
 }
 
 export interface CreateCaseInput {
@@ -400,6 +402,7 @@ export class BaselineFlowService {
     this.record({ type: 'RunStarted', at: this.deps.clock.now().toISOString(), runId, planHash });
     const machine = new RunStateMachine('Confirmed');
     machine.transition('Running');
+    this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Running', attempt: 1 });
 
     const observations: PageObservation[] = [];
     const deniedUrls: { url: string; reason: string }[] = [];
@@ -471,6 +474,7 @@ export class BaselineFlowService {
       attempt: 1,
       stopReason,
     };
+    this.deps.runSink?.save(runRecord);
     this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason });
     const candidates = observations.flatMap((observation) => candidatesFromObservation(observation, this.deps.ids));
     return { runRecord, planHash, observations, deniedUrls, candidates, engineVersion: this.deps.explorer.engineVersion };
@@ -529,6 +533,7 @@ export class BaselineFlowService {
     this.record({ type: 'RunStarted', at: this.deps.clock.now().toISOString(), runId, planHash });
     const machine = new RunStateMachine('Confirmed');
     machine.transition('Running');
+    this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Running', attempt: 1 });
 
     // Delegated 経路は最大 overshoot 分を共有上限の内側に予約する。
     const reservedRequests = Math.ceil(step.limits.maxRequests * snapshot.maxOvershootRatio);
@@ -550,6 +555,7 @@ export class BaselineFlowService {
     if (monitored.status === 'failed') {
       this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'engine-failure' });
       machine.transition('Failed');
+      this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Failed', attempt: 1, stopReason: 'engine-failure' });
       throw domainError('EngineFailure', monitored.failureReason ?? 'scan engine failed', {
         details: { engineRunId, engineVersion: this.deps.scanEngine.engineVersion },
       });
@@ -565,6 +571,7 @@ export class BaselineFlowService {
     } catch (cause) {
       this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'engine-failure' });
       machine.transition('Failed');
+      this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Failed', attempt: 1, stopReason: 'engine-failure' });
       throw domainError('EngineFailure', `evidence storage failed before findings import: ${String(cause)}`, {
         retryable: true,
         details: { engineRunId },
@@ -590,6 +597,7 @@ export class BaselineFlowService {
       attempt: 1,
       stopReason: 'completed',
     };
+    this.deps.runSink?.save(runRecord);
     this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'completed' });
     this.record({
       type: 'FindingsImported',

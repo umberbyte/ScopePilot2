@@ -28,10 +28,15 @@ const HTTP_STATUS_BY_CODE: Record<DomainErrorCode, number> = {
 export interface CoreApiServerOptions {
   readonly service: BaselineFlowService;
   readonly operator: OperatorProfile;
+  /** run 記録の照会・Interrupted 検出 (design/22 §6)。任意。 */
+  readonly runRepository?: {
+    listInterruptedCandidates(): readonly import('@scopepilot2/contracts').RunRecord[];
+    markInterrupted(): readonly import('@scopepilot2/contracts').RunRecord[];
+  };
 }
 
 export function createCoreApiServer(options: CoreApiServerOptions): Server {
-  const { service, operator } = options;
+  const { service, operator, runRepository } = options;
 
   const server = createServer((request, response) => {
     void handle(request, response).catch((cause: unknown) => {
@@ -226,6 +231,14 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       } catch (cause) {
         return respondDomainError(response, cause);
       }
+    }
+    if (route === 'GET /api/runs/interrupted') {
+      if (runRepository === undefined) {
+        return respondError(response, 501, 'Unsupported', 'run persistence is not configured for this server', false);
+      }
+      // design/22 §6: 実行中のまま残った run を Interrupted へ。自動再開は行わない。
+      const interrupted = runRepository.markInterrupted();
+      return respondJson(response, 200, { interrupted });
     }
     if (route === 'GET /api/events') {
       const accept = request.headers.accept ?? '';

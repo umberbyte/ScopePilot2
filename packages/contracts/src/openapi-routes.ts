@@ -17,5 +17,6 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'POST', path: '/api/import/nuclei', operationId: 'importNucleiResults' },
   { method: 'POST', path: '/api/report', operationId: 'generateReport' },
   { method: 'GET', path: '/api/capabilities', operationId: 'listCapabilities' },
+  { method: 'GET', path: '/api/runs/interrupted', operationId: 'listInterruptedRuns' },
   { method: 'GET', path: '/api/events', operationId: 'listEvents' },
 ];

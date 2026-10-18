@@ -9,11 +9,25 @@ describe('Core API server (node:http)', () => {
   let service: BaselineFlowServiceType;
   let server: ReturnType<typeof createCoreApiServer>;
   let baseUrl: string;
+  // 手書き fake: Running 候補を 1 件持つ run repository (design/22 §6 の意味論)。
+  const fakeRunRepository = {
+    candidates: [
+      { runId: 'run-orphan', planId: 'plan-1', caseId: 'case-0001', state: 'Running' as const, attempt: 1 },
+    ],
+    listInterruptedCandidates() {
+      return [...this.candidates];
+    },
+    markInterrupted() {
+      const marked = this.candidates.map((candidate) => ({ ...candidate, state: 'Interrupted' as const, stopReason: 'interrupted' as const }));
+      this.candidates = [];
+      return marked;
+    },
+  };
 
   before(async () => {
     const flow = createTestService();
     service = flow.service;
-    server = createCoreApiServer({ service, operator: TEST_OPERATOR });
+    server = createCoreApiServer({ service, operator: TEST_OPERATOR, runRepository: fakeRunRepository });
     await new Promise<void>((resolve) => {
       server.listen(0, '127.0.0.1', () => {
         resolve();
@@ -495,6 +509,20 @@ describe('Core API server (node:http)', () => {
     assert.equal(resumedBlocks.length, 1);
     assert.match(resumedBlocks[0] ?? '', new RegExp(`^id: ${total}
 `));
+  });
+
+  test('GET /api/runs/interrupted は実行中残置 run を Interrupted 化し、再実行は空を返す', async () => {
+    const first = await fetch(`${baseUrl}/api/runs/interrupted`);
+    assert.equal(first.status, 200);
+    const body = (await first.json()) as { interrupted: readonly { runId: string; state: string; stopReason: string }[] };
+    assert.equal(body.interrupted.length, 1);
+    assert.equal(body.interrupted[0]?.runId, 'run-orphan');
+    assert.equal(body.interrupted[0]?.state, 'Interrupted');
+    assert.equal(body.interrupted[0]?.stopReason, 'interrupted');
+
+    const second = await fetch(`${baseUrl}/api/runs/interrupted`);
+    const empty = (await second.json()) as { interrupted: readonly unknown[] };
+    assert.equal(empty.interrupted.length, 0, '自動再開せず、2 回目は空');
   });
 
   test('GET /api/events?since=N は cursor 以降の監査 event を NDJSON で返す', async () => {

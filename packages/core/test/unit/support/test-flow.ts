@@ -139,7 +139,11 @@ export interface TestFlow {
 }
 
 /** 案件作成前の状態から使える service を組み立てる。 */
-export function createTestService(options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion'> = {}): TestFlow {
+export function createTestService(
+  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion'> & {
+    runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
+  } = {},
+): TestFlow {
   const explorer = new FakeExplorer();
   const scanEngine = new FakeScanEngine();
   const service = new BaselineFlowService({
@@ -150,6 +154,7 @@ export function createTestService(options: Pick<BootstrapOptions, 'operatorPermi
     scanEngine,
     capabilities: testCapabilities(options.zapCapabilityVersion),
     runtimeBundleHash: 'test-runtime-bundle',
+    ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
   });
   const operator: OperatorProfile = {
     ...TEST_OPERATOR,

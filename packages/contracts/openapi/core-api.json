@@ -384,6 +384,38 @@
           }
         }
       }
+    },
+    "/api/runs/interrupted": {
+      "get": {
+        "operationId": "listInterruptedRuns",
+        "summary": "実行中のまま残った run を Interrupted へ変更し一覧を返す (自動再開しない)",
+        "responses": {
+          "200": {
+            "description": "interrupted runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "interrupted"
+                  ],
+                  "properties": {
+                    "interrupted": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RunRecord"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -711,14 +743,29 @@
         }
       },
       "PlanStepKind": {
-        "enum": ["explore", "active-scan", "nuclei-scan", "report"]
+        "enum": [
+          "explore",
+          "active-scan",
+          "nuclei-scan",
+          "report"
+        ]
       },
       "EngineKind": {
-        "enum": ["node-http", "playwright", "zap", "nuclei", "oast"]
+        "enum": [
+          "node-http",
+          "playwright",
+          "zap",
+          "nuclei",
+          "oast"
+        ]
       },
       "GuaranteeLevel": {
         "description": "Delegated は送信前拒否を保証しない (design/22 §3)。",
-        "enum": ["Enforced", "Delegated", "Unsupported"]
+        "enum": [
+          "Enforced",
+          "Delegated",
+          "Unsupported"
+        ]
       },
       "PlanLimits": {
         "type": "object",
@@ -1069,7 +1116,13 @@
         }
       },
       "FormClassification": {
-        "enum": ["search", "login", "data-write", "filter", "unknown"]
+        "enum": [
+          "search",
+          "login",
+          "data-write",
+          "filter",
+          "unknown"
+        ]
       },
       "FormFieldDescriptor": {
         "type": "object",
@@ -1139,7 +1192,10 @@
             "type": "string"
           },
           "discoveredFrom": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "発見元 URL。seed の場合は null。"
           },
           "depth": {
@@ -1147,7 +1203,10 @@
             "minimum": 0
           },
           "originType": {
-            "enum": ["crawl", "document-hint"]
+            "enum": [
+              "crawl",
+              "document-hint"
+            ]
           },
           "links": {
             "type": "array",
@@ -1164,7 +1223,11 @@
         }
       },
       "CandidateCategory": {
-        "enum": ["page", "form", "api-endpoint"]
+        "enum": [
+          "page",
+          "form",
+          "api-endpoint"
+        ]
       },
       "ScanCandidate": {
         "type": "object",
@@ -1295,7 +1358,11 @@
         }
       },
       "ScanAttackStrength": {
-        "enum": ["Low", "Medium", "High"]
+        "enum": [
+          "Low",
+          "Medium",
+          "High"
+        ]
       },
       "ActiveScanRequest": {
         "type": "object",
@@ -1358,10 +1425,21 @@
         }
       },
       "FindingSeverity": {
-        "enum": ["info", "low", "medium", "high", "unknown"]
+        "enum": [
+          "info",
+          "low",
+          "medium",
+          "high",
+          "unknown"
+        ]
       },
       "FindingStatus": {
-        "enum": ["candidate", "confirmed", "rejected", "merged"]
+        "enum": [
+          "candidate",
+          "confirmed",
+          "rejected",
+          "merged"
+        ]
       },
       "Finding": {
         "type": "object",
@@ -1571,7 +1649,12 @@
         }
       },
       "ControlAspect": {
-        "enum": ["preSendScopeEnforcement", "stopControl", "budgetLease", "rateLimit"]
+        "enum": [
+          "preSendScopeEnforcement",
+          "stopControl",
+          "budgetLease",
+          "rateLimit"
+        ]
       },
       "EngineCapabilitySnapshot": {
         "type": "object",
@@ -1592,7 +1675,10 @@
             "type": "string"
           },
           "source": {
-            "enum": ["fixture", "measured"]
+            "enum": [
+              "fixture",
+              "measured"
+            ]
           },
           "guaranteeLevels": {
             "type": "object",
@@ -1658,151 +1744,377 @@
           }
         },
         "oneOf": [
-          { "$ref": "#/components/schemas/CaseCreatedEvent" },
-          { "$ref": "#/components/schemas/CaseScopeUpdatedEvent" },
-          { "$ref": "#/components/schemas/ConfirmationsInvalidatedEvent" },
-          { "$ref": "#/components/schemas/AuthorizationGrantedEvent" },
-          { "$ref": "#/components/schemas/PlanValidatedEvent" },
-          { "$ref": "#/components/schemas/PlanAuthorizedEvent" },
-          { "$ref": "#/components/schemas/PlanConfirmedEvent" },
-          { "$ref": "#/components/schemas/RunStartedEvent" },
-          { "$ref": "#/components/schemas/RunCompletedEvent" },
-          { "$ref": "#/components/schemas/EgressDeniedEvent" },
-          { "$ref": "#/components/schemas/CandidatesAdoptedEvent" },
-          { "$ref": "#/components/schemas/FindingsImportedEvent" },
-          { "$ref": "#/components/schemas/ReportGeneratedEvent" }
+          {
+            "$ref": "#/components/schemas/CaseCreatedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/CaseScopeUpdatedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ConfirmationsInvalidatedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuthorizationGrantedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/PlanValidatedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/PlanAuthorizedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/PlanConfirmedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/RunStartedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/RunCompletedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/EgressDeniedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/CandidatesAdoptedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/FindingsImportedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ReportGeneratedEvent"
+          }
         ]
       },
       "CaseCreatedEvent": {
         "type": "object",
-        "required": ["type", "at", "caseId", "revision"],
+        "required": [
+          "type",
+          "at",
+          "caseId",
+          "revision"
+        ],
         "properties": {
-          "type": { "const": "CaseCreated" },
-          "at": { "type": "string", "format": "date-time" },
-          "caseId": { "type": "string" },
-          "revision": { "type": "integer", "minimum": 1 }
+          "type": {
+            "const": "CaseCreated"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "caseId": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       },
       "CaseScopeUpdatedEvent": {
         "type": "object",
-        "required": ["type", "at", "caseId", "revision", "narrowed"],
+        "required": [
+          "type",
+          "at",
+          "caseId",
+          "revision",
+          "narrowed"
+        ],
         "properties": {
-          "type": { "const": "CaseScopeUpdated" },
-          "at": { "type": "string", "format": "date-time" },
-          "caseId": { "type": "string" },
-          "revision": { "type": "integer", "minimum": 1 },
-          "narrowed": { "type": "boolean" }
+          "type": {
+            "const": "CaseScopeUpdated"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "caseId": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "narrowed": {
+            "type": "boolean"
+          }
         }
       },
       "ConfirmationsInvalidatedEvent": {
         "type": "object",
-        "required": ["type", "at", "caseId", "confirmationIds", "reason"],
+        "required": [
+          "type",
+          "at",
+          "caseId",
+          "confirmationIds",
+          "reason"
+        ],
         "properties": {
-          "type": { "const": "ConfirmationsInvalidated" },
-          "at": { "type": "string", "format": "date-time" },
-          "caseId": { "type": "string" },
-          "confirmationIds": { "type": "array", "items": { "type": "string" } },
-          "reason": { "type": "string" }
+          "type": {
+            "const": "ConfirmationsInvalidated"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "caseId": {
+            "type": "string"
+          },
+          "confirmationIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          }
         }
       },
       "AuthorizationGrantedEvent": {
         "type": "object",
-        "required": ["type", "at", "authorizationId", "caseId"],
+        "required": [
+          "type",
+          "at",
+          "authorizationId",
+          "caseId"
+        ],
         "properties": {
-          "type": { "const": "AuthorizationGranted" },
-          "at": { "type": "string", "format": "date-time" },
-          "authorizationId": { "type": "string" },
-          "caseId": { "type": "string" }
+          "type": {
+            "const": "AuthorizationGranted"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authorizationId": {
+            "type": "string"
+          },
+          "caseId": {
+            "type": "string"
+          }
         }
       },
       "PlanValidatedEvent": {
         "type": "object",
-        "required": ["type", "at", "planHash"],
+        "required": [
+          "type",
+          "at",
+          "planHash"
+        ],
         "properties": {
-          "type": { "const": "PlanValidated" },
-          "at": { "type": "string", "format": "date-time" },
-          "planHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "type": {
+            "const": "PlanValidated"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "planHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
       },
       "PlanAuthorizedEvent": {
         "type": "object",
-        "required": ["type", "at", "planHash", "authorizationId"],
+        "required": [
+          "type",
+          "at",
+          "planHash",
+          "authorizationId"
+        ],
         "properties": {
-          "type": { "const": "PlanAuthorized" },
-          "at": { "type": "string", "format": "date-time" },
-          "planHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-          "authorizationId": { "type": "string" }
+          "type": {
+            "const": "PlanAuthorized"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "planHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "authorizationId": {
+            "type": "string"
+          }
         }
       },
       "PlanConfirmedEvent": {
         "type": "object",
-        "required": ["type", "at", "planHash", "confirmedBy"],
+        "required": [
+          "type",
+          "at",
+          "planHash",
+          "confirmedBy"
+        ],
         "properties": {
-          "type": { "const": "PlanConfirmed" },
-          "at": { "type": "string", "format": "date-time" },
-          "planHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-          "confirmedBy": { "type": "string" }
+          "type": {
+            "const": "PlanConfirmed"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "planHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "confirmedBy": {
+            "type": "string"
+          }
         }
       },
       "RunStartedEvent": {
         "type": "object",
-        "required": ["type", "at", "runId", "planHash"],
+        "required": [
+          "type",
+          "at",
+          "runId",
+          "planHash"
+        ],
         "properties": {
-          "type": { "const": "RunStarted" },
-          "at": { "type": "string", "format": "date-time" },
-          "runId": { "type": "string" },
-          "planHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "type": {
+            "const": "RunStarted"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "planHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
       },
       "RunCompletedEvent": {
         "type": "object",
-        "required": ["type", "at", "runId", "stopReason"],
+        "required": [
+          "type",
+          "at",
+          "runId",
+          "stopReason"
+        ],
         "properties": {
-          "type": { "const": "RunCompleted" },
-          "at": { "type": "string", "format": "date-time" },
-          "runId": { "type": "string" },
-          "stopReason": { "$ref": "#/components/schemas/StopReason" }
+          "type": {
+            "const": "RunCompleted"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "stopReason": {
+            "$ref": "#/components/schemas/StopReason"
+          }
         }
       },
       "EgressDeniedEvent": {
         "type": "object",
-        "required": ["type", "at", "url", "reason"],
+        "required": [
+          "type",
+          "at",
+          "url",
+          "reason"
+        ],
         "properties": {
-          "type": { "const": "EgressDenied" },
-          "at": { "type": "string", "format": "date-time" },
-          "url": { "type": "string" },
-          "reason": { "type": "string" }
+          "type": {
+            "const": "EgressDenied"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "url": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
         }
       },
       "CandidatesAdoptedEvent": {
         "type": "object",
-        "required": ["type", "at", "adoptedCount"],
+        "required": [
+          "type",
+          "at",
+          "adoptedCount"
+        ],
         "properties": {
-          "type": { "const": "CandidatesAdopted" },
-          "at": { "type": "string", "format": "date-time" },
-          "adoptedCount": { "type": "integer", "minimum": 0 }
+          "type": {
+            "const": "CandidatesAdopted"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "adoptedCount": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "FindingsImportedEvent": {
         "type": "object",
-        "required": ["type", "at", "source", "importedCount", "duplicateCount"],
+        "required": [
+          "type",
+          "at",
+          "source",
+          "importedCount",
+          "duplicateCount"
+        ],
         "properties": {
-          "type": { "const": "FindingsImported" },
-          "at": { "type": "string", "format": "date-time" },
-          "source": { "$ref": "#/components/schemas/FindingSourceKind" },
-          "engineVersion": { "type": "string" },
-          "importedCount": { "type": "integer", "minimum": 0 },
-          "duplicateCount": { "type": "integer", "minimum": 0 }
+          "type": {
+            "const": "FindingsImported"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FindingSourceKind"
+          },
+          "engineVersion": {
+            "type": "string"
+          },
+          "importedCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duplicateCount": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "ReportGeneratedEvent": {
         "type": "object",
-        "required": ["type", "at", "reportId", "modelHash"],
+        "required": [
+          "type",
+          "at",
+          "reportId",
+          "modelHash"
+        ],
         "properties": {
-          "type": { "const": "ReportGenerated" },
-          "at": { "type": "string", "format": "date-time" },
-          "reportId": { "type": "string" },
-          "modelHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "type": {
+            "const": "ReportGenerated"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reportId": {
+            "type": "string"
+          },
+          "modelHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
       }
     },

@@ -76,3 +76,8 @@ export class InMemoryEvidenceStore implements EvidenceStorePort {
     return [...this.records];
   }
 }
+
+/** run 記録の永続化 port (design/20 §2)。実行開始時 (Running) と終了時の両方を保存する。 */
+export interface RunSinkPort {
+  save(record: import('@scopepilot2/contracts').RunRecord): void;
+}
