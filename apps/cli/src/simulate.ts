@@ -58,8 +58,10 @@ export interface SimulateOutcome {
   readonly events: readonly BaselineFlowEvent[];
 }
 
+/** `apiUrl` 指定時は in-process server を立てず、指定の Core API へ接続する。 */
 export interface SimulateOptions {
   readonly injectUnknownScanTarget?: boolean;
+  readonly apiUrl?: string;
 }
 
 /** Core API の domain error (HTTP error body)。終了 code へは同じ DomainErrorCode 規約で写す。 */
@@ -86,6 +88,9 @@ const DOMAIN_ERROR_CODES: ReadonlySet<string> = new Set([
 ]);
 
 export async function runSimulate(options: SimulateOptions = {}): Promise<SimulateOutcome> {
+  if (options.apiUrl !== undefined) {
+    return runOnceOverApi(options.apiUrl.replace(/\/$/, ''), options);
+  }
   const harness = createHarness();
   const server = createCoreApiServer({ service: harness.service, operator: FIXTURE_OPERATOR });
   try {
@@ -95,36 +100,41 @@ export async function runSimulate(options: SimulateOptions = {}): Promise<Simula
       throw new Error('expected a TCP address for the core api server');
     }
     const baseUrl = `http://127.0.0.1:${address.port}`;
-    try {
-      return await runScenarioOverApi(baseUrl, options);
-    } catch (cause) {
-      if (!(cause instanceof CoreApiError)) {
-        throw cause;
-      }
-      const exitCode = exitCodeForDomainError(cause.code);
-      const summary: SimulateSummary = {
-        schemaVersion: 'scopepilot2.simulate.v1',
-        command: 'simulate',
-        status: 'failed',
-        exitCode,
-        caseId: '',
-        explorePlanHash: '',
-        scanPlanHash: '',
-        reportModelHash: '',
-        exploredCount: 0,
-        scannedCount: 0,
-        findingsCount: 0,
-        importedCount: 0,
-        duplicateCount: 0,
-        engineVersions: { explorer: '', zap: '', nuclei: '' },
-        capabilityFixtureHashes: {},
-        eventsCount: 0,
-        failure: { code: cause.code, message: cause.message },
-      };
-      return { exitCode, summary, events: [] };
-    }
+    return await runOnceOverApi(baseUrl, options);
   } finally {
     await closeServer(server);
+  }
+}
+
+/** 1 実行分: Core API の domain error を終了 code/summary へ写す。 */
+async function runOnceOverApi(baseUrl: string, options: SimulateOptions): Promise<SimulateOutcome> {
+  try {
+    return await runScenarioOverApi(baseUrl, options);
+  } catch (cause) {
+    if (!(cause instanceof CoreApiError)) {
+      throw cause;
+    }
+    const exitCode = exitCodeForDomainError(cause.code);
+    const summary: SimulateSummary = {
+      schemaVersion: 'scopepilot2.simulate.v1',
+      command: 'simulate',
+      status: 'failed',
+      exitCode,
+      caseId: '',
+      explorePlanHash: '',
+      scanPlanHash: '',
+      reportModelHash: '',
+      exploredCount: 0,
+      scannedCount: 0,
+      findingsCount: 0,
+      importedCount: 0,
+      duplicateCount: 0,
+      engineVersions: { explorer: '', zap: '', nuclei: '' },
+      capabilityFixtureHashes: {},
+      eventsCount: 0,
+      failure: { code: cause.code, message: cause.message },
+    };
+    return { exitCode, summary, events: [] };
   }
 }
 

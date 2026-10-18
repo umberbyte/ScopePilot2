@@ -31,9 +31,10 @@ export async function main(argv: readonly string[], writers?: OutputWriters): Pr
   }
 
   const output = new OutputFormatter({ json: parsed.json }, boundWriters);
-  const outcome = await runSimulate(
-    parsed.injectUnknownScanTarget ? { injectUnknownScanTarget: true } : {},
-  );
+  const outcome = await runSimulate({
+    ...(parsed.injectUnknownScanTarget ? { injectUnknownScanTarget: true } : {}),
+    ...(parsed.apiUrl === undefined ? {} : { apiUrl: parsed.apiUrl }),
+  });
   if (parsed.eventsFile === undefined) {
     for (const event of outcome.events) {
       output.progress(event);

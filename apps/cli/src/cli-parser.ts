@@ -9,6 +9,7 @@ export interface ParsedCli {
   readonly json: boolean;
   readonly injectUnknownScanTarget: boolean;
   readonly eventsFile?: string;
+  readonly apiUrl?: string;
 }
 
 export class UsageError extends Error {
@@ -33,6 +34,7 @@ export function parseCli(argv: readonly string[]): ParsedCli {
   let injectUnknownScanTarget = false;
   let eventsFile: string | undefined;
   let eventsFileSeen = false;
+  let apiUrl: string | undefined;
 
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
@@ -68,6 +70,22 @@ export function parseCli(argv: readonly string[]): ParsedCli {
       case '--inject-unknown-target':
         injectUnknownScanTarget = true;
         break;
+      case '--api': {
+        if (apiUrl !== undefined) {
+          throw new UsageError('conflicting option: --api specified multiple times');
+        }
+        const value = rest[index + 1];
+        if (value === undefined || value.startsWith('--')) {
+          throw new UsageError('option --api requires a base URL value (e.g. http://127.0.0.1:8787)');
+        }
+        const parsed = new URL(value);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          throw new UsageError('option --api requires an http(s) base URL');
+        }
+        apiUrl = value;
+        index += 1;
+        break;
+      }
       case '--events': {
         if (eventsFileSeen) {
           throw new UsageError('conflicting option: --events specified multiple times');
@@ -91,5 +109,6 @@ export function parseCli(argv: readonly string[]): ParsedCli {
     json: json ?? false,
     injectUnknownScanTarget,
     ...(eventsFile === undefined ? {} : { eventsFile }),
+    ...(apiUrl === undefined ? {} : { apiUrl }),
   };
 }

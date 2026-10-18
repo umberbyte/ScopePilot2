@@ -23,6 +23,17 @@ describe('CliParser', () => {
       return true;
     });
 
+    assert.throws(() => parseCli(['simulate', '--api']), (error: unknown) => {
+      assert.ok(error instanceof UsageError);
+      assert.match(error.message, /--api requires a base URL/);
+      return true;
+    });
+    assert.throws(() => parseCli(['simulate', '--api', 'ftp://x']), (error: unknown) => {
+      assert.ok(error instanceof UsageError);
+      assert.match(error.message, /http\(s\) base URL/);
+      return true;
+    });
+
     assert.throws(() => parseCli(['status']), (error: unknown) => {
       assert.ok(error instanceof UsageError);
       assert.match(error.message, /unknown command/);
@@ -36,5 +47,6 @@ describe('CliParser', () => {
     });
     assert.equal(parseCli(['simulate', '--json', '--events', 'events.ndjson']).json, true);
     assert.equal(parseCli(['simulate', '--events', 'events.ndjson']).eventsFile, 'events.ndjson');
+    assert.equal(parseCli(['simulate', '--api', 'http://127.0.0.1:8787']).apiUrl, 'http://127.0.0.1:8787');
   });
 });
