@@ -20,14 +20,17 @@ export function isTerminalRunState(state: RunState): state is TerminalRunState {
   return state === 'Completed' || state === 'Stopped' || state === 'Failed' || state === 'Interrupted';
 }
 
-export type StopReason =
-  | 'completed'
-  | 'user-request'
-  | 'budget-exhausted'
-  | 'scope-violation'
-  | 'authorization-expired'
-  | 'engine-failure'
-  | 'interrupted';
+export const StopReasons = [
+  'completed',
+  'user-request',
+  'budget-exhausted',
+  'scope-violation',
+  'authorization-expired',
+  'engine-failure',
+  'interrupted',
+] as const;
+
+export type StopReason = (typeof StopReasons)[number];
 
 export interface RunRecord {
   readonly runId: string;

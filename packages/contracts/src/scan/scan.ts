@@ -1,7 +1,9 @@
 /** 能動診断の engine 入出力。`docs/design/10-active-scan.md`、`docs/detailed-design/f11-active-scan.md`。 */
 import type { PlanLimits } from '../plan/plan.ts';
 
-export type ScanAttackStrength = 'Low' | 'Medium' | 'High';
+export const ScanAttackStrengths = ['Low', 'Medium', 'High'] as const;
+
+export type ScanAttackStrength = (typeof ScanAttackStrengths)[number];
 
 /** ScopePilot から外部 engine へ渡す入力 (Delegated)。個々の送信は傍受・拒否しない。 */
 export interface ActiveScanRequest {

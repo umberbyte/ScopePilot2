@@ -1,7 +1,9 @@
 /** 探索の観測と診断候補。`docs/design/07-exploration-browser.md`、`docs/detailed-design/f08-browser-exploration.md`。 */
 
 /** D-07 の 5 種 form 分類。 */
-export type FormClassification = 'search' | 'login' | 'data-write' | 'filter' | 'unknown';
+export const FormClassifications = ['search', 'login', 'data-write', 'filter', 'unknown'] as const;
+
+export type FormClassification = (typeof FormClassifications)[number];
 
 export interface FormFieldDescriptor {
   readonly name: string;
@@ -29,7 +31,9 @@ export interface PageObservation {
   readonly forms: readonly FormDescriptor[];
 }
 
-export type CandidateCategory = 'page' | 'form' | 'api-endpoint';
+export const CandidateCategories = ['page', 'form', 'api-endpoint'] as const;
+
+export type CandidateCategory = (typeof CandidateCategories)[number];
 
 /** 候補は観測事実から生成される。guidelineBasis は例えば `WSTG-INFO-06` の参照識別子。 */
 export interface ScanCandidate {

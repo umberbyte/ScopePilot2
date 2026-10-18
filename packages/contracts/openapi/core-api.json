@@ -3,7 +3,7 @@
   "info": {
     "title": "ScopePilot2 Core API",
     "version": "scopepilot2.api.v1",
-    "description": "UI と CLI が共有するローカル契約 (design/18, 19 §3)。loopback 専用。wildcard CORS は提供しない。"
+    "description": "UI と CLI が共有するローカル契約 (design/18, 19 §3)。loopback 専用。wildcard CORS は提供しない。schema は packages/contracts の型と 1:1 (enum 値は contracts の const 配列と契約 test で突合)。"
   },
   "servers": [
     {
@@ -26,12 +26,12 @@
     "/api/case": {
       "get": {
         "operationId": "getCurrentCase",
-        "summary": "現在の案件",
+        "summary": "現在の案件 (未作成の場合は 400 ValidationFailed)",
         "responses": {
           "200": {
             "$ref": "#/components/responses/Case"
           },
-          "404": {
+          "400": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -277,29 +277,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "plan"
-                ],
-                "properties": {
-                  "plan": {
-                    "type": "object"
-                  }
-                }
+                "$ref": "#/components/schemas/ConfirmPlanRequest"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "confirmation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Confirmation"
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -319,38 +304,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "plan",
-                  "confirmation",
-                  "maxDepth"
-                ],
-                "properties": {
-                  "plan": {
-                    "type": "object"
-                  },
-                  "confirmation": {
-                    "type": "object"
-                  },
-                  "maxDepth": {
-                    "type": "integer",
-                    "minimum": 1
-                  }
-                }
+                "$ref": "#/components/schemas/RunExplorationRequest"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "exploration result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
+            "$ref": "#/components/responses/ExploreRun"
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -373,40 +334,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "plan",
-                  "confirmation",
-                  "adopted"
-                ],
-                "properties": {
-                  "plan": {
-                    "type": "object"
-                  },
-                  "confirmation": {
-                    "type": "object"
-                  },
-                  "adopted": {
-                    "type": "array",
-                    "items": {
-                      "type": "object"
-                    }
-                  }
-                }
+                "$ref": "#/components/schemas/RunActiveScanRequest"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "scan result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
+            "$ref": "#/components/responses/ScanRun"
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -441,6 +376,24 @@
           }
         }
       },
+      "ApiErrorCode": {
+        "description": "DomainErrorCode (contracts) と、server が追加で返す transport error のみ。",
+        "enum": [
+          "ValidationFailed",
+          "PermissionDenied",
+          "OutOfScope",
+          "ConfirmationRequired",
+          "Conflict",
+          "CapabilityUnavailable",
+          "NeedsInput",
+          "Unsupported",
+          "EngineFailure",
+          "Cancelled",
+          "InternalError",
+          "NotFound",
+          "MethodNotAllowed"
+        ]
+      },
       "ErrorResponse": {
         "type": "object",
         "required": [
@@ -454,7 +407,7 @@
             "const": "scopepilot2.api.v1"
           },
           "code": {
-            "type": "string"
+            "$ref": "#/components/schemas/ApiErrorCode"
           },
           "message": {
             "type": "string"
@@ -463,6 +416,21 @@
             "type": "boolean"
           }
         }
+      },
+      "OperationClass": {
+        "enum": [
+          "Passive",
+          "Browse",
+          "FormSubmit",
+          "Upload",
+          "ActiveCrawl",
+          "ActiveScan",
+          "Fuzz",
+          "ApiSend",
+          "WebSocketSend",
+          "NucleiScan",
+          "CrossRoleTest"
+        ]
       },
       "ScopeLimits": {
         "type": "object",
@@ -611,6 +579,27 @@
           }
         }
       },
+      "EvidenceRef": {
+        "type": "object",
+        "description": "証拠の原本参照。秘密値そのものは保持しない。",
+        "required": [
+          "evidenceId",
+          "sha256",
+          "label"
+        ],
+        "properties": {
+          "evidenceId": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
       "GrantAuthorizationRequest": {
         "type": "object",
         "required": [
@@ -625,7 +614,7 @@
           "allowedOperationClasses": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/OperationClass"
             },
             "minItems": 1
           },
@@ -672,7 +661,7 @@
           "allowedOperationClasses": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/OperationClass"
             }
           },
           "targetRoles": {
@@ -690,7 +679,253 @@
             "format": "date-time"
           },
           "evidenceRef": {
-            "type": "object"
+            "$ref": "#/components/schemas/EvidenceRef"
+          }
+        }
+      },
+      "PlanStepKind": {
+        "enum": ["explore", "active-scan", "nuclei-scan", "report"]
+      },
+      "EngineKind": {
+        "enum": ["node-http", "playwright", "zap", "nuclei", "oast"]
+      },
+      "GuaranteeLevel": {
+        "description": "Delegated は送信前拒否を保証しない (design/22 §3)。",
+        "enum": ["Enforced", "Delegated", "Unsupported"]
+      },
+      "PlanLimits": {
+        "type": "object",
+        "required": [
+          "maxRequests",
+          "maxPages",
+          "maxDurationMinutes",
+          "maxConcurrency",
+          "requestsPerSecond"
+        ],
+        "properties": {
+          "maxRequests": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxPages": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxDurationMinutes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "requestsPerSecond": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      },
+      "PlanStep": {
+        "type": "object",
+        "required": [
+          "stepId",
+          "kind",
+          "operationClass",
+          "targetSnapshot",
+          "engineKind",
+          "guarantee",
+          "limits"
+        ],
+        "properties": {
+          "stepId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PlanStepKind"
+          },
+          "operationClass": {
+            "$ref": "#/components/schemas/OperationClass"
+          },
+          "targetSnapshot": {
+            "type": "array",
+            "description": "正規化済み URL の固定 snapshot。実行中に変化しない。",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "engineKind": {
+            "$ref": "#/components/schemas/EngineKind"
+          },
+          "guarantee": {
+            "$ref": "#/components/schemas/GuaranteeLevel"
+          },
+          "engineVersion": {
+            "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/PlanLimits"
+          }
+        }
+      },
+      "ExecutionPlan": {
+        "type": "object",
+        "required": [
+          "planId",
+          "caseId",
+          "authorizationId",
+          "operatorId",
+          "targetRole",
+          "steps",
+          "limits",
+          "runtimeBundleHash",
+          "inputEvidenceHash",
+          "createdAt"
+        ],
+        "properties": {
+          "planId": {
+            "type": "string"
+          },
+          "caseId": {
+            "type": "string"
+          },
+          "authorizationId": {
+            "type": "string"
+          },
+          "operatorId": {
+            "type": "string"
+          },
+          "targetRole": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            }
+          },
+          "limits": {
+            "$ref": "#/components/schemas/PlanLimits"
+          },
+          "runtimeBundleHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "inputEvidenceHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ConfirmedView": {
+        "type": "object",
+        "description": "操作者が確認した内容の写し。",
+        "required": [
+          "kind",
+          "targets",
+          "limits"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/PlanStepKind"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limits": {
+            "$ref": "#/components/schemas/PlanLimits"
+          }
+        }
+      },
+      "PlanConfirmation": {
+        "type": "object",
+        "required": [
+          "confirmationId",
+          "planHash",
+          "confirmedBy",
+          "confirmedAt",
+          "confirmedView"
+        ],
+        "properties": {
+          "confirmationId": {
+            "type": "string"
+          },
+          "planHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "confirmedBy": {
+            "type": "string"
+          },
+          "confirmedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "confirmedView": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedView"
+            }
+          }
+        }
+      },
+      "ConfirmPlanRequest": {
+        "type": "object",
+        "required": [
+          "plan"
+        ],
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/ExecutionPlan"
+          }
+        }
+      },
+      "RunExplorationRequest": {
+        "type": "object",
+        "required": [
+          "plan",
+          "confirmation",
+          "maxDepth"
+        ],
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/ExecutionPlan"
+          },
+          "confirmation": {
+            "$ref": "#/components/schemas/PlanConfirmation"
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "RunActiveScanRequest": {
+        "type": "object",
+        "required": [
+          "plan",
+          "confirmation",
+          "adopted"
+        ],
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/ExecutionPlan"
+          },
+          "confirmation": {
+            "$ref": "#/components/schemas/PlanConfirmation"
+          },
+          "adopted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScanCandidate"
+            }
           }
         }
       },
@@ -718,7 +953,7 @@
         ],
         "properties": {
           "plan": {
-            "type": "object"
+            "$ref": "#/components/schemas/ExecutionPlan"
           },
           "planHash": {
             "type": "string",
@@ -742,6 +977,210 @@
           }
         }
       },
+      "RunState": {
+        "enum": [
+          "Draft",
+          "Validated",
+          "Authorized",
+          "Confirmed",
+          "Running",
+          "Stopping",
+          "Completed",
+          "Stopped",
+          "Failed",
+          "Interrupted"
+        ]
+      },
+      "StopReason": {
+        "enum": [
+          "completed",
+          "user-request",
+          "budget-exhausted",
+          "scope-violation",
+          "authorization-expired",
+          "engine-failure",
+          "interrupted"
+        ]
+      },
+      "RunRecord": {
+        "type": "object",
+        "required": [
+          "runId",
+          "planId",
+          "caseId",
+          "state",
+          "attempt"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "planId": {
+            "type": "string"
+          },
+          "caseId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RunState"
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "stopReason": {
+            "$ref": "#/components/schemas/StopReason"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FormClassification": {
+        "enum": ["search", "login", "data-write", "filter", "unknown"]
+      },
+      "FormFieldDescriptor": {
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "FormDescriptor": {
+        "type": "object",
+        "required": [
+          "actionUrl",
+          "method",
+          "fields",
+          "classification"
+        ],
+        "properties": {
+          "actionUrl": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FormFieldDescriptor"
+            }
+          },
+          "classification": {
+            "$ref": "#/components/schemas/FormClassification"
+          }
+        }
+      },
+      "PageObservation": {
+        "type": "object",
+        "required": [
+          "url",
+          "status",
+          "contentType",
+          "discoveredFrom",
+          "depth",
+          "originType",
+          "links",
+          "forms"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "canonical URL"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "discoveredFrom": {
+            "type": ["string", "null"],
+            "description": "発見元 URL。seed の場合は null。"
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "originType": {
+            "enum": ["crawl", "document-hint"]
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "forms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FormDescriptor"
+            }
+          }
+        }
+      },
+      "CandidateCategory": {
+        "enum": ["page", "form", "api-endpoint"]
+      },
+      "ScanCandidate": {
+        "type": "object",
+        "description": "観測事実から生成される診断候補。guidelineBasis は WSTG-INFO-06 等の参照識別子。",
+        "required": [
+          "candidateId",
+          "url",
+          "method",
+          "category",
+          "guidelineBasis",
+          "confidence",
+          "observationUrl"
+        ],
+        "properties": {
+          "candidateId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "category": {
+            "$ref": "#/components/schemas/CandidateCategory"
+          },
+          "guidelineBasis": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "observationUrl": {
+            "type": "string",
+            "description": "provenance: この候補の根拠となった観測 URL。"
+          }
+        }
+      },
       "AdoptCandidatesRequest": {
         "type": "object",
         "required": [
@@ -751,7 +1190,7 @@
           "candidates": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/ScanCandidate"
             },
             "minItems": 1
           }
@@ -766,7 +1205,233 @@
           "adopted": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/ScanCandidate"
+            }
+          }
+        }
+      },
+      "DeniedUrl": {
+        "type": "object",
+        "description": "scope 外のため送信前拒否した URL。",
+        "required": [
+          "url",
+          "reason"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "ExploreRunResult": {
+        "type": "object",
+        "required": [
+          "runRecord",
+          "planHash",
+          "observations",
+          "deniedUrls",
+          "candidates",
+          "engineVersion"
+        ],
+        "properties": {
+          "runRecord": {
+            "$ref": "#/components/schemas/RunRecord"
+          },
+          "planHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "observations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PageObservation"
+            }
+          },
+          "deniedUrls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeniedUrl"
+            }
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScanCandidate"
+            }
+          },
+          "engineVersion": {
+            "type": "string"
+          }
+        }
+      },
+      "ScanAttackStrength": {
+        "enum": ["Low", "Medium", "High"]
+      },
+      "ActiveScanRequest": {
+        "type": "object",
+        "description": "ScopePilot から外部 engine へ渡す入力 (Delegated)。個々の送信は傍受・拒否しない。",
+        "required": [
+          "runId",
+          "targets",
+          "attackStrength",
+          "leasedLimits",
+          "authorizationRef"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attackStrength": {
+            "$ref": "#/components/schemas/ScanAttackStrength"
+          },
+          "leasedLimits": {
+            "$ref": "#/components/schemas/PlanLimits"
+          },
+          "authorizationRef": {
+            "type": "string"
+          }
+        }
+      },
+      "FindingSourceKind": {
+        "enum": [
+          "zap-alert",
+          "nuclei-match",
+          "observation",
+          "document-hint",
+          "ai-proposal",
+          "manual"
+        ]
+      },
+      "FindingSource": {
+        "type": "object",
+        "description": "engine 由来の所見は常に unverified: true (実影響未確認)。",
+        "required": [
+          "kind",
+          "unverified"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/FindingSourceKind"
+          },
+          "engineVersion": {
+            "type": "string"
+          },
+          "unverified": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FindingSeverity": {
+        "enum": ["info", "low", "medium", "high", "unknown"]
+      },
+      "FindingStatus": {
+        "enum": ["candidate", "confirmed", "rejected", "merged"]
+      },
+      "Finding": {
+        "type": "object",
+        "required": [
+          "findingId",
+          "title",
+          "source",
+          "url",
+          "severity",
+          "status",
+          "evidenceRefs",
+          "firstSeenAt",
+          "lastSeenAt",
+          "occurrences"
+        ],
+        "properties": {
+          "findingId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FindingSource"
+          },
+          "url": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "param": {
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/FindingSeverity"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FindingStatus"
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "firstSeenAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "occurrences": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "重複除外後の再観測回数。1 が初回。"
+          },
+          "enginePluginId": {
+            "type": "string"
+          }
+        }
+      },
+      "ActiveScanRunResult": {
+        "type": "object",
+        "required": [
+          "runRecord",
+          "planHash",
+          "scanRequest",
+          "overshootReservation",
+          "engineVersion",
+          "findings"
+        ],
+        "properties": {
+          "runRecord": {
+            "$ref": "#/components/schemas/RunRecord"
+          },
+          "planHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "scanRequest": {
+            "$ref": "#/components/schemas/ActiveScanRequest"
+          },
+          "overshootReservation": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Delegated step の maxOvershoot 分の予算予約。"
+          },
+          "engineVersion": {
+            "type": "string"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
             }
           }
         }
@@ -786,6 +1451,91 @@
           }
         }
       },
+      "ReportArtifact": {
+        "type": "object",
+        "required": [
+          "reportId",
+          "format",
+          "modelHash",
+          "content"
+        ],
+        "properties": {
+          "reportId": {
+            "type": "string"
+          },
+          "format": {
+            "const": "markdown"
+          },
+          "modelHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "ControlAspect": {
+        "enum": ["preSendScopeEnforcement", "stopControl", "budgetLease", "rateLimit"]
+      },
+      "EngineCapabilitySnapshot": {
+        "type": "object",
+        "description": "source は実測 (measured) と固定 fixture (fixture) を区別する。fixture は workflow 検証用。",
+        "required": [
+          "engineKind",
+          "engineVersion",
+          "source",
+          "guaranteeLevels",
+          "maxOvershootRatio",
+          "measuredAt"
+        ],
+        "properties": {
+          "engineKind": {
+            "$ref": "#/components/schemas/EngineKind"
+          },
+          "engineVersion": {
+            "type": "string"
+          },
+          "source": {
+            "enum": ["fixture", "measured"]
+          },
+          "guaranteeLevels": {
+            "type": "object",
+            "required": [
+              "preSendScopeEnforcement",
+              "stopControl",
+              "budgetLease",
+              "rateLimit"
+            ],
+            "properties": {
+              "preSendScopeEnforcement": {
+                "$ref": "#/components/schemas/GuaranteeLevel"
+              },
+              "stopControl": {
+                "$ref": "#/components/schemas/GuaranteeLevel"
+              },
+              "budgetLease": {
+                "$ref": "#/components/schemas/GuaranteeLevel"
+              },
+              "rateLimit": {
+                "$ref": "#/components/schemas/GuaranteeLevel"
+              }
+            }
+          },
+          "maxOvershootRatio": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Delegated 経路の予算予約に使う実測 (または fixture) 値。"
+          },
+          "measuredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fixtureHash": {
+            "type": "string"
+          }
+        }
+      },
       "CapabilitiesResult": {
         "type": "object",
         "required": [
@@ -795,45 +1545,14 @@
           "capabilities": {
             "type": "array",
             "items": {
-              "type": "object",
-              "required": [
-                "engineKind",
-                "engineVersion",
-                "source",
-                "guaranteeLevels",
-                "maxOvershootRatio",
-                "measuredAt"
-              ],
-              "properties": {
-                "engineKind": {
-                  "type": "string"
-                },
-                "engineVersion": {
-                  "type": "string"
-                },
-                "source": {
-                  "enum": ["fixture", "measured"]
-                },
-                "guaranteeLevels": {
-                  "type": "object"
-                },
-                "maxOvershootRatio": {
-                  "type": "number"
-                },
-                "measuredAt": {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                "fixtureHash": {
-                  "type": "string"
-                }
-              }
+              "$ref": "#/components/schemas/EngineCapabilitySnapshot"
             }
           }
         }
       },
       "AuditEventLine": {
         "type": "object",
+        "description": "NDJSON 1 行。eventId は cursor 用の連番。body は BaselineFlowEvent (contracts) のいずれか。",
         "required": [
           "eventId"
         ],
@@ -841,10 +1560,154 @@
           "eventId": {
             "type": "integer",
             "minimum": 1
-          },
-          "type": {
-            "type": "string"
           }
+        },
+        "oneOf": [
+          { "$ref": "#/components/schemas/CaseCreatedEvent" },
+          { "$ref": "#/components/schemas/CaseScopeUpdatedEvent" },
+          { "$ref": "#/components/schemas/ConfirmationsInvalidatedEvent" },
+          { "$ref": "#/components/schemas/AuthorizationGrantedEvent" },
+          { "$ref": "#/components/schemas/PlanValidatedEvent" },
+          { "$ref": "#/components/schemas/PlanAuthorizedEvent" },
+          { "$ref": "#/components/schemas/PlanConfirmedEvent" },
+          { "$ref": "#/components/schemas/RunStartedEvent" },
+          { "$ref": "#/components/schemas/RunCompletedEvent" },
+          { "$ref": "#/components/schemas/EgressDeniedEvent" },
+          { "$ref": "#/components/schemas/CandidatesAdoptedEvent" },
+          { "$ref": "#/components/schemas/FindingsImportedEvent" },
+          { "$ref": "#/components/schemas/ReportGeneratedEvent" }
+        ]
+      },
+      "CaseCreatedEvent": {
+        "type": "object",
+        "required": ["type", "at", "caseId", "revision"],
+        "properties": {
+          "type": { "const": "CaseCreated" },
+          "at": { "type": "string", "format": "date-time" },
+          "caseId": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "CaseScopeUpdatedEvent": {
+        "type": "object",
+        "required": ["type", "at", "caseId", "revision", "narrowed"],
+        "properties": {
+          "type": { "const": "CaseScopeUpdated" },
+          "at": { "type": "string", "format": "date-time" },
+          "caseId": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 1 },
+          "narrowed": { "type": "boolean" }
+        }
+      },
+      "ConfirmationsInvalidatedEvent": {
+        "type": "object",
+        "required": ["type", "at", "caseId", "confirmationIds", "reason"],
+        "properties": {
+          "type": { "const": "ConfirmationsInvalidated" },
+          "at": { "type": "string", "format": "date-time" },
+          "caseId": { "type": "string" },
+          "confirmationIds": { "type": "array", "items": { "type": "string" } },
+          "reason": { "type": "string" }
+        }
+      },
+      "AuthorizationGrantedEvent": {
+        "type": "object",
+        "required": ["type", "at", "authorizationId", "caseId"],
+        "properties": {
+          "type": { "const": "AuthorizationGranted" },
+          "at": { "type": "string", "format": "date-time" },
+          "authorizationId": { "type": "string" },
+          "caseId": { "type": "string" }
+        }
+      },
+      "PlanValidatedEvent": {
+        "type": "object",
+        "required": ["type", "at", "planHash"],
+        "properties": {
+          "type": { "const": "PlanValidated" },
+          "at": { "type": "string", "format": "date-time" },
+          "planHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      },
+      "PlanAuthorizedEvent": {
+        "type": "object",
+        "required": ["type", "at", "planHash", "authorizationId"],
+        "properties": {
+          "type": { "const": "PlanAuthorized" },
+          "at": { "type": "string", "format": "date-time" },
+          "planHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "authorizationId": { "type": "string" }
+        }
+      },
+      "PlanConfirmedEvent": {
+        "type": "object",
+        "required": ["type", "at", "planHash", "confirmedBy"],
+        "properties": {
+          "type": { "const": "PlanConfirmed" },
+          "at": { "type": "string", "format": "date-time" },
+          "planHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "confirmedBy": { "type": "string" }
+        }
+      },
+      "RunStartedEvent": {
+        "type": "object",
+        "required": ["type", "at", "runId", "planHash"],
+        "properties": {
+          "type": { "const": "RunStarted" },
+          "at": { "type": "string", "format": "date-time" },
+          "runId": { "type": "string" },
+          "planHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      },
+      "RunCompletedEvent": {
+        "type": "object",
+        "required": ["type", "at", "runId", "stopReason"],
+        "properties": {
+          "type": { "const": "RunCompleted" },
+          "at": { "type": "string", "format": "date-time" },
+          "runId": { "type": "string" },
+          "stopReason": { "$ref": "#/components/schemas/StopReason" }
+        }
+      },
+      "EgressDeniedEvent": {
+        "type": "object",
+        "required": ["type", "at", "url", "reason"],
+        "properties": {
+          "type": { "const": "EgressDenied" },
+          "at": { "type": "string", "format": "date-time" },
+          "url": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      },
+      "CandidatesAdoptedEvent": {
+        "type": "object",
+        "required": ["type", "at", "adoptedCount"],
+        "properties": {
+          "type": { "const": "CandidatesAdopted" },
+          "at": { "type": "string", "format": "date-time" },
+          "adoptedCount": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "FindingsImportedEvent": {
+        "type": "object",
+        "required": ["type", "at", "source", "importedCount", "duplicateCount"],
+        "properties": {
+          "type": { "const": "FindingsImported" },
+          "at": { "type": "string", "format": "date-time" },
+          "source": { "$ref": "#/components/schemas/FindingSourceKind" },
+          "engineVersion": { "type": "string" },
+          "importedCount": { "type": "integer", "minimum": 0 },
+          "duplicateCount": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ReportGeneratedEvent": {
+        "type": "object",
+        "required": ["type", "at", "reportId", "modelHash"],
+        "properties": {
+          "type": { "const": "ReportGenerated" },
+          "at": { "type": "string", "format": "date-time" },
+          "reportId": { "type": "string" },
+          "modelHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
         }
       }
     },
@@ -919,12 +1782,42 @@
           }
         }
       },
+      "Confirmation": {
+        "description": "confirmation (写しと hash)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PlanConfirmation"
+            }
+          }
+        }
+      },
+      "ExploreRun": {
+        "description": "exploration result",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExploreRunResult"
+            }
+          }
+        }
+      },
+      "ScanRun": {
+        "description": "scan result",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ActiveScanRunResult"
+            }
+          }
+        }
+      },
       "Report": {
         "description": "report artifact (model hash, markdown)",
         "content": {
           "application/json": {
             "schema": {
-              "type": "object"
+              "$ref": "#/components/schemas/ReportArtifact"
             }
           }
         }

@@ -1,12 +1,15 @@
 /** 所見の契約型。`docs/design/17-organizer-reporting.md`、`docs/detailed-design/f19-organizer-reporting.md`。 */
 
-export type FindingSourceKind =
-  | 'zap-alert'
-  | 'nuclei-match'
-  | 'observation'
-  | 'document-hint'
-  | 'ai-proposal'
-  | 'manual';
+export const FindingSourceKinds = [
+  'zap-alert',
+  'nuclei-match',
+  'observation',
+  'document-hint',
+  'ai-proposal',
+  'manual',
+] as const;
+
+export type FindingSourceKind = (typeof FindingSourceKinds)[number];
 
 /** engine 由来の所見は常に `unverified: true` (実影響未確認)。 */
 export interface FindingSource {
@@ -15,9 +18,13 @@ export interface FindingSource {
   readonly unverified: boolean;
 }
 
-export type FindingStatus = 'candidate' | 'confirmed' | 'rejected' | 'merged';
+export const FindingStatuses = ['candidate', 'confirmed', 'rejected', 'merged'] as const;
 
-export type FindingSeverity = 'info' | 'low' | 'medium' | 'high' | 'unknown';
+export type FindingStatus = (typeof FindingStatuses)[number];
+
+export const FindingSeverities = ['info', 'low', 'medium', 'high', 'unknown'] as const;
+
+export type FindingSeverity = (typeof FindingSeverities)[number];
 
 export interface Finding {
   readonly findingId: string;

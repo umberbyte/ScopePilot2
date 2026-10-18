@@ -1,11 +1,9 @@
 /** 外部 engine の能力表。`docs/design/22-execution-control.md` 3章、`docs/detailed-design/01-system-components.md` 5章。 */
 import type { EngineKind, GuaranteeLevel } from '../plan/plan.ts';
 
-export type ControlAspect =
-  | 'preSendScopeEnforcement'
-  | 'stopControl'
-  | 'budgetLease'
-  | 'rateLimit';
+export const ControlAspects = ['preSendScopeEnforcement', 'stopControl', 'budgetLease', 'rateLimit'] as const;
+
+export type ControlAspect = (typeof ControlAspects)[number];
 
 /**
  * `source` は実測 (`measured`) と固定 fixture (`fixture`) を区別する。

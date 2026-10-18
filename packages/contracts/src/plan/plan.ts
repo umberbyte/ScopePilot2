@@ -1,10 +1,14 @@
 /** ExecutionPlan と確認の契約型。`docs/design/22-execution-control.md` 2章。 */
 import type { OperationClass } from '../case/case.ts';
 
-export type EngineKind = 'node-http' | 'playwright' | 'zap' | 'nuclei' | 'oast';
+export const EngineKinds = ['node-http', 'playwright', 'zap', 'nuclei', 'oast'] as const;
+
+export type EngineKind = (typeof EngineKinds)[number];
 
 /** 保証等級。`docs/design/22-execution-control.md` 3章。Delegated は送信前拒否を保証しない。 */
-export type GuaranteeLevel = 'Enforced' | 'Delegated' | 'Unsupported';
+export const GuaranteeLevels = ['Enforced', 'Delegated', 'Unsupported'] as const;
+
+export type GuaranteeLevel = (typeof GuaranteeLevels)[number];
 
 export interface PlanLimits {
   readonly maxRequests: number;
@@ -14,7 +18,9 @@ export interface PlanLimits {
   readonly requestsPerSecond: number;
 }
 
-export type PlanStepKind = 'explore' | 'active-scan' | 'nuclei-scan' | 'report';
+export const PlanStepKinds = ['explore', 'active-scan', 'nuclei-scan', 'report'] as const;
+
+export type PlanStepKind = (typeof PlanStepKinds)[number];
 
 export interface PlanStep {
   readonly stepId: string;
