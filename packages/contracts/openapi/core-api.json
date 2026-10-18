@@ -5,14 +5,21 @@
     "version": "scopepilot2.api.v1",
     "description": "UI と CLI が共有するローカル契約 (design/18, 19 §3)。loopback 専用。wildcard CORS は提供しない。"
   },
-  "servers": [{ "url": "http://127.0.0.1:{port}", "description": "local Core API" }],
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "description": "local Core API"
+    }
+  ],
   "paths": {
     "/api/health": {
       "get": {
         "operationId": "getHealth",
         "summary": "契約 version と稼働状態",
         "responses": {
-          "200": { "$ref": "#/components/responses/Health" }
+          "200": {
+            "$ref": "#/components/responses/Health"
+          }
         }
       }
     },
@@ -21,18 +28,37 @@
         "operationId": "getCurrentCase",
         "summary": "現在の案件",
         "responses": {
-          "200": { "$ref": "#/components/responses/Case" },
-          "404": { "$ref": "#/components/responses/Error" }
+          "200": {
+            "$ref": "#/components/responses/Case"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       },
       "post": {
         "operationId": "createCase",
         "summary": "案件作成",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateCaseRequest" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCaseRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "$ref": "#/components/responses/Case" },
-          "400": { "$ref": "#/components/responses/Error" },
-          "403": { "$ref": "#/components/responses/Error" }
+          "201": {
+            "$ref": "#/components/responses/Case"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -40,11 +66,26 @@
       "post": {
         "operationId": "updateCaseScope",
         "summary": "scope 更新 (expectedRevision 必須・縮小時 confirmation 無効化)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateCaseScopeRequest" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCaseScopeRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "$ref": "#/components/responses/ScopeUpdate" },
-          "400": { "$ref": "#/components/responses/Error" },
-          "409": { "$ref": "#/components/responses/Error" }
+          "200": {
+            "$ref": "#/components/responses/ScopeUpdate"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -52,11 +93,26 @@
       "post": {
         "operationId": "grantAuthorization",
         "summary": "認可付与 (証跡は hash 参照のみ)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GrantAuthorizationRequest" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantAuthorizationRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "$ref": "#/components/responses/Authorization" },
-          "400": { "$ref": "#/components/responses/Error" },
-          "403": { "$ref": "#/components/responses/Error" }
+          "201": {
+            "$ref": "#/components/responses/Authorization"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -64,11 +120,26 @@
       "post": {
         "operationId": "buildExplorePlan",
         "summary": "探索計画の作成と検証 (実行は別確認)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BuildExplorePlanRequest" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildExplorePlanRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "$ref": "#/components/responses/ExplorePlan" },
-          "400": { "$ref": "#/components/responses/Error" },
-          "403": { "$ref": "#/components/responses/Error" }
+          "200": {
+            "$ref": "#/components/responses/ExplorePlan"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -77,11 +148,186 @@
         "operationId": "listEvents",
         "summary": "監査 event の NDJSON (cursor: since 以降の連番 eventId)",
         "parameters": [
-          { "name": "since", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0, "default": 0 } }
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "application/x-ndjson", "content": { "application/x-ndjson": { "schema": { "$ref": "#/components/schemas/AuditEventLine" } } } },
-          "400": { "$ref": "#/components/responses/Error" }
+          "200": {
+            "description": "application/x-ndjson",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEventLine"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/plan/confirm": {
+      "post": {
+        "operationId": "confirmPlan",
+        "summary": "計画確認 (confirmation の写しと hash を返す)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "plan"
+                ],
+                "properties": {
+                  "plan": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/run/explore": {
+      "post": {
+        "operationId": "runExploration",
+        "summary": "探索の実行 (確認一致が必要)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "plan",
+                  "confirmation",
+                  "maxDepth"
+                ],
+                "properties": {
+                  "plan": {
+                    "type": "object"
+                  },
+                  "confirmation": {
+                    "type": "object"
+                  },
+                  "maxDepth": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "exploration result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/run/scan": {
+      "post": {
+        "operationId": "runActiveScan",
+        "summary": "能動診断の実行 (確認一致・能力表検証が必要)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "plan",
+                  "confirmation",
+                  "adopted"
+                ],
+                "properties": {
+                  "plan": {
+                    "type": "object"
+                  },
+                  "confirmation": {
+                    "type": "object"
+                  },
+                  "adopted": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "scan result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     }
@@ -90,134 +336,381 @@
     "schemas": {
       "HealthResponse": {
         "type": "object",
-        "required": ["schemaVersion", "status"],
+        "required": [
+          "schemaVersion",
+          "status"
+        ],
         "properties": {
-          "schemaVersion": { "const": "scopepilot2.api.v1" },
-          "status": { "const": "ok" }
+          "schemaVersion": {
+            "const": "scopepilot2.api.v1"
+          },
+          "status": {
+            "const": "ok"
+          }
         }
       },
       "ErrorResponse": {
         "type": "object",
-        "required": ["schemaVersion", "code", "message", "retryable"],
+        "required": [
+          "schemaVersion",
+          "code",
+          "message",
+          "retryable"
+        ],
         "properties": {
-          "schemaVersion": { "const": "scopepilot2.api.v1" },
-          "code": { "type": "string" },
-          "message": { "type": "string" },
-          "retryable": { "type": "boolean" }
+          "schemaVersion": {
+            "const": "scopepilot2.api.v1"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
         }
       },
       "ScopeLimits": {
         "type": "object",
-        "required": ["maxRequests", "maxPages", "maxDurationMinutes"],
+        "required": [
+          "maxRequests",
+          "maxPages",
+          "maxDurationMinutes"
+        ],
         "properties": {
-          "maxRequests": { "type": "integer", "minimum": 1 },
-          "maxPages": { "type": "integer", "minimum": 1 },
-          "maxDurationMinutes": { "type": "integer", "minimum": 1 }
+          "maxRequests": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxPages": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxDurationMinutes": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       },
       "CaseScope": {
         "type": "object",
-        "required": ["allowedOrigins", "deniedOrigins", "limits"],
+        "required": [
+          "allowedOrigins",
+          "deniedOrigins",
+          "limits"
+        ],
         "properties": {
-          "allowedOrigins": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-          "deniedOrigins": { "type": "array", "items": { "type": "string" } },
-          "limits": { "$ref": "#/components/schemas/ScopeLimits" }
+          "allowedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "deniedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limits": {
+            "$ref": "#/components/schemas/ScopeLimits"
+          }
         }
       },
       "CaseRecord": {
         "type": "object",
-        "required": ["caseId", "name", "revision", "scope", "createdAt"],
+        "required": [
+          "caseId",
+          "name",
+          "revision",
+          "scope",
+          "createdAt"
+        ],
         "properties": {
-          "caseId": { "type": "string" },
-          "name": { "type": "string" },
-          "revision": { "type": "integer", "minimum": 1 },
-          "scope": { "$ref": "#/components/schemas/CaseScope" },
-          "createdAt": { "type": "string", "format": "date-time" }
+          "caseId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "scope": {
+            "$ref": "#/components/schemas/CaseScope"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "CreateCaseRequest": {
         "type": "object",
-        "required": ["name", "allowedOrigins", "deniedOrigins", "limits"],
+        "required": [
+          "name",
+          "allowedOrigins",
+          "deniedOrigins",
+          "limits"
+        ],
         "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "allowedOrigins": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-          "deniedOrigins": { "type": "array", "items": { "type": "string" } },
-          "limits": { "$ref": "#/components/schemas/ScopeLimits" }
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "allowedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "deniedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limits": {
+            "$ref": "#/components/schemas/ScopeLimits"
+          }
         }
       },
       "UpdateCaseScopeRequest": {
-        "allOf": [{ "$ref": "#/components/schemas/CreateCaseRequest" }],
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CreateCaseRequest"
+          }
+        ],
         "type": "object",
-        "required": ["expectedRevision"],
+        "required": [
+          "expectedRevision"
+        ],
         "properties": {
-          "expectedRevision": { "type": "integer", "minimum": 1 }
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       },
       "ScopeUpdateResult": {
         "type": "object",
-        "required": ["revision", "narrowed", "invalidatedConfirmationIds"],
+        "required": [
+          "revision",
+          "narrowed",
+          "invalidatedConfirmationIds"
+        ],
         "properties": {
-          "revision": { "type": "integer" },
-          "narrowed": { "type": "boolean" },
-          "invalidatedConfirmationIds": { "type": "array", "items": { "type": "string" } }
+          "revision": {
+            "type": "integer"
+          },
+          "narrowed": {
+            "type": "boolean"
+          },
+          "invalidatedConfirmationIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       },
       "GrantAuthorizationRequest": {
         "type": "object",
-        "required": ["allowedOperationClasses", "targetRoles", "validFrom", "validUntil", "evidenceLabel", "evidenceContent"],
+        "required": [
+          "allowedOperationClasses",
+          "targetRoles",
+          "validFrom",
+          "validUntil",
+          "evidenceLabel",
+          "evidenceContent"
+        ],
         "properties": {
-          "allowedOperationClasses": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-          "targetRoles": { "type": "array", "items": { "type": "string" } },
-          "validFrom": { "type": "string", "format": "date-time" },
-          "validUntil": { "type": "string", "format": "date-time" },
-          "evidenceLabel": { "type": "string" },
-          "evidenceContent": { "type": "string" }
+          "allowedOperationClasses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "targetRoles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "validFrom": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "validUntil": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidenceLabel": {
+            "type": "string"
+          },
+          "evidenceContent": {
+            "type": "string"
+          }
         }
       },
       "AuthorizationRecord": {
         "type": "object",
-        "required": ["authorizationId", "caseId", "allowedOperationClasses", "targetRoles", "validFrom", "validUntil", "evidenceRef"],
+        "required": [
+          "authorizationId",
+          "caseId",
+          "allowedOperationClasses",
+          "targetRoles",
+          "validFrom",
+          "validUntil",
+          "evidenceRef"
+        ],
         "properties": {
-          "authorizationId": { "type": "string" },
-          "caseId": { "type": "string" },
-          "allowedOperationClasses": { "type": "array", "items": { "type": "string" } },
-          "targetRoles": { "type": "array", "items": { "type": "string" } },
-          "validFrom": { "type": "string", "format": "date-time" },
-          "validUntil": { "type": "string", "format": "date-time" },
-          "evidenceRef": { "type": "object" }
+          "authorizationId": {
+            "type": "string"
+          },
+          "caseId": {
+            "type": "string"
+          },
+          "allowedOperationClasses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "targetRoles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "validFrom": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "validUntil": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidenceRef": {
+            "type": "object"
+          }
         }
       },
       "BuildExplorePlanRequest": {
         "type": "object",
-        "required": ["seeds"],
+        "required": [
+          "seeds"
+        ],
         "properties": {
-          "seeds": { "type": "array", "items": { "type": "string", "format": "uri" }, "minItems": 1 }
+          "seeds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "minItems": 1
+          }
         }
       },
       "ExplorePlanResult": {
         "type": "object",
-        "required": ["plan", "planHash"],
+        "required": [
+          "plan",
+          "planHash"
+        ],
         "properties": {
-          "plan": { "type": "object" },
-          "planHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "plan": {
+            "type": "object"
+          },
+          "planHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
       },
       "AuditEventLine": {
         "type": "object",
-        "required": ["eventId"],
+        "required": [
+          "eventId"
+        ],
         "properties": {
-          "eventId": { "type": "integer", "minimum": 1 },
-          "type": { "type": "string" }
+          "eventId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string"
+          }
         }
       }
     },
     "responses": {
-      "Health": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthResponse" } } } },
-      "Case": { "description": "case record", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CaseRecord" } } } },
-      "ScopeUpdate": { "description": "scope update result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ScopeUpdateResult" } } } },
-      "Authorization": { "description": "authorization record", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthorizationRecord" } } } },
-      "ExplorePlan": { "description": "plan and hash", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExplorePlanResult" } } } },
-      "Error": { "description": "domain error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+      "Health": {
+        "description": "ok",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HealthResponse"
+            }
+          }
+        }
+      },
+      "Case": {
+        "description": "case record",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CaseRecord"
+            }
+          }
+        }
+      },
+      "ScopeUpdate": {
+        "description": "scope update result",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ScopeUpdateResult"
+            }
+          }
+        }
+      },
+      "Authorization": {
+        "description": "authorization record",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AuthorizationRecord"
+            }
+          }
+        }
+      },
+      "ExplorePlan": {
+        "description": "plan and hash",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExplorePlanResult"
+            }
+          }
+        }
+      },
+      "Error": {
+        "description": "domain error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
     }
   }
 }

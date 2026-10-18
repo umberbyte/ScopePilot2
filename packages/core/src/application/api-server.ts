@@ -126,6 +126,52 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'POST /api/plan/confirm') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const plan = planField(body);
+        const confirmation = service.confirmPlan(plan, operator);
+        return respondJson(response, 200, confirmation);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/run/explore') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = await service.runExploration(operator, planField(body), confirmationField(body), {
+          maxDepth: positiveIntegerField(body, 'maxDepth'),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/run/scan') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = await service.runActiveScan(operator, planField(body), confirmationField(body), adoptedField(body));
+        return respondJson(response, 200, {
+          runRecord: result.runRecord,
+          planHash: result.planHash,
+          scanRequest: result.scanRequest,
+          overshootReservation: result.overshootReservation,
+          engineVersion: result.engineVersion,
+          findings: result.findings,
+        });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/events') {
       const since = Number(url.searchParams.get('since') ?? '0');
       if (!Number.isInteger(since) || since < 0) {
@@ -230,6 +276,34 @@ function limitsField(body: Record<string, unknown>): { maxRequests: number; maxP
     maxPages: expectPositiveInteger(record.maxPages, 'limits.maxPages'),
     maxDurationMinutes: expectPositiveInteger(record.maxDurationMinutes, 'limits.maxDurationMinutes'),
   };
+}
+
+function planField(body: Record<string, unknown>): import('@scopepilot2/contracts').ExecutionPlan {
+  return structField(body, 'plan') as unknown as import('@scopepilot2/contracts').ExecutionPlan;
+}
+
+function confirmationField(body: Record<string, unknown>): import('@scopepilot2/contracts').PlanConfirmation {
+  return structField(body, 'confirmation') as unknown as import('@scopepilot2/contracts').PlanConfirmation;
+}
+
+function adoptedField(body: Record<string, unknown>): readonly import('@scopepilot2/contracts').ScanCandidate[] {
+  const value = body.adopted;
+  if (!Array.isArray(value)) {
+    throw new DomainError('ValidationFailed', 'field adopted must be an array of candidates');
+  }
+  return value as readonly import('@scopepilot2/contracts').ScanCandidate[];
+}
+
+function structField(body: Record<string, unknown>, field: string): Record<string, unknown> {
+  const value = body[field];
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new DomainError('ValidationFailed', `field ${field} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function positiveIntegerField(body: Record<string, unknown>, field: string): number {
+  return expectPositiveInteger(body[field], field);
 }
 
 function expectPositiveInteger(value: unknown, field: string): number {

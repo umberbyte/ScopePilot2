@@ -103,6 +103,69 @@ describe('Core API server (node:http)', () => {
     assert.equal(error.code, 'ValidationFailed');
   });
 
+  test('POST /api/plan/confirm → /api/run/explore は確認一致で探索を実行する', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'explore-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+    await fetch(`${baseUrl}/api/authorization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['unauthenticated'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      }),
+    });
+    const planResponse = await fetch(`${baseUrl}/api/plan/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seeds: ['http://fixture.target.test/'] }),
+    });
+    assert.equal(planResponse.status, 200);
+    const { plan, planHash } = (await planResponse.json()) as { plan: unknown; planHash: string };
+    assert.match(planHash, /^[0-9a-f]{64}$/);
+
+    const confirmResponse = await fetch(`${baseUrl}/api/plan/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan }),
+    });
+    assert.equal(confirmResponse.status, 200);
+    const confirmation = (await confirmResponse.json()) as { confirmationId: string };
+
+    const runResponse = await fetch(`${baseUrl}/api/run/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan, confirmation, maxDepth: 2 }),
+    });
+    assert.equal(runResponse.status, 200);
+    const result = (await runResponse.json()) as { runRecord: { state: string; stopReason: string }; observations: unknown[]; candidates: unknown[] };
+    assert.equal(result.runRecord.state, 'Completed');
+    assert.equal(result.runRecord.stopReason, 'completed');
+    assert.ok(result.observations.length > 0);
+    assert.ok(result.candidates.length > 0);
+
+    // 確認 hash 不一致は 409 ConfirmationRequired。
+    const unconfirmed = await fetch(`${baseUrl}/api/run/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan, confirmation: { ...confirmation, planHash: 'x'.repeat(64) }, maxDepth: 2 }),
+    });
+    assert.equal(unconfirmed.status, 409);
+    const error = (await unconfirmed.json()) as { code: string };
+    assert.equal(error.code, 'ConfirmationRequired');
+  });
+
   test('GET /api/events?since=N は cursor 以降の監査 event を NDJSON で返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',
