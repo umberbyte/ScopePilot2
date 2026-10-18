@@ -1,0 +1,240 @@
+/**
+ * Core API (ローカル REST) の seed。`docs/design/18-extension-api.md`、design/19 §3。
+ * UI と CLI が共有するローカル契約の実体。node:http のみで実装し、依存を追加しない。
+ *
+ * - 変更系は JSON body を 1 MiB 上限で受け、DomainError を安定した HTTP status + code へ写す。
+ * - wildcard CORS は許可しない (loopback 既定・F20 §5)。
+ * - /api/events は cursor (since) 以降の監査 event を NDJSON で返す (SSE 実装への土台)。
+ */
+import type { Server } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { DomainError, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
+import type { BaselineFlowService } from './baseline-flow.ts';
+
+const MAX_BODY_BYTES = 1024 * 1024;
+const HTTP_STATUS_BY_CODE: Record<DomainErrorCode, number> = {
+  ValidationFailed: 400,
+  PermissionDenied: 403,
+  OutOfScope: 403,
+  ConfirmationRequired: 409,
+  Conflict: 409,
+  CapabilityUnavailable: 503,
+  NeedsInput: 409,
+  Unsupported: 501,
+  EngineFailure: 502,
+  Cancelled: 409,
+};
+
+export interface CoreApiServerOptions {
+  readonly service: BaselineFlowService;
+  readonly operator: OperatorProfile;
+}
+
+export function createCoreApiServer(options: CoreApiServerOptions): Server {
+  const { service, operator } = options;
+
+  const server = createServer((request, response) => {
+    void handle(request, response).catch((cause: unknown) => {
+      respondError(response, 500, 'InternalError', 'unexpected server error', false);
+      server.emit('core-api-error', cause);
+    });
+  });
+
+  async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const url = new URL(request.url ?? '/', 'http://localhost');
+    const method = request.method ?? 'GET';
+    const route = `${method} ${url.pathname}`;
+
+    // wildcard CORS は付与しない。同一 machine の契約クライアントのみ想定。
+    response.setHeader('Cache-Control', 'no-store');
+
+    if (route === 'GET /api/health') {
+      return respondJson(response, 200, { schemaVersion: 'scopepilot2.api.v1', status: 'ok' });
+    }
+    if (route === 'GET /api/case') {
+      try {
+        return respondJson(response, 200, service.currentCase());
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/case') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const record = service.createCase(operator, {
+          name: stringField(body, 'name'),
+          allowedOrigins: stringArrayField(body, 'allowedOrigins'),
+          deniedOrigins: stringArrayField(body, 'deniedOrigins'),
+          limits: limitsField(body),
+        });
+        return respondJson(response, 201, record);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/case/scope') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const outcome = service.updateCaseScope(operator, {
+          expectedRevision: numberField(body, 'expectedRevision'),
+          allowedOrigins: stringArrayField(body, 'allowedOrigins'),
+          deniedOrigins: stringArrayField(body, 'deniedOrigins'),
+          limits: limitsField(body),
+        });
+        return respondJson(response, 200, outcome);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/authorization') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const record = await service.grantAuthorization(operator, {
+          allowedOperationClasses: stringArrayField(body, 'allowedOperationClasses') as never,
+          targetRoles: stringArrayField(body, 'targetRoles'),
+          validFrom: stringField(body, 'validFrom'),
+          validUntil: stringField(body, 'validUntil'),
+          evidence: {
+            label: stringField(body, 'evidenceLabel'),
+            content: stringField(body, 'evidenceContent'),
+          },
+        });
+        return respondJson(response, 201, record);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/plan/explore') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.buildExplorationPlan(operator, stringArrayField(body, 'seeds'));
+        service.authorizePlan(result.plan);
+        return respondJson(response, 200, { plan: result.plan, planHash: result.planHash });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/events') {
+      const since = Number(url.searchParams.get('since') ?? '0');
+      if (!Number.isInteger(since) || since < 0) {
+        return respondError(response, 400, 'ValidationFailed', 'since must be a non-negative integer', false);
+      }
+      const events = service.events();
+      // cursor は監査 event の連番。以後の event だけを返す (F20-UT-004 と同じ意味論)。
+      const lines = events
+        .slice(since)
+        .map((event, index) => JSON.stringify({ eventId: since + index + 1, ...event }));
+      response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8' });
+      response.end(`${lines.join('\n')}${lines.length > 0 ? '\n' : ''}`);
+      return;
+    }
+    if (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+      return respondError(response, 404, 'NotFound', `unknown route: ${route}`, false);
+    }
+    return respondError(response, 405, 'MethodNotAllowed', `method not allowed: ${method}`, false);
+  }
+
+  return server;
+}
+
+async function readJsonBody(request: IncomingMessage, response: ServerResponse): Promise<Record<string, unknown> | undefined> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) {
+      respondError(response, 400, 'ValidationFailed', `request body exceeds ${MAX_BODY_BYTES} bytes`, false);
+      return undefined;
+    }
+    chunks.push(chunk as Buffer);
+  }
+  if (chunks.length === 0) {
+    respondError(response, 400, 'ValidationFailed', 'request body is required', false);
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      respondError(response, 400, 'ValidationFailed', 'request body must be a JSON object', false);
+      return undefined;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    respondError(response, 400, 'ValidationFailed', 'request body is not valid JSON', false);
+    return undefined;
+  }
+}
+
+function respondDomainError(response: ServerResponse, cause: unknown): void {
+  if (cause instanceof DomainError) {
+    const status = HTTP_STATUS_BY_CODE[cause.code];
+    respondError(response, status, cause.code, cause.message, cause.retryable);
+    return;
+  }
+  respondError(response, 500, 'InternalError', String(cause), false);
+}
+
+function respondError(response: ServerResponse, status: number, code: string, message: string, retryable: boolean): void {
+  respondJson(response, status, { code, message, retryable, schemaVersion: 'scopepilot2.api.v1' });
+}
+
+function respondJson(response: ServerResponse, status: number, body: unknown): void {
+  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  response.end(JSON.stringify(body));
+}
+
+function stringField(body: Record<string, unknown>, field: string): string {
+  const value = body[field];
+  if (typeof value !== 'string') {
+    throw new DomainError('ValidationFailed', `field ${field} must be a string`);
+  }
+  return value;
+}
+
+function numberField(body: Record<string, unknown>, field: string): number {
+  const value = body[field];
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new DomainError('ValidationFailed', `field ${field} must be an integer`);
+  }
+  return value;
+}
+
+function stringArrayField(body: Record<string, unknown>, field: string): readonly string[] {
+  const value = body[field];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new DomainError('ValidationFailed', `field ${field} must be an array of strings`);
+  }
+  return value as readonly string[];
+}
+
+function limitsField(body: Record<string, unknown>): { maxRequests: number; maxPages: number; maxDurationMinutes: number } {
+  const limits = body.limits;
+  if (typeof limits !== 'object' || limits === null) {
+    throw new DomainError('ValidationFailed', 'field limits must be an object');
+  }
+  const record = limits as Record<string, unknown>;
+  return {
+    maxRequests: expectPositiveInteger(record.maxRequests, 'limits.maxRequests'),
+    maxPages: expectPositiveInteger(record.maxPages, 'limits.maxPages'),
+    maxDurationMinutes: expectPositiveInteger(record.maxDurationMinutes, 'limits.maxDurationMinutes'),
+  };
+}
+
+function expectPositiveInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new DomainError('ValidationFailed', `field ${field} must be a positive integer`);
+  }
+  return value;
+}

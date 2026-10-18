@@ -6,7 +6,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --test \"test/unit/**/*.test.ts\""
+    "test": "node --test \"test/unit/**/*.test.ts\"",
+    "test:integration": "node --test \"test/integration/**/*.test.ts\""
   },
   "devDependencies": {
     "@scopepilot2/contracts": "*"
