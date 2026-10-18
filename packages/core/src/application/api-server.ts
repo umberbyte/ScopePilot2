@@ -126,6 +126,46 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'POST /api/plan/scan') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.buildActiveScanPlan(operator, stringArrayField(body, 'targets'));
+        service.authorizePlan(result.plan);
+        return respondJson(response, 200, { plan: result.plan, planHash: result.planHash });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/candidates/adopt') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const adopted = service.adoptCandidates(operator, candidateArrayField(body, 'candidates'));
+        return respondJson(response, 200, { adopted });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/report') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const artifact = service.generateReport(operator, { guidelines: stringArrayField(body, 'guidelines') });
+        return respondJson(response, 200, artifact);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/capabilities') {
+      return respondJson(response, 200, { capabilities: service.capabilities() });
+    }
     if (route === 'POST /api/plan/confirm') {
       const body = await readJsonBody(request, response);
       if (body === undefined) {
@@ -290,6 +330,14 @@ function adoptedField(body: Record<string, unknown>): readonly import('@scopepil
   const value = body.adopted;
   if (!Array.isArray(value)) {
     throw new DomainError('ValidationFailed', 'field adopted must be an array of candidates');
+  }
+  return value as readonly import('@scopepilot2/contracts').ScanCandidate[];
+}
+
+function candidateArrayField(body: Record<string, unknown>, field: string): readonly import('@scopepilot2/contracts').ScanCandidate[] {
+  const value = body[field];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'object' || entry === null || Array.isArray(entry))) {
+    throw new DomainError('ValidationFailed', `field ${field} must be an array of candidates`);
   }
   return value as readonly import('@scopepilot2/contracts').ScanCandidate[];
 }

@@ -17,7 +17,7 @@ ScopePilot2 を TypeScript に統一し、Windows と macOS に配布できる E
 ```text
 apps/
   desktop/       Electron main、preload、React renderer
-  cli/           Node CLI。core のユースケースを直接呼ぶ
+  cli/           Node CLI。UI と同じ Core API 契約経由で core を使う (単体実行時は in-process で host)
 packages/
   contracts/     コマンド、イベント、DTO、JSON Schema、互換性試験
   core/          ドメイン、ユースケース、認可、計画、実行制御
@@ -56,13 +56,13 @@ Electron main ─ ApplicationService ─ core ─ storage
                                   ├─ NucleiAdapter ─ nuclei
                                   └─ AiProviderAdapter ─ 利用者選択provider
 
-CLI process ─ ApplicationService ─ 同じ core / storage / adapters
+CLI process ─ Core API (loopback) ─ ApplicationService ─ 同じ core / storage / adapters
 外部利用者 ─ opt-in loopback Product API ─ ApplicationService
 ```
 
 renderer は `nodeIntegration=false`、`contextIsolation=true`、sandbox 有効、厳格な CSP、任意遷移禁止とする。preload は用途別の型付き操作だけを公開し、汎用 `invoke`、ファイル操作、shell、process spawn を公開しない。IPC の要求と応答は `packages/contracts` のスキーマで双方検証する。[Electron security checklist](https://www.electronjs.org/docs/latest/tutorial/security) と [Context Isolation](https://www.electronjs.org/docs/latest/tutorial/context-isolation) を最低基準とする。
 
-外部向け Product API は既定無効の loopback サーバーであり、UI 内部 IPC とは別トランスポートである。CLI は Product API や UI を起動せず、ApplicationService を直接呼ぶ。将来コアを別言語へ移す場合は ApplicationService の契約を保ち、実装だけを別プロセスへ移せる。
+外部向け Product API は既定無効の loopback サーバーであり、UI 内部 IPC とは別トランスポートである。CLI は Product API や UI を起動せず、UI と同じ Core API 契約 ([18](18-extension-api.md)、[19](19-cli-automation.md) §3) 経由で core を使う。単体実行時は core を同一 process 内で host して loopback で結合し、desktop 実行時は desktop が host する core へ接続する。将来コアを別言語へ移す場合は Core API 契約を保ち、実装だけを別プロセスへ移せる。
 
 ## 5. コアの境界
 

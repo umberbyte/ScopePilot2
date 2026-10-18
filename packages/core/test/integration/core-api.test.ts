@@ -166,6 +166,116 @@ describe('Core API server (node:http)', () => {
     assert.equal(error.code, 'ConfirmationRequired');
   });
 
+  test('POST /api/plan/scan → /api/candidates/adopt → /api/run/scan → /api/report は診断から報告まで実行する', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'scan-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+    await fetch(`${baseUrl}/api/authorization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['unauthenticated'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      }),
+    });
+
+    const candidate = {
+      candidateId: 'cand-it-1',
+      url: 'http://fixture.target.test/page',
+      method: 'GET',
+      category: 'page',
+      guidelineBasis: ['provisional:page'],
+      confidence: 0.7,
+      observationUrl: 'http://fixture.target.test/page',
+    };
+    const adoptedResponse = await fetch(`${baseUrl}/api/candidates/adopt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidates: [candidate] }),
+    });
+    assert.equal(adoptedResponse.status, 200);
+    const { adopted } = (await adoptedResponse.json()) as { adopted: unknown[] };
+    assert.equal(adopted.length, 1);
+
+    const planResponse = await fetch(`${baseUrl}/api/plan/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targets: [candidate.url] }),
+    });
+    assert.equal(planResponse.status, 200);
+    const { plan, planHash } = (await planResponse.json()) as { plan: unknown; planHash: string };
+    assert.match(planHash, /^[0-9a-f]{64}$/);
+
+    const confirmResponse = await fetch(`${baseUrl}/api/plan/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan }),
+    });
+    const confirmation = (await confirmResponse.json()) as { confirmationId: string };
+
+    const runResponse = await fetch(`${baseUrl}/api/run/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan, confirmation, adopted: [candidate] }),
+    });
+    assert.equal(runResponse.status, 200);
+    const scan = (await runResponse.json()) as {
+      runRecord: { state: string; stopReason: string };
+      scanRequest: { targets: string[] };
+      engineVersion: string;
+      findings: unknown[];
+    };
+    assert.equal(scan.runRecord.state, 'Completed');
+    assert.equal(scan.runRecord.stopReason, 'completed');
+    assert.deepEqual(scan.scanRequest.targets, [candidate.url]);
+    assert.equal(scan.engineVersion, 'fake-zap-1');
+
+    const reportResponse = await fetch(`${baseUrl}/api/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ guidelines: ['it-guideline'] }),
+    });
+    assert.equal(reportResponse.status, 200);
+    const report = (await reportResponse.json()) as { modelHash: string };
+    assert.match(report.modelHash, /^[0-9a-f]{64}$/);
+
+    // 空の targets・空の candidates は 400 ValidationFailed。
+    const emptyTargets = await fetch(`${baseUrl}/api/plan/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targets: [] }),
+    });
+    assert.equal(emptyTargets.status, 400);
+    const emptyCandidates = await fetch(`${baseUrl}/api/candidates/adopt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidates: [] }),
+    });
+    assert.equal(emptyCandidates.status, 400);
+  });
+
+  test('GET /api/capabilities は能力表 (source・版) を返す', async () => {
+    const response = await fetch(`${baseUrl}/api/capabilities`);
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      capabilities: { engineKind: string; engineVersion: string; source: string }[];
+    };
+    const kinds = body.capabilities.map((capability) => capability.engineKind);
+    assert.ok(kinds.includes('zap'));
+    assert.ok(body.capabilities.every((capability) => capability.source === 'fixture' || capability.source === 'measured'));
+  });
+
   test('GET /api/events?since=N は cursor 以降の監査 event を NDJSON で返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',

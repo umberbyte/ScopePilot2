@@ -85,6 +85,7 @@ export interface ExploreRunResult {
   readonly observations: readonly PageObservation[];
   readonly deniedUrls: readonly { readonly url: string; readonly reason: string }[];
   readonly candidates: readonly ScanCandidate[];
+  readonly engineVersion: string;
 }
 
 export interface ActiveScanRunResult {
@@ -119,6 +120,11 @@ export class BaselineFlowService {
 
   events(): readonly BaselineFlowEvent[] {
     return [...this.eventsLog];
+  }
+
+  /** 能力表 (fixture または実測)。API 経由で UI/CLI が版と fixture hash を確認するのに使う。 */
+  capabilities(): readonly EngineCapabilitySnapshot[] {
+    return [...this.deps.capabilities];
   }
 
   currentCase(): CaseRecord {
@@ -448,7 +454,7 @@ export class BaselineFlowService {
     };
     this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason });
     const candidates = observations.flatMap((observation) => candidatesFromObservation(observation, this.deps.ids));
-    return { runRecord, planHash, observations, deniedUrls, candidates };
+    return { runRecord, planHash, observations, deniedUrls, candidates, engineVersion: this.deps.explorer.engineVersion };
   }
 
   /** 候補の採用。基準シナリオでは提示された候補を全採用する。 */

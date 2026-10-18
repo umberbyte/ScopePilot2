@@ -143,6 +143,98 @@
         }
       }
     },
+    "/api/plan/scan": {
+      "post": {
+        "operationId": "buildActiveScanPlan",
+        "summary": "能動診断計画の作成と検証 (対象は採用済み候補の固定 snapshot)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildActiveScanPlanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Plan"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/candidates/adopt": {
+      "post": {
+        "operationId": "adoptScanCandidates",
+        "summary": "診断候補の採用 (基準シナリオでは提示候補を全採用)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdoptCandidatesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/AdoptedCandidates"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/report": {
+      "post": {
+        "operationId": "generateReport",
+        "summary": "報告の生成 (delegated step の限界開示を必ず含む)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateReportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Report"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/capabilities": {
+      "get": {
+        "operationId": "listCapabilities",
+        "summary": "engine 能力表 (source が fixture のものは workflow 検証用)",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Capabilities"
+          }
+        }
+      }
+    },
     "/api/events": {
       "get": {
         "operationId": "listEvents",
@@ -634,6 +726,112 @@
           }
         }
       },
+      "BuildActiveScanPlanRequest": {
+        "type": "object",
+        "required": [
+          "targets"
+        ],
+        "properties": {
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "minItems": 1
+          }
+        }
+      },
+      "AdoptCandidatesRequest": {
+        "type": "object",
+        "required": [
+          "candidates"
+        ],
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "minItems": 1
+          }
+        }
+      },
+      "AdoptedCandidatesResult": {
+        "type": "object",
+        "required": [
+          "adopted"
+        ],
+        "properties": {
+          "adopted": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "GenerateReportRequest": {
+        "type": "object",
+        "required": [
+          "guidelines"
+        ],
+        "properties": {
+          "guidelines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        }
+      },
+      "CapabilitiesResult": {
+        "type": "object",
+        "required": [
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "engineKind",
+                "engineVersion",
+                "source",
+                "guaranteeLevels",
+                "maxOvershootRatio",
+                "measuredAt"
+              ],
+              "properties": {
+                "engineKind": {
+                  "type": "string"
+                },
+                "engineVersion": {
+                  "type": "string"
+                },
+                "source": {
+                  "enum": ["fixture", "measured"]
+                },
+                "guaranteeLevels": {
+                  "type": "object"
+                },
+                "maxOvershootRatio": {
+                  "type": "number"
+                },
+                "measuredAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "fixtureHash": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
       "AuditEventLine": {
         "type": "object",
         "required": [
@@ -697,6 +895,46 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/ExplorePlanResult"
+            }
+          }
+        }
+      },
+      "Plan": {
+        "description": "plan and hash",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExplorePlanResult"
+            }
+          }
+        }
+      },
+      "AdoptedCandidates": {
+        "description": "adopted candidates",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AdoptedCandidatesResult"
+            }
+          }
+        }
+      },
+      "Report": {
+        "description": "report artifact (model hash, markdown)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "Capabilities": {
+        "description": "engine capability snapshots",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CapabilitiesResult"
             }
           }
         }

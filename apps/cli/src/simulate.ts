@@ -3,11 +3,23 @@
  * 固定 fixture 上で基準シナリオ (探索→能動診断→所見→報告) を完走させ、
  * 終了コード・監査 event・版情報を返す (F21-UT-009)。
  *
- * A0 では Core API HTTP server の代わりに core/simulation を直接呼ぶ
- * (トレーサビリティ決定「direct CLI」)。HTTP 契約への差し替え時に本 file だけを置き換える。
+ * Core API HTTP 契約 (design/18, 19 §3) 経由で実行する。A0 は CLI 自身が
+ * simulation harness を in-process で host し、127.0.0.1 の ephemeral port へ
+ * loopback 通信する (外部ネットワークに出ない)。
  */
-import { DomainError, type BaselineFlowEvent } from '@scopepilot2/contracts';
-import { runBaselineScenario } from '@scopepilot2/simulation';
+import type { Server } from 'node:http';
+import type {
+  BaselineFlowEvent,
+  DomainErrorCode,
+  ExecutionPlan,
+  Finding,
+  PageObservation,
+  PlanConfirmation,
+  ReportArtifact,
+  ScanCandidate,
+} from '@scopepilot2/contracts';
+import { createCoreApiServer } from '@scopepilot2/core';
+import { createHarness, FIXTURE_OPERATOR, SITE_ORIGIN } from '@scopepilot2/simulation';
 import { exitCodeForDomainError, ExitCodes } from './exit-codes.ts';
 
 export interface SimulateSummary {
@@ -44,69 +56,228 @@ export interface SimulateOptions {
   readonly injectUnknownScanTarget?: boolean;
 }
 
-export async function runSimulate(options: SimulateOptions = {}): Promise<SimulateOutcome> {
-  try {
-    const result = await runBaselineScenario({
-      ...(options.injectUnknownScanTarget === undefined
-        ? {}
-        : { injectUnknownScanTarget: options.injectUnknownScanTarget }),
-    });
-    const imported = result.events.find((event): event is Extract<BaselineFlowEvent, { type: 'FindingsImported' }> => event.type === 'FindingsImported');
-    const zapSnapshot = result.capabilities.find((capability) => capability.engineKind === 'zap');
-    const playwrightSnapshot = result.capabilities.find((capability) => capability.engineKind === 'playwright');
-    const nucleiSnapshot = result.capabilities.find((capability) => capability.engineKind === 'nuclei');
-    const findingsCount = result.findings.length;
-    const exitCode = findingsCount > 0 ? ExitCodes.FindingsPresent : ExitCodes.Success;
-    const summary: SimulateSummary = {
-      schemaVersion: 'scopepilot2.simulate.v1',
-      command: 'simulate',
-      status: 'completed',
-      exitCode,
-      caseId: result.caseRecord.caseId,
-      explorePlanHash: result.explorePlanHash,
-      scanPlanHash: result.scanPlanHash,
-      reportModelHash: result.report.modelHash,
-      exploredCount: result.exploration.observations.length,
-      scannedCount: result.activeScan.scanRequest.targets.length,
-      findingsCount,
-      importedCount: imported?.importedCount ?? 0,
-      duplicateCount: imported?.duplicateCount ?? 0,
-      engineVersions: {
-        explorer: result.harness.explorer.engineVersion,
-        zap: result.activeScan.engineVersion,
-      },
-      capabilityFixtureHashes: {
-        ...(playwrightSnapshot?.fixtureHash === undefined ? {} : { playwright: playwrightSnapshot.fixtureHash }),
-        ...(zapSnapshot?.fixtureHash === undefined ? {} : { zap: zapSnapshot.fixtureHash }),
-        ...(nucleiSnapshot?.fixtureHash === undefined ? {} : { nuclei: nucleiSnapshot.fixtureHash }),
-      },
-      eventsCount: result.events.length,
-    };
-    return { exitCode, summary, events: result.events };
-  } catch (cause) {
-    if (!(cause instanceof DomainError)) {
-      throw cause;
-    }
-    const exitCode = exitCodeForDomainError(cause.code);
-    const summary: SimulateSummary = {
-      schemaVersion: 'scopepilot2.simulate.v1',
-      command: 'simulate',
-      status: 'failed',
-      exitCode,
-      caseId: '',
-      explorePlanHash: '',
-      scanPlanHash: '',
-      reportModelHash: '',
-      exploredCount: 0,
-      scannedCount: 0,
-      findingsCount: 0,
-      importedCount: 0,
-      duplicateCount: 0,
-      engineVersions: { explorer: '', zap: '' },
-      capabilityFixtureHashes: {},
-      eventsCount: 0,
-      failure: { code: cause.code, message: cause.message },
-    };
-    return { exitCode, summary, events: [] };
+/** Core API の domain error (HTTP error body)。終了 code へは同じ DomainErrorCode 規約で写す。 */
+class CoreApiError extends Error {
+  readonly code: DomainErrorCode;
+
+  constructor(code: DomainErrorCode, message: string) {
+    super(message);
+    this.code = code;
   }
+}
+
+const DOMAIN_ERROR_CODES: ReadonlySet<string> = new Set([
+  'ValidationFailed',
+  'PermissionDenied',
+  'OutOfScope',
+  'ConfirmationRequired',
+  'Conflict',
+  'CapabilityUnavailable',
+  'NeedsInput',
+  'Unsupported',
+  'EngineFailure',
+  'Cancelled',
+]);
+
+export async function runSimulate(options: SimulateOptions = {}): Promise<SimulateOutcome> {
+  const harness = createHarness();
+  const server = createCoreApiServer({ service: harness.service, operator: FIXTURE_OPERATOR });
+  try {
+    await listenLoopback(server);
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('expected a TCP address for the core api server');
+    }
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    try {
+      return await runScenarioOverApi(baseUrl, options);
+    } catch (cause) {
+      if (!(cause instanceof CoreApiError)) {
+        throw cause;
+      }
+      const exitCode = exitCodeForDomainError(cause.code);
+      const summary: SimulateSummary = {
+        schemaVersion: 'scopepilot2.simulate.v1',
+        command: 'simulate',
+        status: 'failed',
+        exitCode,
+        caseId: '',
+        explorePlanHash: '',
+        scanPlanHash: '',
+        reportModelHash: '',
+        exploredCount: 0,
+        scannedCount: 0,
+        findingsCount: 0,
+        importedCount: 0,
+        duplicateCount: 0,
+        engineVersions: { explorer: '', zap: '' },
+        capabilityFixtureHashes: {},
+        eventsCount: 0,
+        failure: { code: cause.code, message: cause.message },
+      };
+      return { exitCode, summary, events: [] };
+    }
+  } finally {
+    await closeServer(server);
+  }
+}
+
+async function runScenarioOverApi(baseUrl: string, options: SimulateOptions): Promise<SimulateOutcome> {
+  // 1. 案件作成
+  const caseRecord = await callApi<{ caseId: string }>(baseUrl, 'POST', '/api/case', {
+    name: 'Fixture 基準シナリオ案件',
+    allowedOrigins: [SITE_ORIGIN],
+    deniedOrigins: [],
+    limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+  });
+
+  // 2. 認可
+  await callApi(baseUrl, 'POST', '/api/authorization', {
+    allowedOperationClasses: ['Browse', 'ActiveScan'],
+    targetRoles: ['unauthenticated'],
+    validFrom: '2026-10-18T00:00:00.000Z',
+    validUntil: '2026-10-19T00:00:00.000Z',
+    evidenceLabel: '認可証跡(fixture)',
+    evidenceContent: 'fixture authorization evidence; no secrets',
+  });
+
+  // 3. 探索計画 → 検証・認可結び付け → 確認 → 実行
+  const explorePlan = await callApi<{ plan: ExecutionPlan; planHash: string }>(baseUrl, 'POST', '/api/plan/explore', {
+    seeds: [`${SITE_ORIGIN}/`],
+  });
+  const exploreConfirmation = await callApi<PlanConfirmation>(baseUrl, 'POST', '/api/plan/confirm', { plan: explorePlan.plan });
+  const exploration = await callApi<{
+    observations: readonly PageObservation[];
+    candidates: readonly ScanCandidate[];
+    engineVersion: string;
+  }>(baseUrl, 'POST', '/api/run/explore', {
+    plan: explorePlan.plan,
+    confirmation: exploreConfirmation,
+    maxDepth: 2,
+  });
+
+  // 4. 候補の採用 (基準シナリオでは全採用)
+  const { adopted } = await callApi<{ adopted: readonly ScanCandidate[] }>(baseUrl, 'POST', '/api/candidates/adopt', {
+    candidates: exploration.candidates,
+  });
+
+  // 5. 能動診断計画 → 検証・認可結び付け → 確認 → 実行 → 取込
+  const scanTargets = adopted.map((candidate) => candidate.url);
+  if (options.injectUnknownScanTarget === true) {
+    scanTargets.push(`${SITE_ORIGIN}/not-in-context.php`);
+  }
+  const scanPlan = await callApi<{ plan: ExecutionPlan; planHash: string }>(baseUrl, 'POST', '/api/plan/scan', {
+    targets: scanTargets,
+  });
+  const scanConfirmation = await callApi<PlanConfirmation>(baseUrl, 'POST', '/api/plan/confirm', { plan: scanPlan.plan });
+  const activeScan = await callApi<{
+    scanRequest: { targets: readonly string[] };
+    findings: readonly Finding[];
+    engineVersion: string;
+  }>(baseUrl, 'POST', '/api/run/scan', {
+    plan: scanPlan.plan,
+    confirmation: scanConfirmation,
+    adopted,
+  });
+
+  // 6. 報告
+  const report = await callApi<ReportArtifact>(baseUrl, 'POST', '/api/report', { guidelines: ['fixture-guideline'] });
+
+  // 監査 event は cursor 付き NDJSON で受け取り、eventId を除いて CLI 出力の形状に戻す。
+  const events = await fetchEvents(baseUrl);
+  const imported = events.find(
+    (event): event is Extract<BaselineFlowEvent, { type: 'FindingsImported' }> => event.type === 'FindingsImported',
+  );
+  const capabilities = await callApi<{
+    capabilities: readonly { engineKind: string; fixtureHash?: string }[];
+  }>(baseUrl, 'GET', '/api/capabilities');
+  const capabilityFixtureHashes: { playwright?: string; zap?: string; nuclei?: string } = {};
+  for (const capability of capabilities.capabilities) {
+    if (
+      capability.fixtureHash !== undefined &&
+      (capability.engineKind === 'playwright' || capability.engineKind === 'zap' || capability.engineKind === 'nuclei')
+    ) {
+      capabilityFixtureHashes[capability.engineKind] = capability.fixtureHash;
+    }
+  }
+  const findingsCount = activeScan.findings.length;
+  const exitCode = findingsCount > 0 ? ExitCodes.FindingsPresent : ExitCodes.Success;
+  const summary: SimulateSummary = {
+    schemaVersion: 'scopepilot2.simulate.v1',
+    command: 'simulate',
+    status: 'completed',
+    exitCode,
+    caseId: caseRecord.caseId,
+    explorePlanHash: explorePlan.planHash,
+    scanPlanHash: scanPlan.planHash,
+    reportModelHash: report.modelHash,
+    exploredCount: exploration.observations.length,
+    scannedCount: activeScan.scanRequest.targets.length,
+    findingsCount,
+    importedCount: imported?.importedCount ?? 0,
+    duplicateCount: imported?.duplicateCount ?? 0,
+    engineVersions: {
+      explorer: exploration.engineVersion,
+      zap: activeScan.engineVersion,
+    },
+    capabilityFixtureHashes,
+    eventsCount: events.length,
+  };
+  return { exitCode, summary, events };
+}
+
+async function callApi<T>(baseUrl: string, method: string, path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    ...(body === undefined
+      ? {}
+      : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  });
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(() => null)) as { code?: string; message?: string } | null;
+    if (errorBody === null || typeof errorBody.code !== 'string' || !DOMAIN_ERROR_CODES.has(errorBody.code)) {
+      throw new Error(`core api ${method} ${path} failed: HTTP ${response.status}`);
+    }
+    throw new CoreApiError(errorBody.code as DomainErrorCode, errorBody.message ?? 'core api request failed');
+  }
+  return (await response.json()) as T;
+}
+
+async function fetchEvents(baseUrl: string): Promise<BaselineFlowEvent[]> {
+  const response = await fetch(`${baseUrl}/api/events`);
+  if (!response.ok) {
+    throw new Error(`core api GET /api/events failed: HTTP ${response.status}`);
+  }
+  const text = await response.text();
+  const events: BaselineFlowEvent[] = [];
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') {
+      continue;
+    }
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    delete parsed.eventId;
+    events.push(parsed as unknown as BaselineFlowEvent);
+  }
+  return events;
+}
+
+function listenLoopback(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+}
+
+async function closeServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => resolve(), 2000);
+    server.close(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+    server.closeAllConnections?.();
+  });
 }
