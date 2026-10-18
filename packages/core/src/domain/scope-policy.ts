@@ -6,6 +6,9 @@
  */
 import type { CaseScope, ScopeDecision } from '@scopepilot2/contracts';
 
+/** origin 集合だけを持つ scope 部分 (上限は判定に不要)。 */
+export type ScopeOrigins = Pick<CaseScope, 'allowedOrigins' | 'deniedOrigins'>;
+
 export class ScopePolicy {
   /** URL を canonical origin (`scheme://host[:port]`) へ正規化する。不正 URL は例外。 */
   static canonicalOrigin(url: string): string {
@@ -28,7 +31,7 @@ export class ScopePolicy {
   }
 
   /** deny を allow より優先して判定する。 */
-  static decide(scope: CaseScope, url: string): ScopeDecision {
+  static decide(scope: ScopeOrigins, url: string): ScopeDecision {
     const origin = ScopePolicy.canonicalOrigin(url);
     if (scope.deniedOrigins.some((denied) => denied === origin)) {
       return { allowed: false, reason: `origin ${origin} matches a deny rule` };

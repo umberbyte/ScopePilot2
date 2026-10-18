@@ -161,3 +161,59 @@ export async function runFuzz(
   }
   return { sent, cancelledAt: null };
 }
+
+export interface ExtractorBudget {
+  readonly maxScanBytes: number;
+  readonly maxMatches: number;
+}
+
+export const EXTRACTOR_DEFAULT_BUDGET: ExtractorBudget = { maxScanBytes: 1024 * 1024, maxMatches: 1000 };
+
+/**
+ * bounded な正規抽出。scan 長・match 数の上限を超えたら error となり、
+ * 部分結果を成功扱いしない (F05-UT-007)。
+ */
+export function extractMatches(pattern: RegExp, body: string, budget: ExtractorBudget = EXTRACTOR_DEFAULT_BUDGET): readonly string[] {
+  if (!pattern.global) {
+    throw domainError('ValidationFailed', 'extractor pattern must be global');
+  }
+  if (body.length > budget.maxScanBytes) {
+    throw domainError('ValidationFailed', `extractor scan exceeds ${budget.maxScanBytes} bytes`);
+  }
+  const matches: string[] = [];
+  const anchored = new RegExp(pattern.source, pattern.flags);
+  let lastIndex = 0;
+  while (lastIndex <= body.length) {
+    anchored.lastIndex = lastIndex;
+    const match = anchored.exec(body);
+    if (match === null) {
+      break;
+    }
+    matches.push(match[0]);
+    if (matches.length > budget.maxMatches) {
+      throw domainError('ValidationFailed', `extractor matches exceed ${budget.maxMatches}`);
+    }
+    lastIndex = match.index + Math.max(1, match[0].length);
+  }
+  return matches;
+}
+
+export interface FuzzResponseOutcome {
+  readonly status: number;
+  readonly contentLength: number;
+  readonly bodyHash: string;
+}
+
+/**
+ * 同一 (status, content-length, body hash) の結果は同一 cluster へ集約する (F05-UT-008)。
+ */
+export function clusterResponses(outcomes: readonly FuzzResponseOutcome[]): readonly { key: string; members: readonly number[] }[] {
+  const clusters = new Map<string, number[]>();
+  outcomes.forEach((outcome, index) => {
+    const key = `${outcome.status}|${outcome.contentLength}|${outcome.bodyHash}`;
+    const members = clusters.get(key) ?? [];
+    members.push(index);
+    clusters.set(key, members);
+  });
+  return [...clusters.entries()].map(([key, members]) => ({ key, members }));
+}
