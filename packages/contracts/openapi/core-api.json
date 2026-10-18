@@ -357,6 +357,33 @@
           }
         }
       }
+    },
+    "/api/import/nuclei": {
+      "post": {
+        "operationId": "importNucleiResults",
+        "summary": "Nuclei 結果 (JSONL) の取込。engine 実行は行わない観測出力の取込経路",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportNucleiRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NucleiImport"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1372,6 +1399,10 @@
           "severity": {
             "$ref": "#/components/schemas/FindingSeverity"
           },
+          "sourceSeverity": {
+            "type": "string",
+            "description": "engine 由来の severity 原値。正規化で値が変わる場合に併記する (f18 §5)。"
+          },
           "status": {
             "$ref": "#/components/schemas/FindingStatus"
           },
@@ -1433,6 +1464,70 @@
             "items": {
               "$ref": "#/components/schemas/Finding"
             }
+          }
+        }
+      },
+      "ImportNucleiRequest": {
+        "type": "object",
+        "required": [
+          "lines",
+          "engineVersion"
+        ],
+        "properties": {
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "観測された Nuclei JSONL 出力 (原本)。malformed 行は quarantine して継続する。"
+          },
+          "engineVersion": {
+            "type": "string",
+            "minLength": 1,
+            "description": "出力を生成した Nuclei の版。取込記録と所見の source に残す。"
+          }
+        }
+      },
+      "ImportNucleiResultsResult": {
+        "type": "object",
+        "required": [
+          "findings",
+          "importedCount",
+          "duplicateCount",
+          "quarantinedCount",
+          "excludedOutOfScope",
+          "evidenceRef"
+        ],
+        "properties": {
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            },
+            "description": "取込後の全所見 (ZAP 由来を含む)。"
+          },
+          "importedCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duplicateCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "同一 JSONL 内の重複と、既取込分の再観測の合計。"
+          },
+          "quarantinedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "malformed 行数 (処理は継続)。"
+          },
+          "excludedOutOfScope": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "案件 scope 外の matched-at として除外した行数。"
+          },
+          "evidenceRef": {
+            "type": "string",
+            "description": "JSONL 原本を保存した証拠の evidenceId。"
           }
         }
       },
@@ -1808,6 +1903,16 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/ActiveScanRunResult"
+            }
+          }
+        }
+      },
+      "NucleiImport": {
+        "description": "nuclei result import",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ImportNucleiResultsResult"
             }
           }
         }

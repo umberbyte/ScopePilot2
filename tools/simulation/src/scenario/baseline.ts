@@ -14,9 +14,10 @@ import type {
   ReportArtifact,
   ScanCandidate,
 } from '@scopepilot2/contracts';
-import type { ActiveScanRunResult, ExploreRunResult } from '@scopepilot2/core';
+import type { ActiveScanRunResult, ExploreRunResult, ImportNucleiResultsResult } from '@scopepilot2/core';
 import { createHarness, FIXTURE_AUTHORIZATION_PERIOD, FIXTURE_OPERATOR, type SimulationHarness } from '../harness.ts';
 import { SITE_ORIGIN } from '../fixtures/target-site.ts';
+import { FIXTURE_NUCLEI_JSONL, FIXTURE_NUCLEI_VERSION } from '../fixtures/nuclei-jsonl.ts';
 
 export interface BaselineScenarioResult {
   readonly harness: SimulationHarness;
@@ -31,6 +32,8 @@ export interface BaselineScenarioResult {
   readonly scanPlanHash: string;
   readonly scanConfirmation: PlanConfirmation;
   readonly activeScan: ActiveScanRunResult;
+  readonly nucleiImport: ImportNucleiResultsResult;
+  /** 報告時点の全所見 (ZAP・Nuclei 両方)。 */
   readonly findings: readonly Finding[];
   readonly report: ReportArtifact;
   readonly events: readonly BaselineFlowEvent[];
@@ -85,7 +88,14 @@ export async function runBaselineScenario(options: BaselineScenarioOptions = {})
   const scanConfirmation = service.confirmPlan(scanPlan, operator);
   const activeScan = await service.runActiveScan(operator, scanPlan, scanConfirmation, adoptedCandidates);
 
-  // 6. 報告
+  // 6. Nuclei 結果 (供給済み JSONL) の取込。engine 実行は能力表が実測を満たすまで
+  //    公開しないため、観測出力の取込経路のみを基準シナリオへ含める (f18)。
+  const nucleiImport = await service.importNucleiResults(operator, {
+    lines: FIXTURE_NUCLEI_JSONL,
+    engineVersion: FIXTURE_NUCLEI_VERSION,
+  });
+
+  // 7. 報告
   const report = service.generateReport(operator, { guidelines: ['fixture-guideline'] });
 
   return {
@@ -101,7 +111,8 @@ export async function runBaselineScenario(options: BaselineScenarioOptions = {})
     scanPlanHash,
     scanConfirmation,
     activeScan,
-    findings: activeScan.findings,
+    nucleiImport,
+    findings: nucleiImport.findings,
     report,
     events: service.events(),
     capabilities: harness.capabilities,

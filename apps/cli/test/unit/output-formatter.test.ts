@@ -32,9 +32,9 @@ const summary: SimulateSummary = {
   findingsCount: 3,
   importedCount: 3,
   duplicateCount: 1,
-  engineVersions: { explorer: 'fixture-playwright-1', zap: '2.17.0-fixture' },
+  engineVersions: { explorer: 'fixture-playwright-1', zap: '2.17.0-fixture', nuclei: '3.4.0-fixture' },
   capabilityFixtureHashes: { zap: 'zap-fixture-hash' },
-  eventsCount: 16,
+  eventsCount: 17,
 };
 
 describe('OutputFormatter', () => {

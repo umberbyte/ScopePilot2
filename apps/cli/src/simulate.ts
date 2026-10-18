@@ -19,7 +19,13 @@ import type {
   ScanCandidate,
 } from '@scopepilot2/contracts';
 import { createCoreApiServer } from '@scopepilot2/core';
-import { createHarness, FIXTURE_OPERATOR, SITE_ORIGIN } from '@scopepilot2/simulation';
+import {
+  createHarness,
+  FIXTURE_NUCLEI_JSONL,
+  FIXTURE_NUCLEI_VERSION,
+  FIXTURE_OPERATOR,
+  SITE_ORIGIN,
+} from '@scopepilot2/simulation';
 import { exitCodeForDomainError, ExitCodes } from './exit-codes.ts';
 
 export interface SimulateSummary {
@@ -36,7 +42,7 @@ export interface SimulateSummary {
   readonly findingsCount: number;
   readonly importedCount: number;
   readonly duplicateCount: number;
-  readonly engineVersions: { readonly explorer: string; readonly zap: string };
+  readonly engineVersions: { readonly explorer: string; readonly zap: string; readonly nuclei: string };
   readonly capabilityFixtureHashes: {
     readonly playwright?: string;
     readonly zap?: string;
@@ -110,7 +116,7 @@ export async function runSimulate(options: SimulateOptions = {}): Promise<Simula
         findingsCount: 0,
         importedCount: 0,
         duplicateCount: 0,
-        engineVersions: { explorer: '', zap: '' },
+        engineVersions: { explorer: '', zap: '', nuclei: '' },
         capabilityFixtureHashes: {},
         eventsCount: 0,
         failure: { code: cause.code, message: cause.message },
@@ -180,14 +186,30 @@ async function runScenarioOverApi(baseUrl: string, options: SimulateOptions): Pr
     adopted,
   });
 
-  // 6. 報告
+  // 6. Nuclei 結果 (供給済み JSONL) の取込。engine 実行ではなく観測出力の取込経路 (f18)。
+  const nucleiImport = await callApi<{
+    findings: readonly Finding[];
+    importedCount: number;
+    duplicateCount: number;
+    quarantinedCount: number;
+    excludedOutOfScope: number;
+    evidenceRef: string;
+  }>(baseUrl, 'POST', '/api/import/nuclei', {
+    lines: FIXTURE_NUCLEI_JSONL,
+    engineVersion: FIXTURE_NUCLEI_VERSION,
+  });
+
+  // 7. 報告
   const report = await callApi<ReportArtifact>(baseUrl, 'POST', '/api/report', { guidelines: ['fixture-guideline'] });
 
   // 監査 event は cursor 付き NDJSON で受け取り、eventId を除いて CLI 出力の形状に戻す。
   const events = await fetchEvents(baseUrl);
-  const imported = events.find(
-    (event): event is Extract<BaselineFlowEvent, { type: 'FindingsImported' }> => event.type === 'FindingsImported',
-  );
+  const importedTotals = events
+    .filter((event): event is Extract<BaselineFlowEvent, { type: 'FindingsImported' }> => event.type === 'FindingsImported')
+    .reduce(
+      (totals, event) => ({ imported: totals.imported + event.importedCount, duplicates: totals.duplicates + event.duplicateCount }),
+      { imported: 0, duplicates: 0 },
+    );
   const capabilities = await callApi<{
     capabilities: readonly { engineKind: string; fixtureHash?: string }[];
   }>(baseUrl, 'GET', '/api/capabilities');
@@ -200,7 +222,7 @@ async function runScenarioOverApi(baseUrl: string, options: SimulateOptions): Pr
       capabilityFixtureHashes[capability.engineKind] = capability.fixtureHash;
     }
   }
-  const findingsCount = activeScan.findings.length;
+  const findingsCount = nucleiImport.findings.length;
   const exitCode = findingsCount > 0 ? ExitCodes.FindingsPresent : ExitCodes.Success;
   const summary: SimulateSummary = {
     schemaVersion: 'scopepilot2.simulate.v1',
@@ -214,11 +236,12 @@ async function runScenarioOverApi(baseUrl: string, options: SimulateOptions): Pr
     exploredCount: exploration.observations.length,
     scannedCount: activeScan.scanRequest.targets.length,
     findingsCount,
-    importedCount: imported?.importedCount ?? 0,
-    duplicateCount: imported?.duplicateCount ?? 0,
+    importedCount: importedTotals.imported,
+    duplicateCount: importedTotals.duplicates,
     engineVersions: {
       explorer: exploration.engineVersion,
       zap: activeScan.engineVersion,
+      nuclei: FIXTURE_NUCLEI_VERSION,
     },
     capabilityFixtureHashes,
     eventsCount: events.length,

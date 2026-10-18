@@ -46,6 +46,7 @@ import {
   validatePlan,
 } from '../domain/plan-service.ts';
 import { FindingImporter } from '../domain/finding-importer.ts';
+import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
 import type { ActiveScanEnginePort, ExplorationPort } from '../ports/engines.ts';
@@ -95,6 +96,24 @@ export interface ActiveScanRunResult {
   readonly findings: readonly Finding[];
   readonly overshootReservation: number;
   readonly engineVersion: string;
+}
+
+export interface ImportNucleiResultsInput {
+  /** 観測された Nuclei JSONL 出力 (原本)。engine 実行はこの経路では行わない。 */
+  readonly lines: readonly string[];
+  readonly engineVersion: string;
+}
+
+export interface ImportNucleiResultsResult {
+  /** 取込後の全所見 (ZAP 由来を含む)。 */
+  readonly findings: readonly Finding[];
+  readonly importedCount: number;
+  readonly duplicateCount: number;
+  /** malformed 行数。quarantine しても処理は継続する (f18 §6)。 */
+  readonly quarantinedCount: number;
+  /** 案件 scope 外の matched-at は案件の所見に含めない。 */
+  readonly excludedOutOfScope: number;
+  readonly evidenceRef: string;
 }
 
 const MAX_POLL_ITERATIONS = 1000;
@@ -587,6 +606,60 @@ export class BaselineFlowService {
       findings: this.importer.list(),
       overshootReservation: reservedRequests,
       engineVersion: this.deps.scanEngine.engineVersion,
+    };
+  }
+
+  /**
+   * Nuclei 結果 (JSONL) の取込。engine の起動・送信は行わない観測出力の取込経路であり、
+   * 実行 (nuclei-scan step) は能力表が実測を満たすまで公開しない (design/22)。
+   * 原本を証拠保存してから所見化し、壊れた行は quarantine して継続する。
+   */
+  async importNucleiResults(operator: OperatorProfile, input: ImportNucleiResultsInput): Promise<ImportNucleiResultsResult> {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    if (input.engineVersion.trim() === '') {
+      throw domainError('ValidationFailed', 'engineVersion must not be empty');
+    }
+
+    const parsed = parseNucleiJsonl(input.lines);
+    const inScope = parsed.matches.filter((match) => ScopePolicy.decide(caseRecord.scope, match.matchedAt).allowed);
+    const excludedOutOfScope = parsed.matches.length - inScope.length;
+    const batch = importMatches(inScope);
+
+    const importId = this.deps.ids.next('nuclei-import');
+    let rawEvidence;
+    try {
+      rawEvidence = await this.deps.evidence.saveText(
+        `nuclei-jsonl-raw:${importId}`,
+        canonicalJson({ importId, engineVersion: input.engineVersion, lines: input.lines }),
+      );
+    } catch (cause) {
+      throw domainError('EngineFailure', `evidence storage failed before nuclei import: ${String(cause)}`, {
+        retryable: true,
+        details: { importId },
+      });
+    }
+    const result = this.importer.importNucleiMatches(batch.imported, {
+      now: this.deps.clock.now().toISOString(),
+      engineVersion: input.engineVersion,
+      makeFindingId: () => this.deps.ids.next('finding'),
+      evidenceRef: rawEvidence.evidenceId,
+    });
+    this.record({
+      type: 'FindingsImported',
+      at: this.deps.clock.now().toISOString(),
+      source: 'nuclei-match',
+      engineVersion: input.engineVersion,
+      importedCount: result.created.length,
+      duplicateCount: batch.duplicates + result.duplicateCount,
+    });
+    return {
+      findings: this.importer.list(),
+      importedCount: result.created.length,
+      duplicateCount: batch.duplicates + result.duplicateCount,
+      quarantinedCount: parsed.quarantined,
+      excludedOutOfScope,
+      evidenceRef: rawEvidence.evidenceId,
     };
   }
 

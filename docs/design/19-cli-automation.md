@@ -42,7 +42,7 @@ Ctrl+C/SIGINT は第一段階で協調停止を要求し、猶予後の二回目
 
 ## 5. シミュレーションハーネス
 
-`tools/simulation` は ZAP API、Playwright 対象、Nuclei JSONL の固定 fixture を提供する。A0 の基準シナリオは「案件作成→認可→探索→候補採用→能動診断→取込→所見→報告」である。実サービスへの検出率ベンチマークは既定の受け入れ条件にしない。
+`tools/simulation` は ZAP API、Playwright 対象、Nuclei JSONL の固定 fixture を提供する。A0 の基準シナリオは「案件作成→認可→探索→候補採用→能動診断→取込→Nuclei 結果取込→所見→報告」である (Nuclei は engine 実行ではなく観測出力 JSONL の取込経路。実行は能力表の実測が済むまで公開しない)。実サービスへの検出率ベンチマークは既定の受け入れ条件にしない。
 
 ## 6. 安全制御
 

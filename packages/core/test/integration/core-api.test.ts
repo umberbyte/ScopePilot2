@@ -265,6 +265,57 @@ describe('Core API server (node:http)', () => {
     assert.equal(emptyCandidates.status, 400);
   });
 
+  test('POST /api/import/nuclei は JSONL 取込結果 (quarantine・scope外・重複・正規化) を返す', async () => {
+    const response = await fetch(`${baseUrl}/api/import/nuclei`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        engineVersion: '3.4.0-it',
+        lines: [
+          '{"template-id":"it-header.yaml","matched-at":"http://fixture.target.test/","info":{"severity":"info","name":"IT header"}}',
+          '{"template-id":"it-header.yaml","matched-at":"http://fixture.target.test/","info":{"severity":"info","name":"IT header"}}',
+          '{"template-id":"it-critical.yaml","matched-at":"http://fixture.target.test/setup.php","info":{"severity":"critical","name":"IT critical"}}',
+          '{"template-id":"it-external.yaml","matched-at":"http://elsewhere.example/x","info":{"severity":"info","name":"IT external"}}',
+          '{broken json',
+        ],
+      }),
+    });
+    assert.equal(response.status, 200);
+    const result = (await response.json()) as {
+      findings: { readonly source: { readonly kind: string }; readonly severity: string; readonly sourceSeverity?: string; readonly url: string }[];
+      importedCount: number;
+      duplicateCount: number;
+      quarantinedCount: number;
+      excludedOutOfScope: number;
+      evidenceRef: string;
+    };
+    assert.equal(result.importedCount, 2);
+    assert.equal(result.duplicateCount, 1);
+    assert.equal(result.quarantinedCount, 1);
+    assert.equal(result.excludedOutOfScope, 1);
+    assert.ok(result.evidenceRef.length > 0);
+    const critical = result.findings.find(
+      (finding) => finding.source.kind === 'nuclei-match' && finding.sourceSeverity === 'critical',
+    );
+    assert.notEqual(critical, undefined);
+    assert.equal(critical?.severity, 'high');
+    assert.ok(
+      result.findings
+        .filter((finding) => finding.source.kind === 'nuclei-match')
+        .every((finding) => finding.url.startsWith('http://fixture.target.test')),
+      'scope 外 matched-at の所見は作らない',
+    );
+
+    const invalid = await fetch(`${baseUrl}/api/import/nuclei`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lines: ['{}'] }),
+    });
+    assert.equal(invalid.status, 400);
+    const error = (await invalid.json()) as { code: string };
+    assert.equal(error.code, 'ValidationFailed');
+  });
+
   test('GET /api/capabilities は能力表 (source・版) を返す', async () => {
     const response = await fetch(`${baseUrl}/api/capabilities`);
     assert.equal(response.status, 200);

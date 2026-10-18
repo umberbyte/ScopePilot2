@@ -2,12 +2,19 @@
  * engine alert の取込と重複除外。`docs/detailed-design/f11-active-scan.md` 4章 (ScanResultImporter)、
  * 旧版からの継承知見「取込時の重複除外」。
  * 同一 (pluginId, url, param) の再取込は新規所見を作らず、観測回数だけを増やす (F11-UT-006)。
+ * Nuclei match も同じ台帳へ取り込む (f18 §4 NucleiResultImporter。dedupe key は template/target)。
  * engine 由来の所見は常に実影響未確認 (unverified) として扱う。
  */
 import type { EngineAlert, Finding, FindingSeverity } from '@scopepilot2/contracts';
+import type { NucleiMatch } from './known-vulnerabilities.ts';
+import { normalizeNucleiSeverity } from './known-vulnerabilities.ts';
 
 export function dedupeKeyOf(alert: EngineAlert): string {
   return `${alert.pluginId}|${alert.url}|${alert.param ?? ''}`;
+}
+
+function nucleiDedupeKeyOf(match: NucleiMatch): string {
+  return `nuclei|${match.templateId}|${match.matchedAt}`;
 }
 
 function severityOf(risk: EngineAlert['risk']): FindingSeverity {
@@ -69,6 +76,43 @@ export class FindingImporter {
           lastSeenAt: context.now,
           occurrences: 1,
           enginePluginId: alert.pluginId,
+        };
+        this.findingsByDedupeKey.set(key, finding);
+        created.push(finding);
+      } else {
+        duplicateCount += 1;
+        const updated: Finding = { ...existing, occurrences: existing.occurrences + 1, lastSeenAt: context.now };
+        this.findingsByDedupeKey.set(key, updated);
+        reobserved.push(updated);
+      }
+    }
+    return { created, reobserved, duplicateCount };
+  }
+
+  /** Nuclei match の取込。severity は正規化値と原値を併記し、原値は変えない (f18 §5)。 */
+  importNucleiMatches(matches: readonly NucleiMatch[], context: ImportAlertsContext): ImportAlertsResult {
+    const created: Finding[] = [];
+    const reobserved: Finding[] = [];
+    let duplicateCount = 0;
+
+    for (const match of matches) {
+      const key = nucleiDedupeKeyOf(match);
+      const existing = this.findingsByDedupeKey.get(key);
+      if (existing === undefined) {
+        const { severity, sourceSeverity } = normalizeNucleiSeverity(match.severity);
+        const finding: Finding = {
+          findingId: context.makeFindingId(),
+          title: match.name === '' ? match.templateId : match.name,
+          source: { kind: 'nuclei-match', engineVersion: context.engineVersion, unverified: true },
+          url: match.matchedAt,
+          severity,
+          ...(severity === sourceSeverity.toLowerCase() ? {} : { sourceSeverity }),
+          status: 'candidate',
+          evidenceRefs: [context.evidenceRef],
+          firstSeenAt: context.now,
+          lastSeenAt: context.now,
+          occurrences: 1,
+          enginePluginId: match.templateId,
         };
         this.findingsByDedupeKey.set(key, finding);
         created.push(finding);

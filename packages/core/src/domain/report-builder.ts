@@ -64,7 +64,7 @@ export function renderMarkdown(model: ReportModel, reportId: string): ReportArti
   model.findings.forEach((finding, index) => {
     lines.push(`### [${index + 1}] ${finding.title}`);
     lines.push('');
-    lines.push(`- 深刻度: ${finding.severity}`);
+    lines.push(`- 深刻度: ${finding.severity}${finding.sourceSeverity === undefined ? '' : ` (原表記: ${finding.sourceSeverity})`}`);
     lines.push(`- URL: ${finding.url}`);
     if (finding.param !== undefined) {
       lines.push(`- パラメータ: ${finding.param}`);

@@ -34,6 +34,8 @@ export interface Finding {
   readonly method?: string;
   readonly param?: string;
   readonly severity: FindingSeverity;
+  /** engine 由来の severity 原値。正規化で値が変わる場合に併記する (f18 §5)。 */
+  readonly sourceSeverity?: string;
   readonly status: FindingStatus;
   readonly evidenceRefs: readonly string[];
   readonly firstSeenAt: string;

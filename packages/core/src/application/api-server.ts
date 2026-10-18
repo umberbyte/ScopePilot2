@@ -212,6 +212,21 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'POST /api/import/nuclei') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = await service.importNucleiResults(operator, {
+          lines: stringArrayField(body, 'lines'),
+          engineVersion: stringField(body, 'engineVersion'),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/events') {
       const since = Number(url.searchParams.get('since') ?? '0');
       if (!Number.isInteger(since) || since < 0) {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { DomainError } from '@scopepilot2/contracts';
 import {
+  FIXTURE_NUCLEI_VERSION,
   FIXTURE_ZAP_VERSION,
   runBaselineScenario,
   zapAlertsFixtureHash,
@@ -22,6 +23,7 @@ const EXPECTED_EVENT_SEQUENCE: readonly string[] = [
   'PlanConfirmed',
   'RunStarted',
   'RunCompleted',
+  'FindingsImported',
   'FindingsImported',
   'ReportGenerated',
 ];
@@ -65,24 +67,33 @@ describe('A0 基準シナリオ (探索→能動診断→所見)', () => {
 
   test('[F21-FT-004] engine 警告は重複除外され、実影響未確認として取込まれる (Delegated)', async () => {
     const result = await runBaselineScenario();
-    assert.equal(result.findings.length, 3);
-    const reobserved = result.findings.find((finding) => finding.enginePluginId === '40012');
+    const zapFindings = result.findings.filter((finding) => finding.source.kind === 'zap-alert');
+    assert.equal(zapFindings.length, 3);
+    const reobserved = zapFindings.find((finding) => finding.enginePluginId === '40012');
     assert.notEqual(reobserved, undefined);
     assert.equal(reobserved?.occurrences, 2);
     for (const finding of result.findings) {
-      assert.equal(finding.source.kind, 'zap-alert');
       assert.equal(finding.source.unverified, true);
-      assert.equal(finding.source.engineVersion, FIXTURE_ZAP_VERSION);
       assert.equal(finding.status, 'candidate');
       assert.ok(finding.evidenceRefs.length > 0);
     }
-    const imported = result.events.find((event) => event.type === 'FindingsImported');
+    for (const finding of zapFindings) {
+      assert.equal(finding.source.engineVersion, FIXTURE_ZAP_VERSION);
+    }
+    const imported = result.events.filter(
+      (event): event is Extract<typeof event, { type: 'FindingsImported' }> => event.type === 'FindingsImported',
+    );
+    assert.equal(imported.length, 2);
     assert.deepEqual(
-      imported !== undefined && imported.type === 'FindingsImported'
-        ? { importedCount: imported.importedCount, duplicateCount: imported.duplicateCount }
-        : undefined,
+      { importedCount: imported[0]?.importedCount, duplicateCount: imported[0]?.duplicateCount },
       { importedCount: 3, duplicateCount: 1 },
     );
+    assert.deepEqual(imported[0]?.source, 'zap-alert');
+    assert.deepEqual(
+      { importedCount: imported[1]?.importedCount, duplicateCount: imported[1]?.duplicateCount },
+      { importedCount: 3, duplicateCount: 1 },
+    );
+    assert.deepEqual(imported[1]?.source, 'nuclei-match');
   });
 
   test('[F21-FT-005] engine 版・能力表 (fixture) ・overshoot 予約が実行記録へ残る', async () => {
