@@ -5,7 +5,7 @@
  */
 
 export interface ParsedCli {
-  readonly command: 'simulate';
+  readonly command: 'simulate' | 'capabilities';
   readonly json: boolean;
   readonly injectUnknownScanTarget: boolean;
   readonly eventsFile?: string;
@@ -26,8 +26,8 @@ const SECRET_OPTION_PATTERN = /(?:secret|token|password|passphrase|api[-_]?key|c
 
 export function parseCli(argv: readonly string[]): ParsedCli {
   const [command, ...rest] = argv;
-  if (command !== 'simulate') {
-    throw new UsageError(`unknown command: ${String(command)} (expected: simulate)`);
+  if (command !== 'simulate' && command !== 'capabilities') {
+    throw new UsageError(`unknown command: ${String(command)} (expected: simulate or capabilities)`);
   }
 
   let json: boolean | undefined;
@@ -105,7 +105,7 @@ export function parseCli(argv: readonly string[]): ParsedCli {
   }
 
   return {
-    command: 'simulate',
+    command,
     json: json ?? false,
     injectUnknownScanTarget,
     ...(eventsFile === undefined ? {} : { eventsFile }),

@@ -8,6 +8,7 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { parseCli, UsageError } from './cli-parser.ts';
 import { OutputFormatter, type OutputWriters } from './output-formatter.ts';
 import { runSimulate } from './simulate.ts';
+import { runCapabilities } from './capabilities.ts';
 
 export async function main(argv: readonly string[], writers?: OutputWriters): Promise<number> {
   const boundWriters: OutputWriters = writers ?? {
@@ -30,6 +31,12 @@ export async function main(argv: readonly string[], writers?: OutputWriters): Pr
     throw error;
   }
 
+  if (parsed.command === 'capabilities') {
+    return await runCapabilities(
+      parsed.apiUrl === undefined ? {} : { apiUrl: parsed.apiUrl },
+      boundWriters,
+    );
+  }
   const output = new OutputFormatter({ json: parsed.json }, boundWriters);
   const outcome = await runSimulate({
     ...(parsed.injectUnknownScanTarget ? { injectUnknownScanTarget: true } : {}),

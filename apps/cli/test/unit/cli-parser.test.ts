@@ -39,6 +39,8 @@ describe('CliParser', () => {
       assert.match(error.message, /unknown command/);
       return true;
     });
+    assert.equal(parseCli(['capabilities']).command, 'capabilities');
+    assert.equal(parseCli(['capabilities', '--api', 'http://127.0.0.1:8787']).apiUrl, 'http://127.0.0.1:8787');
 
     assert.deepEqual(parseCli(['simulate']), {
       command: 'simulate',
