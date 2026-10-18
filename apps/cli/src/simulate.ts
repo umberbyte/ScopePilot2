@@ -260,12 +260,18 @@ async function runScenarioOverApi(baseUrl: string, options: SimulateOptions): Pr
 }
 
 async function callApi<T>(baseUrl: string, method: string, path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`${baseUrl}${path}`, {
-    method,
-    ...(body === undefined
-      ? {}
-      : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method,
+      ...(body === undefined
+        ? {}
+        : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    });
+  } catch {
+    // 接続できない Core API は engine 失敗 (retryable) として報告し、生の fetch error を外へ出さない。
+    throw new CoreApiError('EngineFailure', `Core API at ${baseUrl} is unreachable`, );
+  }
   if (!response.ok) {
     const errorBody = (await response.json().catch(() => null)) as { code?: string; message?: string } | null;
     if (errorBody === null || typeof errorBody.code !== 'string' || !DOMAIN_ERROR_CODES.has(errorBody.code)) {

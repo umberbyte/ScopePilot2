@@ -54,6 +54,14 @@ describe('SimulationHarness (scopepilot simulate)', () => {
     }
   });
 
+  test('[F21-UT-009] 接続できない --api は engine 失敗 (exit 7) として報告する', async () => {
+    const outcome = await runSimulate({ apiUrl: 'http://127.0.0.1:9' });
+    assert.equal(outcome.summary.status, 'failed');
+    assert.equal(outcome.exitCode, 7);
+    assert.equal(outcome.summary.failure?.code, 'EngineFailure');
+    assert.match(outcome.summary.failure?.message ?? '', /unreachable/);
+  });
+
   test('[F21-UT-009] 既知失敗 (URL Does not Exist) は engine 失敗として報告する', async () => {
     const outcome = await runSimulate({ injectUnknownScanTarget: true });
     assert.equal(outcome.summary.status, 'failed');
