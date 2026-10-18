@@ -375,6 +375,40 @@ describe('Core API server (node:http)', () => {
     assert.equal(result.observations.length, 2, 'page 上限で観測を打ち切り');
   });
 
+  test('認可期限切れ: 期限切れ認可では計画検証が 403 になる (design/19 受け入れ2)', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'authz-expired-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+    await fetch(`${baseUrl}/api/authorization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['unauthenticated'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-18T09:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      }),
+    });
+    // 固定時計 (TEST_NOW=09:00Z) の境界で validUntil == now は期限切れ扱い。
+    const planResponse = await fetch(`${baseUrl}/api/plan/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seeds: ['http://fixture.target.test/'] }),
+    });
+    assert.equal(planResponse.status, 403);
+    const error = (await planResponse.json()) as { code: string };
+    assert.equal(error.code, 'PermissionDenied');
+  });
+
   test('GET /api/events?since=N は cursor 以降の監査 event を NDJSON で返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',
