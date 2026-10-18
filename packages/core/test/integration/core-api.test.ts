@@ -409,6 +409,69 @@ describe('Core API server (node:http)', () => {
     assert.equal(error.code, 'PermissionDenied');
   });
 
+  test('scope 縮小後の旧 confirmation では実行できない (409, F01-UT-006 の HTTP 経路)', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'scope-narrow-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+    await fetch(`${baseUrl}/api/authorization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['unauthenticated'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      }),
+    });
+    const planResponse = await fetch(`${baseUrl}/api/plan/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seeds: ['http://fixture.target.test/'] }),
+    });
+    const { plan } = (await planResponse.json()) as { plan: unknown };
+    const confirmResponse = await fetch(`${baseUrl}/api/plan/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan }),
+    });
+    const confirmation = (await confirmResponse.json()) as { confirmationId: string };
+
+    // scope を縮小 (上限減) すると confirmation は無効化される。
+    const narrowResponse = await fetch(`${baseUrl}/api/case/scope`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 4000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+    assert.equal(narrowResponse.status, 200);
+    const narrowed = (await narrowResponse.json()) as { narrowed: boolean; invalidatedConfirmationIds: string[] };
+    assert.equal(narrowed.narrowed, true);
+    assert.deepEqual(narrowed.invalidatedConfirmationIds, [confirmation.confirmationId]);
+
+    const staleRun = await fetch(`${baseUrl}/api/run/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan, confirmation, maxDepth: 2 }),
+    });
+    assert.equal(staleRun.status, 409);
+    const error = (await staleRun.json()) as { code: string; message: string };
+    assert.equal(error.code, 'ConfirmationRequired');
+    assert.match(error.message, /invalidated/);
+  });
+
   test('GET /api/events?since=N は cursor 以降の監査 event を NDJSON で返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',
