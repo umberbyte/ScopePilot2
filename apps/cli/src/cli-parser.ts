@@ -5,11 +5,12 @@
  */
 
 export interface ParsedCli {
-  readonly command: 'simulate' | 'capabilities';
+  readonly command: 'simulate' | 'capabilities' | 'events';
   readonly json: boolean;
   readonly injectUnknownScanTarget: boolean;
   readonly eventsFile?: string;
   readonly apiUrl?: string;
+  readonly since?: number;
 }
 
 export class UsageError extends Error {
@@ -26,8 +27,8 @@ const SECRET_OPTION_PATTERN = /(?:secret|token|password|passphrase|api[-_]?key|c
 
 export function parseCli(argv: readonly string[]): ParsedCli {
   const [command, ...rest] = argv;
-  if (command !== 'simulate' && command !== 'capabilities') {
-    throw new UsageError(`unknown command: ${String(command)} (expected: simulate or capabilities)`);
+  if (command !== 'simulate' && command !== 'capabilities' && command !== 'events') {
+    throw new UsageError(`unknown command: ${String(command)} (expected: simulate, capabilities, or events)`);
   }
 
   let json: boolean | undefined;
@@ -35,6 +36,7 @@ export function parseCli(argv: readonly string[]): ParsedCli {
   let eventsFile: string | undefined;
   let eventsFileSeen = false;
   let apiUrl: string | undefined;
+  let since: number | undefined;
 
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
@@ -70,6 +72,18 @@ export function parseCli(argv: readonly string[]): ParsedCli {
       case '--inject-unknown-target':
         injectUnknownScanTarget = true;
         break;
+      case '--since': {
+        if (since !== undefined) {
+          throw new UsageError('conflicting option: --since specified multiple times');
+        }
+        const value = rest[index + 1];
+        if (value === undefined || value.startsWith('--') || !/^\d+$/.test(value)) {
+          throw new UsageError('option --since requires a non-negative integer cursor');
+        }
+        since = Number(value);
+        index += 1;
+        break;
+      }
       case '--api': {
         if (apiUrl !== undefined) {
           throw new UsageError('conflicting option: --api specified multiple times');
@@ -110,5 +124,6 @@ export function parseCli(argv: readonly string[]): ParsedCli {
     injectUnknownScanTarget,
     ...(eventsFile === undefined ? {} : { eventsFile }),
     ...(apiUrl === undefined ? {} : { apiUrl }),
+    ...(since === undefined ? {} : { since }),
   };
 }

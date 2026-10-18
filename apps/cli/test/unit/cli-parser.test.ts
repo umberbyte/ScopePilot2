@@ -41,6 +41,10 @@ describe('CliParser', () => {
     });
     assert.equal(parseCli(['capabilities']).command, 'capabilities');
     assert.equal(parseCli(['capabilities', '--api', 'http://127.0.0.1:8787']).apiUrl, 'http://127.0.0.1:8787');
+    assert.equal(parseCli(['events']).command, 'events');
+    assert.equal(parseCli(['events', '--since', '12']).since, 12);
+    assert.throws(() => parseCli(['events', '--since', 'x']), /non-negative integer/);
+    assert.throws(() => parseCli(['events', '--since']), /--since requires/);
 
     assert.deepEqual(parseCli(['simulate']), {
       command: 'simulate',

@@ -9,6 +9,7 @@ import { parseCli, UsageError } from './cli-parser.ts';
 import { OutputFormatter, type OutputWriters } from './output-formatter.ts';
 import { runSimulate } from './simulate.ts';
 import { runCapabilities } from './capabilities.ts';
+import { runEvents } from './events.ts';
 
 export async function main(argv: readonly string[], writers?: OutputWriters): Promise<number> {
   const boundWriters: OutputWriters = writers ?? {
@@ -34,6 +35,15 @@ export async function main(argv: readonly string[], writers?: OutputWriters): Pr
   if (parsed.command === 'capabilities') {
     return await runCapabilities(
       parsed.apiUrl === undefined ? {} : { apiUrl: parsed.apiUrl },
+      boundWriters,
+    );
+  }
+  if (parsed.command === 'events') {
+    return await runEvents(
+      {
+        ...(parsed.apiUrl === undefined ? {} : { apiUrl: parsed.apiUrl }),
+        ...(parsed.since === undefined ? {} : { since: parsed.since }),
+      },
       boundWriters,
     );
   }
