@@ -1,0 +1,16 @@
+{
+  "name": "@scopepilot2/guideline-catalog",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/unit/**/*.test.ts\"",
+    "test:fixture": "node --test \"test/fixture/**/*.test.ts\"",
+    "generate": "node src/main.ts"
+  },
+  "devDependencies": {
+    "@scopepilot2/contracts": "*"
+  }
+}
