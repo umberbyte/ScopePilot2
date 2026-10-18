@@ -228,12 +228,28 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       }
     }
     if (route === 'GET /api/events') {
-      const since = Number(url.searchParams.get('since') ?? '0');
+      const accept = request.headers.accept ?? '';
+      const lastEventIdHeader = Number(request.headers['last-event-id'] ?? '0');
+      const sinceQuery = url.searchParams.get('since');
+      const since = sinceQuery !== null ? Number(sinceQuery) : Number.isFinite(lastEventIdHeader) ? lastEventIdHeader : 0;
       if (!Number.isInteger(since) || since < 0) {
         return respondError(response, 400, 'ValidationFailed', 'since must be a non-negative integer', false);
       }
       const events = service.events();
       // cursor は監査 event の連番。以後の event だけを返す (F20-UT-004 と同じ意味論)。
+      if (accept.includes('text/event-stream')) {
+        // SSE 形式 (design/18): Last-Event-ID (または ?since) 以降を再送する。
+        const sseLines = events
+          .slice(since)
+          .map((event, index) => {
+            const eventId = since + index + 1;
+            const body = JSON.stringify({ eventId, ...event });
+            return `id: ${eventId}\nevent: ${event.type}\ndata: ${body}\n\n`;
+          });
+        response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(sseLines.join(''));
+        return;
+      }
       const lines = events
         .slice(since)
         .map((event, index) => JSON.stringify({ eventId: since + index + 1, ...event }));

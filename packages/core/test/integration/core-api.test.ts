@@ -472,6 +472,31 @@ describe('Core API server (node:http)', () => {
     assert.match(error.message, /invalidated/);
   });
 
+  test('GET /api/events の SSE 形式は Last-Event-ID 以降を再送する (design/18)', async () => {
+    const sseResponse = await fetch(`${baseUrl}/api/events`, {
+      headers: { Accept: 'text/event-stream', 'Last-Event-ID': '0' },
+    });
+    assert.equal(sseResponse.status, 200);
+    assert.match(sseResponse.headers.get('content-type') ?? '', /text\/event-stream/);
+    const text = await sseResponse.text();
+    const blocks = text.split('\n\n').filter((block) => block !== '');
+    assert.ok(blocks.length >= 2);
+    const first = blocks[0] ?? '';
+    assert.match(first, /^id: 1\nevent: CaseCreated\ndata: /);
+    for (const [index, block] of blocks.entries()) {
+      assert.match(block, new RegExp(`^id: ${index + 1}\n`));
+    }
+    const total = blocks.length;
+    const resumed = await fetch(`${baseUrl}/api/events`, {
+      headers: { Accept: 'text/event-stream', 'Last-Event-ID': String(total - 1) },
+    });
+    const resumedText = await resumed.text();
+    const resumedBlocks = resumedText.split('\n\n').filter((block) => block !== '');
+    assert.equal(resumedBlocks.length, 1);
+    assert.match(resumedBlocks[0] ?? '', new RegExp(`^id: ${total}
+`));
+  });
+
   test('GET /api/events?since=N は cursor 以降の監査 event を NDJSON で返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',
