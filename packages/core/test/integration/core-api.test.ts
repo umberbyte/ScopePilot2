@@ -327,6 +327,54 @@ describe('Core API server (node:http)', () => {
     assert.ok(body.capabilities.every((capability) => capability.source === 'fixture' || capability.source === 'measured'));
   });
 
+  test('上限停止: maxPages=2 の案件で探索は Stopped/budget-exhausted になる (design/19 受け入れ2)', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'budget-stop-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 2, maxDurationMinutes: 60 },
+      }),
+    });
+    await fetch(`${baseUrl}/api/authorization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['unauthenticated'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      }),
+    });
+    const planResponse = await fetch(`${baseUrl}/api/plan/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seeds: ['http://fixture.target.test/'] }),
+    });
+    assert.equal(planResponse.status, 200);
+    const { plan } = (await planResponse.json()) as { plan: unknown };
+    const confirmResponse = await fetch(`${baseUrl}/api/plan/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan }),
+    });
+    const confirmation = (await confirmResponse.json()) as { confirmationId: string };
+    const runResponse = await fetch(`${baseUrl}/api/run/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan, confirmation, maxDepth: 5 }),
+    });
+    assert.equal(runResponse.status, 200);
+    const result = (await runResponse.json()) as { runRecord: { state: string; stopReason: string }; observations: unknown[] };
+    assert.equal(result.runRecord.state, 'Stopped');
+    assert.equal(result.runRecord.stopReason, 'budget-exhausted');
+    assert.equal(result.observations.length, 2, 'page 上限で観測を打ち切り');
+  });
+
   test('GET /api/events?since=N は cursor 以降の監査 event を NDJSON で返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',
