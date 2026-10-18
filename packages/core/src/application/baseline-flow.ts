@@ -15,7 +15,6 @@ import {
   type BaselineFlowEvent,
   type CaseRecord,
   type CaseScope,
-  type EngineAlert,
   type EngineCapabilitySnapshot,
   type ExecutionPlan,
   type Finding,
@@ -26,6 +25,7 @@ import {
   type PlanLimits,
   type ReportArtifact,
   type RunRecord,
+  type RunState,
   type ScanCandidate,
   type ScopeLimits,
   type StopReason,
@@ -33,6 +33,9 @@ import {
 } from '@scopepilot2/contracts';
 import { ScopePolicy } from '../domain/scope-policy.ts';
 import { CaseAggregate } from '../domain/case-aggregate.ts';
+import { RunStateMachine } from '../domain/run-state-machine.ts';
+import { ScanMonitor } from '../domain/scan-monitor.ts';
+import { filterAuthorizationEvidenceMetadata } from '../domain/authorization-evidence.ts';
 import {
   buildPlan,
   confirmationMatches,
@@ -69,7 +72,7 @@ export interface GrantAuthorizationInput {
   readonly targetRoles: readonly string[];
   readonly validFrom: string;
   readonly validUntil: string;
-  readonly evidence: { readonly label: string; readonly content: string };
+  readonly evidence: { readonly label: string; readonly content: string; readonly metadata?: Readonly<Record<string, string>> };
 }
 
 export interface ExploreRunInput {
@@ -207,7 +210,12 @@ export class BaselineFlowService {
     if (input.allowedOperationClasses.length === 0) {
       throw domainError('ValidationFailed', 'authorization must allow at least one operation class');
     }
-    const stored = await this.deps.evidence.saveText(input.evidence.label, input.evidence.content);
+    const stored = await this.deps.evidence.saveText(
+      input.evidence.label,
+      input.evidence.content,
+      // 許可欄以外の metadata は保存しない (F01-UT-008)。
+      filterAuthorizationEvidenceMetadata(input.evidence.metadata ?? {}),
+    );
     this.authorization = {
       authorizationId: this.deps.ids.next('authz'),
       caseId: caseRecord.caseId,
@@ -365,6 +373,8 @@ export class BaselineFlowService {
     const runId = this.deps.ids.next('run');
     const planHash = planHashOf(plan);
     this.record({ type: 'RunStarted', at: this.deps.clock.now().toISOString(), runId, planHash });
+    const machine = new RunStateMachine('Confirmed');
+    machine.transition('Running');
 
     const observations: PageObservation[] = [];
     const deniedUrls: { url: string; reason: string }[] = [];
@@ -420,11 +430,19 @@ export class BaselineFlowService {
     }
 
     this.exploredUrlCount = observations.length;
+    // 上限停止は Completed ではなく Stopped として区別する (design/22 §2)。
+    let runState: RunState;
+    if (stopReason === 'completed') {
+      runState = machine.transition('Completed');
+    } else {
+      machine.transition('Stopping');
+      runState = machine.transition('Stopped');
+    }
     const runRecord: RunRecord = {
       runId,
       planId: plan.planId,
       caseId: caseRecord.caseId,
-      state: 'Completed',
+      state: runState,
       attempt: 1,
       stopReason,
     };
@@ -484,6 +502,8 @@ export class BaselineFlowService {
     const runId = this.deps.ids.next('run');
     const planHash = planHashOf(plan);
     this.record({ type: 'RunStarted', at: this.deps.clock.now().toISOString(), runId, planHash });
+    const machine = new RunStateMachine('Confirmed');
+    machine.transition('Running');
 
     // Delegated 経路は最大 overshoot 分を共有上限の内側に予約する。
     const reservedRequests = Math.ceil(step.limits.maxRequests * snapshot.maxOvershootRatio);
@@ -497,37 +517,34 @@ export class BaselineFlowService {
     };
 
     const engineRunId = await this.deps.scanEngine.start(scanRequest);
-    const collectedAlerts: EngineAlert[] = [];
-    let cursor = 0;
-    let lastStatus: 'running' | 'complete' | 'failed' = 'running';
-    let failureReason: string | undefined;
-    for (let iteration = 0; iteration < MAX_POLL_ITERATIONS; iteration += 1) {
-      const batch = await this.deps.scanEngine.alerts(engineRunId, cursor);
-      cursor = batch.nextCursor;
-      collectedAlerts.push(...batch.alerts);
-      const progress = await this.deps.scanEngine.progress(engineRunId);
-      lastStatus = progress.status;
-      if (progress.status === 'failed' && progress.failureReason !== undefined) {
-        failureReason = progress.failureReason;
-      }
-      if (progress.status !== 'running') {
-        break;
-      }
-    }
+    const monitor = new ScanMonitor(this.deps.scanEngine, engineRunId, MAX_POLL_ITERATIONS);
+    const monitored = await monitor.collectUntilDone();
+    const collectedAlerts = monitored.alerts;
 
     // engine 異常は「URL Does not Exist」等の観測理由とともに失敗として扱い、無制限に再試行しない。
-    if (lastStatus === 'failed') {
+    if (monitored.status === 'failed') {
       this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'engine-failure' });
-      throw domainError('EngineFailure', failureReason ?? 'scan engine failed', {
+      machine.transition('Failed');
+      throw domainError('EngineFailure', monitored.failureReason ?? 'scan engine failed', {
         details: { engineRunId, engineVersion: this.deps.scanEngine.engineVersion },
       });
     }
 
-    // 観測した出力を原本として保存してから取込む (保存成功後だけ event を出す)。
-    const rawEvidence = await this.deps.evidence.saveText(
-      `zap-alerts-raw:${engineRunId}`,
-      canonicalJson({ engineRunId, alerts: collectedAlerts }),
-    );
+    // 観測した出力を原本として保存してから取込む (保存成功後だけ event を出す = SYS-UT-005)。
+    let rawEvidence;
+    try {
+      rawEvidence = await this.deps.evidence.saveText(
+        `zap-alerts-raw:${engineRunId}`,
+        canonicalJson({ engineRunId, alerts: collectedAlerts }),
+      );
+    } catch (cause) {
+      this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'engine-failure' });
+      machine.transition('Failed');
+      throw domainError('EngineFailure', `evidence storage failed before findings import: ${String(cause)}`, {
+        retryable: true,
+        details: { engineRunId },
+      });
+    }
     const now = this.deps.clock.now().toISOString();
     const importResult = this.importer.importAlerts(collectedAlerts, {
       now,
@@ -544,7 +561,7 @@ export class BaselineFlowService {
       runId,
       planId: plan.planId,
       caseId: caseRecord.caseId,
-      state: 'Completed',
+      state: machine.transition('Completed'),
       attempt: 1,
       stopReason: 'completed',
     };

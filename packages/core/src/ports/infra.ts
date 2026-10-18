@@ -14,11 +14,12 @@ export interface StoredEvidence {
   readonly sha256: string;
   readonly label: string;
   readonly savedAt: string;
+  readonly metadata?: Readonly<Record<string, string>>;
 }
 
 /** 証跡の保存 port。原本は hash 参照し、保存成功後だけ event を公開する (SYS-UT-005)。 */
 export interface EvidenceStorePort {
-  saveText(label: string, content: string): Promise<StoredEvidence>;
+  saveText(label: string, content: string, metadata?: Readonly<Record<string, string>>): Promise<StoredEvidence>;
 }
 
 /** 固定時計。fixture での決定的実行に使う。 */
@@ -58,13 +59,14 @@ export class InMemoryEvidenceStore implements EvidenceStorePort {
   private sequence = 0;
   private readonly records: StoredEvidence[] = [];
 
-  async saveText(label: string, content: string): Promise<StoredEvidence> {
+  async saveText(label: string, content: string, metadata?: Readonly<Record<string, string>>): Promise<StoredEvidence> {
     this.sequence += 1;
     const record: StoredEvidence = {
       evidenceId: `evidence-${String(this.sequence).padStart(4, '0')}`,
       sha256: hashStable('scopepilot2.evidence', content),
       label,
       savedAt: new Date().toISOString(),
+      ...(metadata === undefined || Object.keys(metadata).length === 0 ? {} : { metadata }),
     };
     this.records.push(record);
     return record;

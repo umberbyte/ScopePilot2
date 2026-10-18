@@ -5,6 +5,7 @@
 import {
   BaselineFlowService,
   FixedClock,
+  type StoredEvidence,
   InMemoryEvidenceStore,
   SequentialIdGenerator,
   type ActiveScanEnginePort,
@@ -59,6 +60,7 @@ export class FakeExplorer implements ExplorationPort {
 export class FakeScanEngine implements ActiveScanEnginePort {
   readonly engineVersion = 'fake-zap-1';
   readonly startCalls: ActiveScanEngineStartCall[] = [];
+  stopCalls = 0;
   private sequence = 0;
 
   async start(request: Parameters<ActiveScanEnginePort['start']>[0]): Promise<string> {
@@ -75,7 +77,23 @@ export class FakeScanEngine implements ActiveScanEnginePort {
     return { alerts: [], nextCursor: cursor };
   }
 
-  async stop(): Promise<void> {}
+  async stop(): Promise<void> {
+    this.stopCalls += 1;
+  }
+}
+
+/** alert 原本の保存だけに失敗する証拠 store (SYS-UT-005)。認可証跡の保存は成功する。 */
+export class FailingAlertEvidenceStore extends InMemoryEvidenceStore {
+  override async saveText(
+    label: string,
+    content: string,
+    metadata?: Readonly<Record<string, string>>,
+  ): Promise<StoredEvidence> {
+    if (label.startsWith('zap-alerts-raw:')) {
+      throw new Error('evidence storage failure (test)');
+    }
+    return super.saveText(label, content, metadata);
+  }
 }
 
 export interface ActiveScanEngineStartCall {
@@ -83,7 +101,7 @@ export interface ActiveScanEngineStartCall {
   readonly leasedMaxRequests: number;
 }
 
-function testCapabilities(): readonly EngineCapabilitySnapshot[] {
+function testCapabilities(zapVersion = 'fake-zap-1'): readonly EngineCapabilitySnapshot[] {
   const enforced = {
     preSendScopeEnforcement: 'Enforced',
     stopControl: 'Enforced',
@@ -98,7 +116,7 @@ function testCapabilities(): readonly EngineCapabilitySnapshot[] {
   } as const;
   return [
     { engineKind: 'playwright', engineVersion: 'fake-explorer-1', source: 'fixture', guaranteeLevels: enforced, maxOvershootRatio: 0, measuredAt: TEST_NOW },
-    { engineKind: 'zap', engineVersion: 'fake-zap-1', source: 'fixture', guaranteeLevels: delegated, maxOvershootRatio: 0.05, measuredAt: TEST_NOW },
+    { engineKind: 'zap', engineVersion: zapVersion, source: 'fixture', guaranteeLevels: delegated, maxOvershootRatio: 0.05, measuredAt: TEST_NOW },
   ];
 }
 
@@ -109,6 +127,8 @@ export interface BootstrapOptions {
   readonly validFrom?: string;
   readonly validUntil?: string;
   readonly operatorPermissions?: readonly OperatorPermission[];
+  readonly evidenceFailure?: boolean;
+  readonly zapCapabilityVersion?: string;
 }
 
 export interface TestFlow {
@@ -119,16 +139,16 @@ export interface TestFlow {
 }
 
 /** 案件作成前の状態から使える service を組み立てる。 */
-export function createTestService(options: Pick<BootstrapOptions, 'operatorPermissions'> = {}): TestFlow {
+export function createTestService(options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion'> = {}): TestFlow {
   const explorer = new FakeExplorer();
   const scanEngine = new FakeScanEngine();
   const service = new BaselineFlowService({
     clock: new FixedClock([TEST_NOW]),
     ids: new SequentialIdGenerator(),
-    evidence: new InMemoryEvidenceStore(),
+    evidence: options.evidenceFailure === true ? new FailingAlertEvidenceStore() : new InMemoryEvidenceStore(),
     explorer,
     scanEngine,
-    capabilities: testCapabilities(),
+    capabilities: testCapabilities(options.zapCapabilityVersion),
     runtimeBundleHash: 'test-runtime-bundle',
   });
   const operator: OperatorProfile = {
