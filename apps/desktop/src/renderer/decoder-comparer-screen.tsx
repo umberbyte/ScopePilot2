@@ -3,7 +3,7 @@
  * 標準 codec の chain 復号とテキスト行差分 (+ provenance hash) を API 経由で提供する。
 
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Button, Checkbox, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 import { t } from './resources.ts';
 
@@ -29,11 +29,10 @@ const useStyles = makeStyles({
   chips: { display: 'flex', gap: '4px', flexWrap: 'wrap' },
 });
 
-async function callJson<T>(apiBase: string, path: string, body: unknown): Promise<T> {
+async function callJson<T>(apiBase: string, path: string, body?: unknown, method: 'GET' | 'POST' = 'POST'): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    method,
+    ...(body === undefined && method === 'GET' ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   });
   if (!response.ok) {
     const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
@@ -58,6 +57,11 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [oastProtocol, setOastProtocol] = useState('http');
   const [oastToken, setOastToken] = useState('');
   const [oastResult, setOastResult] = useState<string>('');
+  const [wsTarget, setWsTarget] = useState('http://fixture.target.test/ws');
+  const [wsImportText, setWsImportText] = useState('');
+  const [wsSendText, setWsSendText] = useState('');
+  const [wsNotice, setWsNotice] = useState('');
+  const [wsFrames, setWsFrames] = useState<readonly { frameId: string; direction: string; text: string; rawHash: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -98,6 +102,52 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       setBusy(false);
     }
   }, [apiBase, sequencerSamples, sequencerTarget]);
+
+  const loadWsFrames = useCallback(async () => {
+    try {
+      const body = await callJson<{ frames: readonly { frameId: string; direction: string; text: string; rawHash: string }[] }>(apiBase, '/api/websocket/frames', undefined, 'GET');
+      setWsFrames(body.frames);
+    } catch {
+      // 一覧の取得失敗は個別操作の error 表示に任せる。
+    }
+  }, [apiBase]);
+
+  useEffect(() => {
+    void loadWsFrames();
+  }, [loadWsFrames]);
+
+  const importWsFrames = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const payloads = wsImportText.split('\n').map((line) => line.trim()).filter((line) => line !== '');
+      const result = await callJson<{ imported: number; duplicates: number }>(apiBase, '/api/websocket/frames', {
+        targetUrl: wsTarget,
+        frames: payloads.map((payload) => ({ direction: 'received', payload })),
+      });
+      setWsNotice(t('a10.wsImported', { imported: result.imported, duplicates: result.duplicates }));
+      await loadWsFrames();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, loadWsFrames, wsImportText, wsTarget]);
+
+  const sendWsMessages = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const messages = wsSendText.split('\n').map((line) => line.trim()).filter((line) => line !== '');
+      const result = await callJson<{ planHash: string; sent: number; rejected: string | null }>(apiBase, '/api/websocket/send', { targetUrl: wsTarget, messages });
+      setWsNotice(result.rejected === null ? t('a10.wsSent', { sent: result.sent }) : t('a10.wsRejected', { rejected: result.rejected, sent: result.sent }));
+      await loadWsFrames();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, loadWsFrames, wsSendText, wsTarget]);
 
   const startOastAttempt = useCallback(async () => {
     setBusy(true);
@@ -243,6 +293,46 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         </div>
       )}
       {oastResult !== '' && <Text>{oastResult}</Text>}
+      <Text weight="semibold">{t('a10.wsTitle')}</Text>
+      <Text className={styles.muted}>{t('a10.wsIntro')}</Text>
+      <Field label={t('a10.wsTargetLabel')}>
+        <Input value={wsTarget} onChange={(_, data) => setWsTarget(data.value)} />
+      </Field>
+      <Field label={t('a10.wsImportLabel')}>
+        <Textarea value={wsImportText} onChange={(_, data) => setWsImportText(data.value)} rows={2} />
+      </Field>
+      <Button disabled={busy} onClick={() => void importWsFrames()}>
+        {t('a10.wsImport')}
+      </Button>
+      <Field label={t('a10.wsSendLabel')}>
+        <Textarea value={wsSendText} onChange={(_, data) => setWsSendText(data.value)} rows={2} />
+      </Field>
+      <Button appearance="primary" disabled={busy} onClick={() => void sendWsMessages()}>
+        {t('a10.wsSend')}
+      </Button>
+      {wsNotice !== '' && <Text role="status">{wsNotice}</Text>}
+      {wsFrames.length > 0 && (
+        <Table size="small" aria-label={t('a10.wsTable.aria')}>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>frameId</TableHeaderCell>
+              <TableHeaderCell>{t('a10.ws.col.direction')}</TableHeaderCell>
+              <TableHeaderCell>{t('a10.ws.col.text')}</TableHeaderCell>
+              <TableHeaderCell>{t('a10.ws.col.rawHash')}</TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {wsFrames.map((frame) => (
+              <TableRow key={frame.frameId}>
+                <TableCell>{frame.frameId}</TableCell>
+                <TableCell>{frame.direction}</TableCell>
+                <TableCell>{frame.text}</TableCell>
+                <TableCell>{frame.rawHash}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
     </div>
   );
 }

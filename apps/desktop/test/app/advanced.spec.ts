@@ -292,6 +292,15 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await expect(page.getByText(/attempt oast-\d+ を開始しました/)).toBeVisible();
   await page.getByRole('button', { name: 'callback を記録する (fixture)' }).click();
   await expect(page.getByText('callback 記録: 相関 1・未知 0・重複 0')).toBeVisible({ timeout: 30_000 });
+
+  // WebSocket: frame を取り込み・送信すると台帳に残る (design/f14)。
+  await page.getByLabel('取込 frame (1行1件・text)').fill('hello\nhello');
+  await page.getByRole('button', { name: 'frame を取り込む' }).click();
+  await expect(page.getByText('frame 取込: 1 件・重複 1 件')).toBeVisible({ timeout: 30_000 });
+  await page.getByLabel('送信 message (1行1件・text)').fill('ping');
+  await page.getByRole('button', { name: 'message を送信する' }).click();
+  await expect(page.getByText('送信しました (1 件・plan hash 付き)')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('cell', { name: 'ping' })).toBeVisible();
 });
 
 test('A05: break queue の受付・転送・破棄と対象外 URL の拒否を扱う', async () => {

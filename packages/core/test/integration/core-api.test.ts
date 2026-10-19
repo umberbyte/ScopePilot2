@@ -1114,6 +1114,40 @@ describe('Core API server (node:http)', () => {
     }
   });
 
+  test('websocket は frame 取込・送信・一覧を扱う (design/f14)', async () => {
+    const post = async (path: string, body: unknown): Promise<Response> =>
+      fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    const imported = await post('/api/websocket/frames', {
+      targetUrl: 'http://fixture.target.test/ws',
+      frames: [
+        { direction: 'received', payload: 'hello' },
+        { direction: 'received', payload: 'hello' },
+      ],
+    });
+    assert.equal(imported.status, 200);
+    const importBody = (await imported.json()) as { imported: number; duplicates: number };
+    assert.deepEqual(importBody, { imported: 1, duplicates: 1 });
+
+    const sent = await post('/api/websocket/send', { targetUrl: 'http://fixture.target.test/ws', messages: ['ping', 'pong'] });
+    assert.equal(sent.status, 200);
+    const sentBody = (await sent.json()) as { sent: number; rejected: string | null; planHash: string };
+    assert.equal(sentBody.sent, 2);
+    assert.equal(sentBody.rejected, null);
+    assert.match(sentBody.planHash, /^[0-9a-f]{64}$/);
+
+    const badDirection = await post('/api/websocket/frames', { targetUrl: 'http://fixture.target.test/ws', frames: [{ direction: 'sideways', payload: 'x' }] });
+    assert.equal(badDirection.status, 400);
+
+    const list = (await (await fetch(`${baseUrl}/api/websocket/frames`)).json()) as { frames: readonly { direction: string; text: string; rawHash: string }[] };
+    assert.ok(list.frames.some((frame) => frame.direction === 'sent' && frame.text === 'ping'));
+    assert.ok(list.frames.every((frame) => frame.rawHash.length === 12));
+
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /WsFramesImported/);
+    assert.match(eventsText, /WsMessagesSent/);
+  });
+
   test('oast は token 発行・callback 記録・attempt 一覧を扱う (design/f13)', async () => {
     const post = async (path: string, body: unknown): Promise<Response> =>
       fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

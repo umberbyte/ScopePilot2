@@ -2205,6 +2205,221 @@
         }
       }
     },
+    "/api/websocket/frames": {
+      "get": {
+        "operationId": "listWsFrames",
+        "summary": "WebSocket frame の一覧 (text のみ・raw hash と text を区別)",
+        "responses": {
+          "200": {
+            "description": "frames",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "frames"
+                  ],
+                  "properties": {
+                    "frames": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "frameId",
+                          "direction",
+                          "text",
+                          "rawHash"
+                        ],
+                        "properties": {
+                          "frameId": {
+                            "type": "string"
+                          },
+                          "direction": {
+                            "type": "string",
+                            "enum": [
+                              "sent",
+                              "received"
+                            ]
+                          },
+                          "text": {
+                            "type": "string",
+                            "description": "frame の text 表現 (F14-UT-007: raw hash と区別)"
+                          },
+                          "rawHash": {
+                            "type": "string",
+                            "description": "原本 hash (先頭 12 桁)"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "importWsFrames",
+        "summary": "WebSocket frame を取り込む (design/f14・text のみ)。同一 frame は dedupe (F14-UT-001)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetUrl",
+                  "frames"
+                ],
+                "properties": {
+                  "targetUrl": {
+                    "type": "string"
+                  },
+                  "frames": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "direction",
+                        "payload"
+                      ],
+                      "properties": {
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "sent",
+                            "received"
+                          ]
+                        },
+                        "payload": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "取込結果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "imported",
+                    "duplicates"
+                  ],
+                  "properties": {
+                    "imported": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "duplicates": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/websocket/send": {
+      "post": {
+        "operationId": "sendWsMessages",
+        "summary": "WebSocket text message を送信する (design/f14)。plan hash 付き・rate/size 上限で adapter 前に拒否 (F14-UT-006)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetUrl",
+                  "messages"
+                ],
+                "properties": {
+                  "targetUrl": {
+                    "type": "string"
+                  },
+                  "messages": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "送信結果 (fixture adapter は frame 台帳へ sent として記録)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "planHash",
+                    "sent",
+                    "rejected"
+                  ],
+                  "properties": {
+                    "planHash": {
+                      "type": "string"
+                    },
+                    "sent": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "rejected": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "size",
+                        "rate",
+                        null
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/documents/auth-hints": {
       "get": {
         "operationId": "listDocumentAuthHints",
@@ -4214,6 +4429,12 @@
             "$ref": "#/components/schemas/OastCallbacksRecordedEvent"
           },
           {
+            "$ref": "#/components/schemas/WsFramesImportedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WsMessagesSentEvent"
+          },
+          {
             "$ref": "#/components/schemas/ReportGeneratedEvent"
           }
         ]
@@ -4854,6 +5075,69 @@
           "uncorrelated": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "WsFramesImportedEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "targetUrl",
+          "imported",
+          "duplicates"
+        ],
+        "properties": {
+          "type": {
+            "const": "WsFramesImported"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "targetUrl": {
+            "type": "string"
+          },
+          "imported": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duplicates": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "WsMessagesSentEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "targetUrl",
+          "sent"
+        ],
+        "properties": {
+          "type": {
+            "const": "WsMessagesSent"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "targetUrl": {
+            "type": "string"
+          },
+          "sent": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rejected": {
+            "type": "string",
+            "enum": [
+              "size",
+              "rate"
+            ],
+            "description": "上限で拒否した場合のみ"
           }
         }
       },

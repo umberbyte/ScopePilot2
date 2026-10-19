@@ -25,4 +25,6 @@ export type BaselineFlowEvent =
   | { readonly type: 'ApiSpecImported'; readonly at: string; readonly documentLabel: string; readonly endpointCount: number; readonly excludedServerCount: number }
   | { readonly type: 'OastAttemptStarted'; readonly at: string; readonly attemptId: string; readonly targetUrl: string; readonly protocol: 'http' | 'dns' | 'smtp' | 'icmp' }
   | { readonly type: 'OastCallbacksRecorded'; readonly at: string; readonly kept: number; readonly duplicates: number; readonly correlated: number; readonly uncorrelated: number }
+  | { readonly type: 'WsFramesImported'; readonly at: string; readonly targetUrl: string; readonly imported: number; readonly duplicates: number }
+  | { readonly type: 'WsMessagesSent'; readonly at: string; readonly targetUrl: string; readonly sent: number; readonly rejected?: 'size' | 'rate' }
   | { readonly type: 'ReportGenerated'; readonly at: string; readonly reportId: string; readonly modelHash: string };

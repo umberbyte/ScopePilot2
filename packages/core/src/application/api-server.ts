@@ -329,6 +329,49 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/websocket/frames') {
+      return respondJson(response, 200, { frames: service.listWsFrames() });
+    }
+    if (route === 'POST /api/websocket/frames') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const framesValue = body.frames;
+        if (!Array.isArray(framesValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field frames must be an array', false);
+        }
+        const frames = framesValue.map((frame, index) => {
+          if (typeof frame !== 'object' || frame === null) {
+            throw new DomainError('ValidationFailed', `frames[${index}] must be an object`);
+          }
+          const record = frame as Record<string, unknown>;
+          const direction = stringField(record, 'direction');
+          if (direction !== 'sent' && direction !== 'received') {
+            throw new DomainError('ValidationFailed', `frames[${index}]: direction must be sent or received`);
+          }
+          return { direction: direction as 'sent' | 'received', payload: stringField(record, 'payload') };
+        });
+        const result = service.importWsFrames(operator, { targetUrl: stringField(body, 'targetUrl'), frames });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/websocket/send') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const messages = stringArrayField(body, 'messages');
+        const result = await service.sendWsMessages(operator, { targetUrl: stringField(body, 'targetUrl'), messages });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/documents/hints') {
       return respondJson(response, 200, { hints: service.listDocumentHints() });
     }

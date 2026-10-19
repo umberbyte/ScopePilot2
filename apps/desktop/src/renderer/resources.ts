@@ -131,6 +131,21 @@ export const strings = {
   'a10.oastToken': 'token: {token}',
   'a10.oastRecord': 'callback を記録する (fixture)',
   'a10.oastRecorded': 'callback 記録: 相関 {correlated}・未知 {uncorrelated}・重複 {duplicates}',
+  'a10.wsTitle': 'WebSocket 中継',
+  'a10.wsIntro':
+    'text frame のみを扱います (binary は対象外・design/f14)。frame の取込と送信は rate/size 上限の内側で行われ、同一 frame は重複として数えます。送信は fixture adapter が台帳へ sent として記録します。',
+  'a10.wsTargetLabel': '対象 URL (WebSocket・scope 内)',
+  'a10.wsImportLabel': '取込 frame (1行1件・text)',
+  'a10.wsImport': 'frame を取り込む',
+  'a10.wsImported': 'frame 取込: {imported} 件・重複 {duplicates} 件',
+  'a10.wsSendLabel': '送信 message (1行1件・text)',
+  'a10.wsSend': 'message を送信する',
+  'a10.wsSent': '送信しました ({sent} 件・plan hash 付き)',
+  'a10.wsRejected': '上限のため拒否しました ({rejected}・送信済み {sent} 件)',
+  'a10.wsTable.aria': 'WebSocket frame 一覧',
+  'a10.ws.col.direction': '方向',
+  'a10.ws.col.text': 'text',
+  'a10.ws.col.rawHash': 'raw hash',
 
   'a05.intro':
     '実 proxy listener (通信傍受・転送本体) は実 engine 接続と共に後続増分です。ここでは break queue への受付と判断 (forward / drop) を扱います。deadline 経過・queue 上限は既定で drop し、暗黙 forward はしません。',

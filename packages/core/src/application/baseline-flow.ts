@@ -94,6 +94,7 @@ import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities
 import { assess, createSamplePlan, extractToken, reportProjection, SampleCollector } from '../domain/sequencer.ts';
 import { parseOpenApiDocument } from '../domain/api-scanning.ts';
 import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, TokenIssuer, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
+import { buildWsSendPlan, importFrames, sendWithPolicy, wsEvidence, type WsFrame } from '../domain/websocket.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
 import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, LoginSessionCookie } from '../ports/engines.ts';
@@ -214,6 +215,11 @@ export class BaselineFlowService {
   private readonly oastSeenEventIds = new Set<string>();
   private readonly oastInteractions: { token: string; payload: string; recordedAt: string }[] = [];
   private readonly oastUncorrelated: { token: string; reason: string; recordedAt: string }[] = [];
+
+  /** WebSocket frame 台帳 (design/f14)。text のみ・重複 fingerprint は持越しで dedupe。 */
+  private readonly wsFrames: WsFrame[] = [];
+  private readonly wsSeenFingerprints = new Set<string>();
+  private wsSessionRevision = 1;
 
   /** 取り込んだ API 仕様の記録 (design/f12)。endpoint の一覧は都度応答する。 */
   private readonly apiSpecImports: readonly { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[] = [];
@@ -904,6 +910,106 @@ export class BaselineFlowService {
         candidateOnly: linked.linkedTokens.length === 1 && linked.candidateOnly === false ? false : true,
       };
     });
+  }
+
+  /**
+   * WebSocket frame の取込 (design/f14)。text のみ (binary は対象外)。同一 frame は
+   * 呼出内・持越しの両方で dedupe する (F14-UT-001)。表示は raw hash と text を
+   * 区別して返す (F14-UT-007)。
+   */
+  importWsFrames(
+    operator: OperatorProfile,
+    input: { readonly targetUrl: string; readonly frames: readonly { readonly direction: 'sent' | 'received'; readonly payload: string }[] },
+  ): { imported: number; duplicates: number } {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
+    const decision = ScopePolicy.decide(caseRecord.scope, canonical);
+    if (!decision.allowed) {
+      throw domainError('OutOfScope', `websocket target is out of scope: ${decision.reason}`);
+    }
+    if (input.frames.length === 0) {
+      throw domainError('ValidationFailed', 'websocket import needs at least one frame');
+    }
+    const staged: WsFrame[] = input.frames.map((frame, index) => ({
+      frameId: this.deps.ids.next('ws'),
+      direction: frame.direction,
+      payload: frame.payload,
+      receivedAtMs: this.deps.clock.now().getTime() + index,
+    }));
+    // dedupe は direction+payload の fingerprint で (frameId は取込ごとに新規のため
+    // domain の id 含む fingerprint には一致しない)。呼出内と持越しの両方で重複を数える。
+    const batchFingerprints = new Set<string>();
+    const fresh: WsFrame[] = [];
+    let duplicates = 0;
+    for (const frame of staged) {
+      const fingerprint = `${frame.direction}:${frame.payload}`;
+      if (this.wsSeenFingerprints.has(fingerprint) || batchFingerprints.has(fingerprint)) {
+        duplicates += 1;
+        continue;
+      }
+      batchFingerprints.add(fingerprint);
+      fresh.push(frame);
+    }
+    const { imported } = importFrames(fresh);
+    for (const frame of imported) {
+      this.wsSeenFingerprints.add(`${frame.direction}:${frame.payload}`);
+      this.wsFrames.push(frame);
+    }
+    this.record({ type: 'WsFramesImported', at: this.deps.clock.now().toISOString(), targetUrl: canonical, imported: imported.length, duplicates });
+    return { imported: imported.length, duplicates };
+  }
+
+  /** frame 一覧 (text と raw hash を区別した表示素材)。 */
+  listWsFrames(): readonly { frameId: string; direction: 'sent' | 'received'; text: string; rawHash: string }[] {
+    return this.wsFrames.map((frame) => ({ frameId: frame.frameId, direction: frame.direction, text: wsEvidence(frame).text, rawHash: wsEvidence(frame).rawHash.slice(0, 12) }));
+  }
+
+  /**
+   * WebSocket message の送信 (design/f14)。text のみ (binary は Unsupported・
+   * F14-UT-003)。plan hash 付きで確認対象を固定し (F14-UT-002)、rate/size 上限は
+   * adapter を呼ばずに拒否する (F14-UT-006)。fixture adapter は送信を frame 台帳へ
+   * 'sent' として記録するだけ。
+   */
+  async sendWsMessages(
+    operator: OperatorProfile,
+    input: { readonly targetUrl: string; readonly messages: readonly string[] },
+  ): Promise<{ planHash: string; sent: number; rejected: 'size' | 'rate' | null }> {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
+    const decision = ScopePolicy.decide(caseRecord.scope, canonical);
+    if (!decision.allowed) {
+      throw domainError('OutOfScope', `websocket target is out of scope: ${decision.reason}`);
+    }
+    if (input.messages.length === 0) {
+      throw domainError('ValidationFailed', 'websocket send needs at least one message');
+    }
+    const plan = buildWsSendPlan({
+      targetUrl: canonical,
+      messages: input.messages.map((message) => ({ kind: 'text' as const, payload: message })),
+      sessionRevision: this.wsSessionRevision,
+    });
+    let virtualMs = 0;
+    const result = await sendWithPolicy(
+      input.messages,
+      { maxMessageBytes: 1_000_000, messagesPerSecond: 10, now: () => (virtualMs += 1000) },
+      {
+        send: async (message) => {
+          const frame: WsFrame = { frameId: this.deps.ids.next('ws'), direction: 'sent', payload: message, receivedAtMs: this.deps.clock.now().getTime() };
+          this.wsFrames.push(frame);
+          this.wsSeenFingerprints.add(`${frame.direction}:${frame.payload}`);
+        },
+      },
+    );
+    this.record({
+      type: 'WsMessagesSent',
+      at: this.deps.clock.now().toISOString(),
+      targetUrl: canonical,
+      sent: result.sent,
+      ...(result.rejected === null ? {} : { rejected: result.rejected }),
+    });
+    return { planHash: plan.planHash, sent: result.sent, rejected: result.rejected };
   }
 
   listApiSpecImports(): readonly { documentLabel: string; endpointCount: number; importedAt: string }[] {

@@ -57,6 +57,8 @@ const EXPECTED_EVENT_TYPES = [
   'ApiSpecImported',
   'OastAttemptStarted',
   'OastCallbacksRecorded',
+  'WsFramesImported',
+  'WsMessagesSent',
   'ReportGenerated',
 ];
 
