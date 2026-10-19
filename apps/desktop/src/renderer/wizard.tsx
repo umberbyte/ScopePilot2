@@ -12,6 +12,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
+import { executionSummary } from '@scopepilot2/ui';
 import {
   advance,
   goBack,
@@ -61,6 +62,13 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
   const [data, setData] = useState<WizardData>(initialWizardData);
   const [caseName, setCaseName] = useState<string>('');
   const [exploreSummary, setExploreSummary] = useState<string>('');
+  const [candidates, setCandidates] = useState<readonly { candidateId: string; url: string; method: string }[]>([]);
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<readonly string[]>([]);
+  const [scanPlan, setScanPlan] = useState<{ plan: { steps: readonly unknown[]; limits: { maxRequests: number } } } | null>(null);
+  const [scanConfirmation, setScanConfirmation] = useState<{ confirmationId: string } | null>(null);
+  const [runSummary, setRunSummary] = useState('');
+  const [findings, setFindings] = useState<readonly { findingId: string; title: string; severity: string; url: string; occurrences: number; source: { unverified: boolean; engineVersion?: string } }[]>([]);
+  const [reportContent, setReportContent] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>('');
 
@@ -101,11 +109,12 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
         seeds: ['http://fixture.target.test/'],
       });
       const confirmation = await callApi<{ confirmationId: string }>(apiBase, 'POST', '/api/plan/confirm', { plan: plan.plan });
-      const run = await callApi<{ observations: readonly unknown[]; candidates: readonly unknown[] }>(apiBase, 'POST', '/api/run/explore', {
+      const run = await callApi<{ observations: readonly unknown[]; candidates: readonly { candidateId: string; url: string; method: string }[] }>(apiBase, 'POST', '/api/run/explore', {
         plan: plan.plan,
         confirmation,
         maxDepth: 5,
       });
+      setCandidates(run.candidates);
       setExploreSummary(`探索完了: ${run.observations.length} 件を観測、診断候補 ${run.candidates.length} 件を生成`);
       setData((current) => ({ ...current, explorationDone: true }));
     } catch (cause) {
@@ -114,6 +123,73 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
       setBusy(false);
     }
   }, [apiBase]);
+
+  const adoptTargets = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const selected = candidates.filter((candidate) => selectedCandidateIds.includes(candidate.candidateId));
+      const result = await callApi<{ adopted: readonly { candidateId: string; url: string; method: string }[] }>(apiBase, 'POST', '/api/candidates/adopt', { candidates: selected });
+      setData((current) => ({ ...current, selectedTargets: result.adopted.map((entry) => entry.url) }));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, candidates, selectedCandidateIds]);
+
+  const prepareScanPlan = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const plan = await callApi<{ plan: { steps: readonly unknown[]; limits: { maxRequests: number } } }>(apiBase, 'POST', '/api/plan/scan', { targets: data.selectedTargets });
+      const confirmation = await callApi<{ confirmationId: string }>(apiBase, 'POST', '/api/plan/confirm', { plan: plan.plan });
+      setScanPlan(plan);
+      setScanConfirmation(confirmation);
+      setData((current) => ({ ...current, planConfirmed: true }));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, data.selectedTargets]);
+
+  const runScan = useCallback(async () => {
+    if (scanPlan === null || scanConfirmation === null) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const adopted = data.selectedTargets.map((url, index) => ({ candidateId: `cand-${index}`, url, method: 'GET', category: 'page', guidelineBasis: ['provisional:page'], confidence: 0.7, observationUrl: url }));
+      const run = await callApi<{ findings: readonly { findingId: string; title: string; severity: string; url: string; occurrences: number; source: { unverified: boolean; engineVersion?: string } }[]; engineVersion: string; overshootReservation: number }>(apiBase, 'POST', '/api/run/scan', {
+        plan: scanPlan.plan,
+        confirmation: scanConfirmation,
+        adopted,
+      });
+      await callApi(apiBase, 'POST', '/api/import/nuclei', { lines: [] });
+      setFindings(run.findings);
+      setRunSummary(`診断完了 (engine ${run.engineVersion}・overshoot 予約 ${run.overshootReservation} 件分): 所見 ${run.findings.length} 件`);
+      setData((current) => ({ ...current, runFinished: true }));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, data.selectedTargets, scanPlan, scanConfirmation]);
+
+  const buildReport = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const report = await callApi<{ content: string; modelHash: string }>(apiBase, 'POST', '/api/report', { guidelines: data.selectedGuidelines });
+      setReportContent(report.content);
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, data.selectedGuidelines]);
 
   const advanceResult = advance(step, data);
   const backResult = goBack(step);
@@ -179,10 +255,86 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
         </>
       )}
 
-      {['S04', 'S05', 'S06', 'S07'].includes(step) && (
-        <Text className={styles.hint}>
-          {step} {STEP_LABELS[step]} — この画面は次増分で接続します (wizard 状態は維持されています)。
-        </Text>
+      {step === 'S04' && (
+        <>
+          <Text size={400}>S04 探索結果から対象選定</Text>
+          <Text className={styles.hint}>観測された候補から診断対象を選んでください (全選択可)。</Text>
+          {candidates.map((candidate) => (
+            <Checkbox
+              key={candidate.candidateId}
+              label={`${candidate.method} ${candidate.url}`}
+              checked={selectedCandidateIds.includes(candidate.candidateId)}
+              onChange={(_event, state) => {
+                setSelectedCandidateIds((current) =>
+                  state.checked === true
+                    ? [...current, candidate.candidateId]
+                    : current.filter((entry) => entry !== candidate.candidateId),
+                );
+              }}
+            />
+          ))}
+          <Button appearance="primary" disabled={busy || selectedCandidateIds.length === 0} onClick={() => void adoptTargets()}>
+            選択を採用する ({selectedCandidateIds.length} 件)
+          </Button>
+        </>
+      )}
+
+      {step === 'S05' && scanPlan !== null && (
+        <>
+          <Text size={400}>S05 実行計画の最終確認</Text>
+          <Text>送信目的: 探索結果に対する能動診断 (ZAP 委譲)。</Text>
+          <Text>対象: {data.selectedTargets.length} 件 / 概算通信数上限: {scanPlan.plan.limits.maxRequests} 件</Text>
+          <Text>禁止操作: 本案件では破壊的操作・認証情報変更を禁止します。</Text>
+          {executionSummary(scanPlan.plan.steps as never).map((row) => (
+            <Text key={row.stepId} className={styles.hint}>
+              {row.kind}: {row.label}
+            </Text>
+          ))}
+          <Text className={styles.hint}>この確認が、送信前の最終操作です。</Text>
+        </>
+      )}
+
+      {step === 'S05' && scanPlan === null && (
+        <>
+          <Text size={400}>S05 実行計画の最終確認</Text>
+          <Button appearance="primary" disabled={busy} onClick={() => void prepareScanPlan()}>
+            計画を作成して確認する
+          </Button>
+        </>
+      )}
+
+      {step === 'S06' && (
+        <>
+          <Text size={400}>S06 実行状況</Text>
+          {data.runFinished ? (
+            <>
+              <Text>{runSummary}</Text>
+              {findings.map((finding) => (
+                <Text key={finding.findingId} className={styles.hint}>
+                  [{finding.severity}] {finding.title} — {finding.url} (観測 {finding.occurrences} 回)
+                  {finding.source.unverified ? ' ・実影響未確認' : ''}
+                </Text>
+              ))}
+            </>
+          ) : (
+            <Button appearance="primary" disabled={busy} onClick={() => void runScan()}>
+              診断を実行する
+            </Button>
+          )}
+        </>
+      )}
+
+      {step === 'S07' && (
+        <>
+          <Text size={400}>S07 結果レビュー・報告</Text>
+          {reportContent === '' ? (
+            <Button appearance="primary" disabled={busy} onClick={() => void buildReport()}>
+              報告書を生成する
+            </Button>
+          ) : (
+            <Text style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{reportContent}</Text>
+          )}
+        </>
       )}
 
       <div className={styles.actions}>
