@@ -35,6 +35,7 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
   const [extensionVersion, setExtensionVersion] = useState('1.0.0');
   const [extensionSignature, setExtensionSignature] = useState('');
   const [extensionNotice, setExtensionNotice] = useState('');
+  const [caProfiles, setCaProfiles] = useState<readonly { profileId: string; purpose: string; generatedBy: string; fingerprint: string; createdAt: string; expiresAt: string; trusted: boolean }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -47,6 +48,29 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
     }
   }, [apiBase]);
 
+
+  const loadCaProfiles = useCallback(async () => {
+    try {
+      const body = await callJson<{ profiles: readonly { profileId: string; purpose: string; generatedBy: string; fingerprint: string; createdAt: string; expiresAt: string; trusted: boolean }[] }>(apiBase, '/api/certificates/ca');
+      setCaProfiles(body.profiles);
+    } catch (cause) {
+      setError(String(cause));
+    }
+  }, [apiBase]);
+
+  const setCaTrust = useCallback(async (profileId: string, trusted: boolean) => {
+    setBusy(true);
+    setError('');
+    try {
+      await callJson(apiBase, '/api/certificates/ca/trust', { profileId, trusted });
+      await loadCaProfiles();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, loadCaProfiles]);
+
   useEffect(() => {
     void (async () => {
       try {
@@ -57,7 +81,8 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
       }
     })();
     void loadExtensions();
-  }, [apiBase, loadExtensions]);
+    void loadCaProfiles();
+  }, [apiBase, loadCaProfiles, loadExtensions]);
 
   const installExtension = useCallback(async () => {
     setBusy(true);
@@ -159,6 +184,19 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
       )}
       <Text weight="semibold">{t('a13.certificates.title')}</Text>
       <Text className={styles.muted}>{t('a13.certificates.note')}</Text>
+      {caProfiles.map((profile) => (
+        <div key={profile.profileId} className={styles.section}>
+          <Text>{t('a13.certificates.profileLine', { id: profile.profileId, purpose: profile.purpose })}</Text>
+          <Text className={styles.muted}>{t('a13.certificates.fingerprint', { fingerprint: profile.fingerprint })}</Text>
+          <Text className={styles.muted}>{t('a13.certificates.validity', { from: profile.createdAt.slice(0, 10), until: profile.expiresAt.slice(0, 10) })}</Text>
+          <Text className={styles.muted}>{t('a13.certificates.generatedBy', { generatedBy: profile.generatedBy })}</Text>
+          <Text className={styles.muted}>{t('a13.certificates.noExport')}</Text>
+          <Text>{profile.trusted ? t('a13.certificates.trusted') : t('a13.certificates.notTrusted')}</Text>
+          <Button size="small" disabled={busy} onClick={() => void setCaTrust(profile.profileId, !profile.trusted)}>
+            {profile.trusted ? t('a13.certificates.unregister') : t('a13.certificates.register')}
+          </Button>
+        </div>
+      ))}
       <Text weight="semibold">{t('a13.ai.title')}</Text>
       <Text className={styles.muted}>{t('a13.ai.note')}</Text>
     </div>

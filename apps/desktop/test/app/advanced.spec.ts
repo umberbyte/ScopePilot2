@@ -299,6 +299,14 @@ test('A13: engine 能力の詳細 (overshoot・測定時刻・fixture hash) と�
   await page.getByRole('button', { name: 'extension を読み込む' }).click();
   await expect(page.getByText('app-helper 1.0.0 を読み込みました')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('cell', { name: 'app-helper' })).toBeVisible();
+
+  // 証明書: CA profile の表示と信頼登録 (design/24)。
+  await expect(page.getByText('scopepilot2-diagnostics — HTTPS 記録 (診断用 profile)')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/fingerprint: [0-9a-f]+…/)).toBeVisible();
+  await expect(page.getByText('秘密鍵の export は提供しません (design/24 §2)。')).toBeVisible();
+  await expect(page.getByText('信頼登録: 未')).toBeVisible();
+  await page.getByRole('button', { name: '信頼登録する' }).click();
+  await expect(page.getByText('信頼登録: 済み')).toBeVisible({ timeout: 30_000 });
 });
 
 test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができる', async () => {

@@ -23,6 +23,7 @@ export type BaselineFlowEvent =
   | { readonly type: 'DocumentAuthHintsRegistered'; readonly at: string; readonly documentLabel: string; readonly entryCount: number }
   | { readonly type: 'DocumentPriorityHintsRegistered'; readonly at: string; readonly documentLabel: string; readonly ruleCount: number }
   | { readonly type: 'DocumentParameterHintsRegistered'; readonly at: string; readonly documentLabel: string; readonly parameterCount: number }
+  | { readonly type: 'CaProfileTrustChanged'; readonly at: string; readonly profileId: string; readonly trusted: boolean }
   | { readonly type: 'SequencerSessionCompleted'; readonly at: string; readonly sessionId: string; readonly targetUrl: string; readonly verdict: 'assessed' | 'insufficient'; readonly sampleCount: number; readonly duplicates: number; readonly missing: number }
   | { readonly type: 'ApiSpecImported'; readonly at: string; readonly documentLabel: string; readonly endpointCount: number; readonly excludedServerCount: number }
   | { readonly type: 'OastAttemptStarted'; readonly at: string; readonly attemptId: string; readonly targetUrl: string; readonly protocol: 'http' | 'dns' | 'smtp' | 'icmp' }

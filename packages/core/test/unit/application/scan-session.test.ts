@@ -67,3 +67,25 @@ describe('active scan session (design/08)', () => {
     assert.deepEqual(filtered.scanRequest.sessionCookieNames, [], '別 Origin の cookie は適用しない');
   });
 });
+
+
+describe('ca profiles (design/24)', () => {
+  test('profile 一覧は fingerprint・期限・信頼状態を返し、信頼変更は監査に残る', async () => {
+    const { service, operator } = await bootstrapFlow();
+    const before = service.listCaProfiles();
+    assert.equal(before.length, 1);
+    assert.equal(before[0]?.profileId, 'scopepilot2-diagnostics');
+    assert.equal(before[0]?.trusted, false);
+    assert.match(before[0]?.fingerprint ?? '', /^[0-9a-f]{32}$/);
+
+    const changed = service.setCaProfileTrust(operator, 'scopepilot2-diagnostics', true);
+    assert.deepEqual(changed, { profileId: 'scopepilot2-diagnostics', trusted: true });
+    assert.equal(service.listCaProfiles()[0]?.trusted, true);
+    assert.ok(JSON.stringify(service.events()).includes('CaProfileTrustChanged'));
+
+    assert.throws(
+      () => service.setCaProfileTrust(operator, 'unknown-profile', true),
+      /unknown CA profile/,
+    );
+  });
+});

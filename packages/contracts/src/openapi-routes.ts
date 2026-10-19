@@ -62,6 +62,8 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'POST', path: '/api/documents/priority-hints', operationId: 'registerDocumentPriorityHints' },
   { method: 'GET', path: '/api/documents/parameter-hints', operationId: 'listDocumentParameterHints' },
   { method: 'POST', path: '/api/documents/parameter-hints', operationId: 'registerDocumentParameterHints' },
+  { method: 'GET', path: '/api/certificates/ca', operationId: 'listCaProfiles' },
+  { method: 'POST', path: '/api/certificates/ca/trust', operationId: 'setCaProfileTrust' },
   { method: 'GET', path: '/api/business-logic/checks', operationId: 'listBusinessLogicChecks' },
   { method: 'POST', path: '/api/business-logic/checks', operationId: 'runBusinessLogicCheck' },
   { method: 'GET', path: '/api/traffic', operationId: 'listTraffic' },

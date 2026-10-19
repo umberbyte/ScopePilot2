@@ -3296,6 +3296,134 @@
         }
       }
     },
+    "/api/certificates/ca": {
+      "get": {
+        "operationId": "listCaProfiles",
+        "summary": "HTTPS 記録用 CA profile の一覧 (design/24)。秘密鍵の export は設計上存在しない",
+        "responses": {
+          "200": {
+            "description": "profiles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "profiles"
+                  ],
+                  "properties": {
+                    "profiles": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "profileId",
+                          "purpose",
+                          "generatedBy",
+                          "fingerprint",
+                          "createdAt",
+                          "expiresAt",
+                          "trusted"
+                        ],
+                        "properties": {
+                          "profileId": {
+                            "type": "string"
+                          },
+                          "purpose": {
+                            "type": "string"
+                          },
+                          "generatedBy": {
+                            "type": "string",
+                            "description": "生成元。実鍵は実 engine 接続時に生成 (design/24 §2)"
+                          },
+                          "fingerprint": {
+                            "type": "string",
+                            "description": "fingerprint (先頭 32 桁)"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "expiresAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "trusted": {
+                            "type": "boolean",
+                            "description": "信頼登録状態 (明示操作でのみ変化)"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/certificates/ca/trust": {
+      "post": {
+        "operationId": "setCaProfileTrust",
+        "summary": "CA profile の信頼登録状態を変更する (明示操作・監査記録)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "profileId",
+                  "trusted"
+                ],
+                "properties": {
+                  "profileId": {
+                    "type": "string"
+                  },
+                  "trusted": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "変更結果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "profileId",
+                    "trusted"
+                  ],
+                  "properties": {
+                    "profileId": {
+                      "type": "string"
+                    },
+                    "trusted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/business-logic/checks": {
       "get": {
         "operationId": "listBusinessLogicChecks",
@@ -5155,6 +5283,9 @@
             "$ref": "#/components/schemas/DocumentParameterHintsRegisteredEvent"
           },
           {
+            "$ref": "#/components/schemas/CaProfileTrustChangedEvent"
+          },
+          {
             "$ref": "#/components/schemas/SequencerSessionCompletedEvent"
           },
           {
@@ -5721,6 +5852,30 @@
           "parameterCount": {
             "type": "integer",
             "minimum": 1
+          }
+        }
+      },
+      "CaProfileTrustChangedEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "profileId",
+          "trusted"
+        ],
+        "properties": {
+          "type": {
+            "const": "CaProfileTrustChanged"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "profileId": {
+            "type": "string"
+          },
+          "trusted": {
+            "type": "boolean"
           }
         }
       },

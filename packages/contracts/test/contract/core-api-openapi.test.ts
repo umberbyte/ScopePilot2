@@ -55,6 +55,7 @@ const EXPECTED_EVENT_TYPES = [
   'DocumentAuthHintsRegistered',
   'DocumentPriorityHintsRegistered',
   'DocumentParameterHintsRegistered',
+  'CaProfileTrustChanged',
   'SequencerSessionCompleted',
   'ApiSpecImported',
   'OastAttemptStarted',

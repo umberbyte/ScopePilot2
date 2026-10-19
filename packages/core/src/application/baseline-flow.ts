@@ -228,6 +228,9 @@ export class BaselineFlowService {
   private readonly wsSeenFingerprints = new Set<string>();
   private wsSessionRevision = 1;
 
+  /** CA profile の信頼登録状態 (design/24。既定は未登録)。 */
+  private caProfileTrusted = false;
+
   /** 読み込み済み extension (design/f20)。manifest の署名検証を通過したもののみ。 */
   private readonly loadedExtensions: readonly { extensionId: string; version: string; permissions: readonly string[]; apiRange: readonly string[] }[] = [];
 
@@ -1229,6 +1232,38 @@ export class BaselineFlowService {
   /** 読み込み済み extension の一覧 (manifest の公開情報のみ・署名は出さない)。 */
   listExtensions(): readonly { extensionId: string; version: string; permissions: readonly string[]; apiRange: readonly string[] }[] {
     return [...this.loadedExtensions];
+  }
+
+  /**
+   * HTTPS 記録用 CA profile の台帳 (design/24 §2)。鍵生成は実 engine 接続と共に
+   * 後続 — ここは fingerprint・生成元・期限・信頼登録状態の表示と信頼状態の
+   * 変更 (監査付き) のみ。秘密鍵の export は設計上存在しない。
+   */
+  listCaProfiles(): readonly { profileId: string; purpose: string; generatedBy: string; fingerprint: string; createdAt: string; expiresAt: string; trusted: boolean }[] {
+    const fingerprint = hashStable('scopepilot2.ca.profile', { runtime: this.deps.runtimeBundleHash }).slice(0, 32);
+    const created = new Date(this.deps.clock.now().getTime() - 24 * 60 * 60 * 1000);
+    return [
+      {
+        profileId: 'scopepilot2-diagnostics',
+        purpose: 'HTTPS 記録 (診断用 profile)',
+        generatedBy: 'fixture (実鍵は実 engine 接続時に生成)',
+        fingerprint,
+        createdAt: created.toISOString(),
+        expiresAt: new Date(created.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+        trusted: this.caProfileTrusted,
+      },
+    ];
+  }
+
+  /** CA profile の信頼登録状態の変更 (design/24: 信頼登録は明示操作・監査記録)。 */
+  setCaProfileTrust(operator: OperatorProfile, profileId: string, trusted: boolean): { profileId: string; trusted: boolean } {
+    this.requirePermission(operator, 'case.manage');
+    if (profileId !== 'scopepilot2-diagnostics') {
+      throw domainError('ValidationFailed', `unknown CA profile ${profileId}`);
+    }
+    this.caProfileTrusted = trusted;
+    this.record({ type: 'CaProfileTrustChanged', at: this.deps.clock.now().toISOString(), profileId, trusted });
+    return { profileId, trusted };
   }
 
   listApiSpecImports(): readonly { documentLabel: string; endpointCount: number; importedAt: string }[] {

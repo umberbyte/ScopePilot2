@@ -1367,6 +1367,31 @@ describe('Core API server (node:http)', () => {
     assert.match(eventsText, /DocumentHintsRegistered/);
   });
 
+  test('certificates/ca は profile 一覧と信頼登録状態を扱う (design/24)', async () => {
+    const list = (await (await fetch(`${baseUrl}/api/certificates/ca`)).json()) as { profiles: readonly { profileId: string; trusted: boolean; fingerprint: string }[] };
+    assert.equal(list.profiles.length, 1);
+    assert.equal(list.profiles[0]?.profileId, 'scopepilot2-diagnostics');
+    assert.equal(list.profiles[0]?.trusted, false);
+
+    const changed = await fetch(`${baseUrl}/api/certificates/ca/trust`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId: 'scopepilot2-diagnostics', trusted: true }),
+    });
+    assert.equal(changed.status, 200);
+    const after = (await (await fetch(`${baseUrl}/api/certificates/ca`)).json()) as { profiles: readonly { trusted: boolean }[] };
+    assert.equal(after.profiles[0]?.trusted, true);
+
+    const unknown = await fetch(`${baseUrl}/api/certificates/ca/trust`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId: 'ghost', trusted: true }),
+    });
+    assert.equal(unknown.status, 400);
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /CaProfileTrustChanged/);
+  });
+
   test('documents/parameter-hints は parameter バリエーションを登録・一覧する (AGENTS.md)', async () => {
     const post = async (path: string, body: unknown): Promise<Response> =>
       fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

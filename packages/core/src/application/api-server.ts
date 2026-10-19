@@ -468,6 +468,21 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/certificates/ca') {
+      return respondJson(response, 200, { profiles: service.listCaProfiles() });
+    }
+    if (route === 'POST /api/certificates/ca/trust') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.setCaProfileTrust(operator, stringField(body, 'profileId'), body.trusted === true);
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/documents/hints') {
       return respondJson(response, 200, { hints: service.listDocumentHints() });
     }
