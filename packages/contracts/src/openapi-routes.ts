@@ -40,6 +40,8 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'POST', path: '/api/sessions/cookies', operationId: 'assignRoleCookies' },
   { method: 'GET', path: '/api/business-logic/checks', operationId: 'listBusinessLogicChecks' },
   { method: 'POST', path: '/api/business-logic/checks', operationId: 'runBusinessLogicCheck' },
+  { method: 'GET', path: '/api/traffic', operationId: 'listTraffic' },
+  { method: 'GET', path: '/api/traffic/site-map', operationId: 'listSiteMapEndpoints' },
   { method: 'GET', path: '/api/capabilities', operationId: 'listCapabilities' },
   { method: 'GET', path: '/api/runs/interrupted', operationId: 'listInterruptedRuns' },
   { method: 'GET', path: '/api/events', operationId: 'listEvents' },

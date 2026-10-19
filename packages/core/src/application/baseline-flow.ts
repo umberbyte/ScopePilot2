@@ -47,6 +47,7 @@ import {
 } from '../domain/plan-service.ts';
 import { FindingImporter } from '../domain/finding-importer.ts';
 import { BreakQueue, decideIntercept, type BreakItem, type BreakQueueEvent, type InterceptDecision } from '../domain/proxy-intercept.ts';
+import { SiteMapProjector, planTrafficQuery } from '../domain/target-logger.ts';
 import {
   businessTargetInScope,
   compareObservations,
@@ -170,6 +171,10 @@ export class BaselineFlowService {
   /** proxy の break queue (design/f02)。deadline 経過は既定で drop (暗黙 forward しない)。 */
   private readonly breakQueue = new BreakQueue(100);
 
+  /** HTTP 通信 log と endpoint 集約 (design/f03)。探索・Repeater の観測通信を記録する。 */
+  private readonly trafficLog: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' }[] = [];
+  private readonly siteMapProjector = new SiteMapProjector();
+
   /** 業務ロジック検証の実行履歴 (design/f17)。 */
   private readonly businessChecks: readonly { checkId: string; roles: readonly string[]; targetUrl: string; status: string; comparison: string; restore: string; executedAt: string }[] = [];
 
@@ -232,6 +237,39 @@ export class BaselineFlowService {
   /** 探索で scope 拒否された URL (開示用)。 */
   listDeniedUrls(): readonly { url: string; reason: string }[] {
     return [...this.deniedUrlLog];
+  }
+
+  /** 観測通信の記録 (traffic log と endpoint 集約の両方に入れる)。 */
+  private recordObservedExchange(summary: { url: string; method: string; status: number; contentType: string }, at: string, source: 'explore' | 'repeater'): void {
+    (this.trafficLog as { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' }[]).push({
+      exchangeId: this.deps.ids.next('exchange'),
+      ...summary,
+      at,
+      source,
+    });
+    this.siteMapProjector.add(summary);
+  }
+
+  /**
+   * HTTP 通信一覧 (design/f03)。limit は 1〜500。総数が 100,000 を超えると一覧ではなく
+   * 集約 (summary) mode になる (F03-UT-005/006)。list mode は最近の通信から返す。
+   */
+  listTraffic(limit: number): {
+    mode: 'list' | 'summary';
+    total: number;
+    entries?: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: string }[];
+  } {
+    const plan = planTrafficQuery(this.trafficLog.length, limit);
+    if (plan.mode === 'summary') {
+      return { mode: 'summary', total: this.trafficLog.length };
+    }
+    const entries = [...this.trafficLog].slice(-plan.limit).reverse();
+    return { mode: 'list', total: this.trafficLog.length, entries };
+  }
+
+  /** endpoint 集約 (origin/path/method/content-type/status。query は同一視・F03-UT-004)。 */
+  listSiteMapEndpoints(): readonly ReturnType<SiteMapProjector['list']>[number][] {
+    return this.siteMapProjector.list();
   }
 
   /** break queue の一覧 (deadline 経過を反映してから返す)。 */
@@ -586,6 +624,7 @@ export class BaselineFlowService {
       send: async (command) => {
         // fixture adapter: 対象 URL から決定的な text 応答を返す。実 adapter は後続増分。
         this.repeaterSentCommands.push(command);
+        this.recordObservedExchange({ url: draft.targetUrl, method: 'GET', status: 200, contentType: 'text/html' }, this.deps.clock.now().toISOString(), 'repeater');
       },
     });
     if (!outcome.sent) {
@@ -951,6 +990,7 @@ export class BaselineFlowService {
       // 探索の追跡情報 (depth・発見元) は core 側の値で上書きして記録する。
       const observation: PageObservation = { ...observed, url: canonical, depth: entry.depth, discoveredFrom: entry.discoveredFrom };
       observations.push(observation);
+      this.recordObservedExchange({ url: canonical, method: 'GET', status: observation.status, contentType: observation.contentType }, this.deps.clock.now().toISOString(), 'explore');
 
       if (entry.depth + 1 <= input.maxDepth) {
         for (const link of observation.links) {

@@ -918,6 +918,60 @@ describe('Core API server (node:http)', () => {
     assert.match(eventsText, /BusinessLogicCheckCompleted/);
   });
 
+  test('GET /api/traffic は通信一覧と endpoint 集約を返す (design/f03)', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'traffic-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+    await fetch(`${baseUrl}/api/authorization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['unauthenticated'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      }),
+    });
+    const planResponse = await fetch(`${baseUrl}/api/plan/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seeds: ['http://fixture.target.test/'] }),
+    });
+    const { plan } = (await planResponse.json()) as { plan: unknown };
+    const confirmation = (await (await fetch(`${baseUrl}/api/plan/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan }),
+    })).json()) as { confirmationId: string };
+    await fetch(`${baseUrl}/api/run/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan, confirmation, maxDepth: 1 }),
+    });
+
+    const trafficResponse = await fetch(`${baseUrl}/api/traffic?limit=50`);
+    assert.equal(trafficResponse.status, 200);
+    const traffic = (await trafficResponse.json()) as { mode: string; total: number; entries?: readonly { url: string; source: string }[] };
+    assert.equal(traffic.mode, 'list');
+    assert.ok(traffic.total > 0);
+    assert.ok((traffic.entries ?? []).length > 0);
+
+    // endpoint 集約 (query 同一視) と limit 検証。
+    const endpoints = (await (await fetch(`${baseUrl}/api/traffic/site-map`)).json()) as { endpoints: readonly { path: string; observedUrls: number }[] };
+    assert.ok(endpoints.endpoints.length > 0);
+    const badLimit = await fetch(`${baseUrl}/api/traffic?limit=501`);
+    assert.equal(badLimit.status, 400);
+  });
+
   test('GET /api/observations は site map 用の観測一覧と scope 拒否を返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',

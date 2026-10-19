@@ -159,7 +159,11 @@ test('A04: site map に観測一覧と scope 拒否が表示される', async ()
   // ため、探索中に拒否記録が残る。
   // 複数回の探索で同一拒否が重複記録されうるため first を使う。
   await expect(page.getByText(/elsewhere\.example\/out-of-scope/).first()).toBeVisible();
-  await expect(page.getByText('HTTP history (通信一覧・仮想化表示) は後続増分で提供します。')).toBeVisible();
+  // HTTP history と endpoint 集約 (探索・Repeater の観測通信が記録されている)。
+  await expect(page.getByText(/HTTP history \(通信 \d+ 件\)/)).toBeVisible();
+  await expect(page.getByText(/GET http:\/\/fixture.target.test\/ → 200/).first()).toBeVisible();
+  await expect(page.getByText(/endpoint 集約 \(\d+ 件・query は同一視\)/)).toBeVisible();
+  await expect(page.getByText(/\(\d+ URL\)/).first()).toBeVisible();
 });
 
 test('A03: catalog の診断項目をガイドライン切替・絞り込み・詳細表示できる', async () => {

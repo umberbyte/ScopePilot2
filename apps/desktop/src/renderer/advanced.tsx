@@ -576,6 +576,8 @@ function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const [deniedUrls, setDeniedUrls] = useState<readonly { url: string; reason: string }[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
+  const [traffic, setTraffic] = useState<{ mode: 'list' | 'summary'; total: number; entries?: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: string }[] } | null>(null);
+  const [endpoints, setEndpoints] = useState<readonly { key: string; path: string; method: string; status: number; observedUrls: number }[]>([]);
 
   useEffect(() => {
     void (async () => {
@@ -584,6 +586,10 @@ function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
         setObservations(body.observations);
         setDeniedUrls(body.deniedUrls);
         setLoaded(true);
+        const trafficBody = await callJson<{ mode: 'list' | 'summary'; total: number; entries?: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: string }[] }>(apiBase, 'GET', '/api/traffic?limit=100');
+        setTraffic(trafficBody);
+        const endpointBody = await callJson<{ endpoints: readonly { key: string; path: string; method: string; status: number; observedUrls: number }[] }>(apiBase, 'GET', '/api/traffic/site-map');
+        setEndpoints(endpointBody.endpoints);
       } catch (cause) {
         setError(String(cause));
       }
@@ -641,7 +647,35 @@ function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
           </Text>
         ))
       )}
-      <Text className={styles.muted}>HTTP history (通信一覧・仮想化表示) は後続増分で提供します。</Text>
+      <Text weight="semibold">{`HTTP history (通信 ${traffic?.total ?? 0} 件)`}</Text>
+      {traffic === null ? (
+        <Text className={styles.muted}>取得中…</Text>
+      ) : traffic.mode === 'summary' ? (
+        <Text className={styles.muted}>{`総数 ${traffic.total} 件は表示上限を超えるため、一覧ではなく endpoint 集約のみ表示します。`}</Text>
+      ) : (traffic.entries ?? []).length === 0 ? (
+        <Text className={styles.muted}>通信記録はまだありません。</Text>
+      ) : (
+        <div className={styles.section}>
+          {(traffic.entries ?? []).slice(0, 20).map((entry) => (
+            <Text key={entry.exchangeId} block>
+              {`${entry.method} ${entry.url} → ${String(entry.status)} (${entry.contentType.split(';')[0]}・${entry.source})`}
+            </Text>
+          ))}
+          {traffic.total > 20 ? <Text className={styles.muted}>{`…他 ${traffic.total - 20} 件 (上位 20 件のみ表示)`}</Text> : null}
+        </div>
+      )}
+      <Text weight="semibold">{`endpoint 集約 (${endpoints.length} 件・query は同一視)`}</Text>
+      {endpoints.length === 0 ? (
+        <Text className={styles.muted}>集約される endpoint はまだありません。</Text>
+      ) : (
+        <div className={styles.section}>
+          {endpoints.slice(0, 15).map((endpoint) => (
+            <Text key={endpoint.key} block>
+              {`${endpoint.method} ${endpoint.path} → ${String(endpoint.status)} (${endpoint.observedUrls} URL)`}
+            </Text>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

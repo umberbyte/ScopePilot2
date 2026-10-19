@@ -562,6 +562,21 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/traffic') {
+      const limitParam = url.searchParams.get('limit');
+      const limit = limitParam === null ? 100 : Number(limitParam);
+      if (!Number.isInteger(limit)) {
+        return respondError(response, 400, 'ValidationFailed', 'limit must be an integer', false);
+      }
+      try {
+        return respondJson(response, 200, service.listTraffic(limit));
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/traffic/site-map') {
+      return respondJson(response, 200, { endpoints: service.listSiteMapEndpoints() });
+    }
     if (route === 'GET /api/runs/interrupted') {
       if (runRepository === undefined) {
         return respondError(response, 501, 'Unsupported', 'run persistence is not configured for this server', false);
