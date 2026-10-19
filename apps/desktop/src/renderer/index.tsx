@@ -4,6 +4,7 @@
  * (`docs/detailed-design/01-system-components.md` §1)。
  */
 import { createRoot } from 'react-dom/client';
+import { WizardApp } from './wizard.tsx';
 import { FluentProvider, webLightTheme, Text, Spinner, makeStyles } from '@fluentui/react-components';
 import React, { useEffect, useState } from 'react';
 
@@ -48,6 +49,7 @@ function App(): React.ReactElement {
       </Text>
       <Text>{status}</Text>
       <Spinner size="tiny" label="fixture harness" />
+      {apiBase !== undefined && <WizardApp apiBase={apiBase} />}
     </div>
   );
 }

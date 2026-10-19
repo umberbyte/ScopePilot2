@@ -8,6 +8,7 @@ import type { OperatorPermission } from '@scopepilot2/contracts';
 export type UiMode = 'simple' | 'advanced';
 
 export type UiRoute =
+  | 'wizard.case-open'
   | 'wizard.guideline'
   | 'wizard.explore'
   | 'wizard.target-select'
@@ -24,6 +25,7 @@ export type UiRoute =
   | 'settings';
 
 const SIMPLE_ROUTES: ReadonlySet<UiRoute> = new Set<UiRoute>([
+  'wizard.case-open',
   'wizard.guideline',
   'wizard.explore',
   'wizard.target-select',
@@ -33,6 +35,7 @@ const SIMPLE_ROUTES: ReadonlySet<UiRoute> = new Set<UiRoute>([
 ]);
 
 const ROUTE_PERMISSIONS: Readonly<Record<UiRoute, OperatorPermission>> = {
+  'wizard.case-open': 'case.read',
   'wizard.guideline': 'case.read',
   'wizard.explore': 'run.manage',
   'wizard.target-select': 'run.manage',

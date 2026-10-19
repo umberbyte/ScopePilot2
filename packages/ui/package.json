@@ -2,6 +2,9 @@
   "name": "@scopepilot2/ui",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "dependencies": {
     "@fluentui/react-components": "^9.74.9",
     "react": "^19.3.1",

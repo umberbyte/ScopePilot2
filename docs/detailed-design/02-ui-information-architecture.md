@@ -87,4 +87,8 @@ AI は `CaseSetup`, `GuidelineExplain`, `DocumentExtract`, `CrawlSuggest`, `Cand
 | UI-UT-007 | `ai/proposal-reducer.test.ts` | AI 提案を受信 | 明示採用まで draft を変更しない |
 | UI-UT-008 | `presenters/secret.test.ts` | secret reference を表示 | 値ではなく保存先・状態のみ表示 |
 
+| UI-UT-009 | `packages/ui/test/unit/wizard/wizard-state.test.ts` | 未完了 step の進行 | 拒否し理由を返す |
+| UI-UT-010 | 同上 | step→route 写像 | 全 step が Simple 許可 route に一意に写る |
+| UI-UT-011 | 同上 | 戻り遷移 | S01 以外は常に許可、S07 は常に完了扱い |
+
 実 DOM、keyboard、仮想化、Electron bridge は Playwright component/app test で検証し、presenter の単体テストだけで画面品質を保証したことにしない。
