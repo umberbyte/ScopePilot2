@@ -5,6 +5,7 @@
  */
 import { createRoot } from 'react-dom/client';
 import { AdvancedApp } from './advanced.tsx';
+import { t } from './resources.ts';
 import { WizardApp } from './wizard.tsx';
 import { FluentProvider, webDarkTheme, webLightTheme, Text, Spinner, makeStyles, Button } from '@fluentui/react-components';
 import React, { useEffect, useState } from 'react';
@@ -45,7 +46,7 @@ function usePrefersLight(): boolean {
 
 function App(): React.ReactElement {
   const styles = useStyles();
-  const [status, setStatus] = useState<string>('接続中…');
+  const [status, setStatus] = useState<string>(t('app.status.connecting'));
   // モードは表示と編集範囲だけを変える (design/02 §0)。wizard 側の状態はモード切替で
   // 失われないよう、Simple を隠すだけで mount を維持する。
   const [mode, setMode] = useState<'simple' | 'advanced'>('simple');
@@ -53,16 +54,16 @@ function App(): React.ReactElement {
 
   useEffect(() => {
     if (apiBase === undefined) {
-      setStatus('API 橋渡しが見つかりません (preload 未構成)');
+      setStatus(t('app.status.bridgeMissing'));
       return;
     }
     fetch(`${apiBase}/api/health`)
       .then((response) => response.json() as Promise<{ status: string; schemaVersion: string }>)
       .then((body) => {
-        setStatus(`Core API: ${body.status} (${body.schemaVersion})`);
+        setStatus(t('app.status.apiOk', { status: body.status, schemaVersion: body.schemaVersion }));
       })
       .catch(() => {
-        setStatus('Core API へ接続できません');
+        setStatus(t('app.status.apiUnreachable'));
       });
   }, [apiBase]);
 
@@ -73,15 +74,15 @@ function App(): React.ReactElement {
       </Text>
       <Text>{status}</Text>
       <div className={styles.modebar}>
-        <Text>モード:</Text>
+        <Text>{t('app.mode.label')}</Text>
         <Button appearance={mode === 'simple' ? 'primary' : 'secondary'} onClick={() => setMode('simple')}>
-          シンプル
+          {t('app.mode.simple')}
         </Button>
         <Button appearance={mode === 'advanced' ? 'primary' : 'secondary'} onClick={() => setMode('advanced')}>
-          アドバンスド
+          {t('app.mode.advanced')}
         </Button>
       </div>
-      <Spinner size="tiny" label="fixture harness" />
+      <Spinner size="tiny" label={t('app.harnessLabel')} />
       {apiBase !== undefined && (
         <>
           <div style={{ display: mode === 'simple' ? 'block' : 'none' }}>

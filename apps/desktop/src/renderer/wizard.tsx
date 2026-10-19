@@ -13,6 +13,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { executionSummary } from '@scopepilot2/ui';
+import { t } from './resources.ts';
 import {
   advance,
   goBack,
@@ -33,7 +34,7 @@ const GUIDELINES: readonly string[] = [
   'デジタル庁 DS-221',
 ];
 
-const DEFAULT_EXPLORE_LIMITS = '上限 (既定・表示専用): 500 ページ / 2 req/s / 30 分 / 深さ 5';
+
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px', maxWidth: '760px' },
@@ -115,7 +116,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
         maxDepth: 5,
       });
       setCandidates(run.candidates);
-      setExploreSummary(`探索完了: ${run.observations.length} 件を観測、診断候補 ${run.candidates.length} 件を生成`);
+      setExploreSummary(t('wizard.s03.done', { observations: run.observations.length, candidates: run.candidates.length }));
       setData((current) => ({ ...current, explorationDone: true }));
     } catch (cause) {
       setError(String(cause));
@@ -169,7 +170,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
       });
       await callApi(apiBase, 'POST', '/api/import/nuclei', { engineVersion: run.engineVersion, lines: [] });
       setFindings(run.findings);
-      setRunSummary(`診断完了 (engine ${run.engineVersion}・overshoot 予約 ${run.overshootReservation} 件分): 所見 ${run.findings.length} 件`);
+      setRunSummary(t('wizard.s06.done', { engineVersion: run.engineVersion, overshoot: run.overshootReservation, findings: run.findings.length }));
       setData((current) => ({ ...current, runFinished: true }));
     } catch (cause) {
       setError(String(cause));
@@ -208,12 +209,12 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
 
       {step === 'S01' && (
         <>
-          <Text size={400}>S01 案件を開く</Text>
+          <Text size={400}>{STEP_LABELS.S01}</Text>
           {data.caseOpened ? (
-            <Text role="status">案件「{caseName}」を開きました。</Text>
+            <Text role="status">{t('wizard.s01.opened', { caseName })}</Text>
           ) : (
             <Button appearance="primary" disabled={busy} onClick={() => void openCase()}>
-              案件を開く (fixture)
+              {t('wizard.s01.openCase')}
             </Button>
           )}
         </>
@@ -221,7 +222,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
 
       {step === 'S02' && (
         <>
-          <Text size={400}>S02 ガイドライン選択</Text>
+          <Text size={400}>{t('wizard.s02.title')}</Text>
           {GUIDELINES.map((guideline) => (
             <Checkbox
               key={guideline}
@@ -243,13 +244,13 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
 
       {step === 'S03' && (
         <>
-          <Text size={400}>S03 認証準備・探索開始</Text>
-          <Text className={styles.hint}>{DEFAULT_EXPLORE_LIMITS}</Text>
+          <Text size={400}>{t('wizard.s03.title')}</Text>
+          <Text className={styles.hint}>{t('wizard.s03.defaultLimits')}</Text>
           {data.explorationDone ? (
             <Text role="status">{exploreSummary}</Text>
           ) : (
             <Button appearance="primary" disabled={busy} onClick={() => void runExploration()}>
-              探索を開始する
+              {t('wizard.s03.explore')}
             </Button>
           )}
         </>
@@ -257,8 +258,8 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
 
       {step === 'S04' && (
         <>
-          <Text size={400}>S04 探索結果から対象選定</Text>
-          <Text className={styles.hint}>観測された候補から診断対象を選んでください (全選択可)。</Text>
+          <Text size={400}>{t('wizard.s04.title')}</Text>
+          <Text className={styles.hint}>{t('wizard.s04.hint')}</Text>
           {candidates.map((candidate) => (
             <Checkbox
               key={candidate.candidateId}
@@ -274,51 +275,56 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
             />
           ))}
           <Button appearance="primary" disabled={busy || selectedCandidateIds.length === 0} onClick={() => void adoptTargets()}>
-            選択を採用する ({selectedCandidateIds.length} 件)
+            {t('wizard.s04.adopt', { count: selectedCandidateIds.length })}
           </Button>
         </>
       )}
 
       {step === 'S05' && scanPlan !== null && (
         <>
-          <Text size={400}>S05 実行計画の最終確認</Text>
-          <Text>送信目的: 探索結果に対する能動診断 (ZAP 委譲)。</Text>
-          <Text>対象: {data.selectedTargets.length} 件 / 概算通信数上限: {scanPlan.plan.limits.maxRequests} 件</Text>
-          <Text>禁止操作: 本案件では破壊的操作・認証情報変更を禁止します。</Text>
+          <Text size={400}>{t('wizard.s05.title')}</Text>
+          <Text>{t('wizard.s05.purpose')}</Text>
+          <Text>{t('wizard.s05.targets', { targets: data.selectedTargets.length, maxRequests: scanPlan.plan.limits.maxRequests })}</Text>
+          <Text>{t('wizard.s05.forbidden')}</Text>
           {executionSummary(scanPlan.plan.steps as never).map((row) => (
             <Text key={row.stepId} className={styles.hint}>
               {row.kind}: {row.label}
             </Text>
           ))}
-          <Text className={styles.hint}>この確認が、送信前の最終操作です。</Text>
+          <Text className={styles.hint}>{t('wizard.s05.finalNote')}</Text>
         </>
       )}
 
       {step === 'S05' && scanPlan === null && (
         <>
-          <Text size={400}>S05 実行計画の最終確認</Text>
+          <Text size={400}>{t('wizard.s05.title')}</Text>
           <Button appearance="primary" disabled={busy} onClick={() => void prepareScanPlan()}>
-            計画を作成して確認する
+            {t('wizard.s05.build')}
           </Button>
         </>
       )}
 
       {step === 'S06' && (
         <>
-          <Text size={400}>S06 実行状況</Text>
+          <Text size={400}>{t('wizard.s06.title')}</Text>
           {data.runFinished ? (
             <>
               <Text role="status">{runSummary}</Text>
               {findings.map((finding) => (
                 <Text key={finding.findingId} className={styles.hint}>
-                  [{finding.severity}] {finding.title} — {finding.url} (観測 {finding.occurrences} 回)
-                  {finding.source.unverified ? ' ・実影響未確認' : ''}
+                  {t('wizard.s06.finding', {
+                    severity: finding.severity,
+                    title: finding.title,
+                    url: finding.url,
+                    occurrences: finding.occurrences,
+                    unverified: finding.source.unverified ? t('wizard.s06.unverified') : '',
+                  })}
                 </Text>
               ))}
             </>
           ) : (
             <Button appearance="primary" disabled={busy} onClick={() => void runScan()}>
-              診断を実行する
+              {t('wizard.s06.run')}
             </Button>
           )}
         </>
@@ -326,10 +332,10 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
 
       {step === 'S07' && (
         <>
-          <Text size={400}>S07 結果レビュー・報告</Text>
+          <Text size={400}>{t('wizard.s07.title')}</Text>
           {reportContent === '' ? (
             <Button appearance="primary" disabled={busy} onClick={() => void buildReport()}>
-              報告書を生成する
+              {t('wizard.s07.generate')}
             </Button>
           ) : (
             <Text style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{reportContent}</Text>
@@ -343,7 +349,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
             setStep(backResult.previous);
           }
         }}>
-          戻る
+          {t('wizard.nav.back')}
         </Button>
         <Button
           appearance="primary"
@@ -354,7 +360,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
             }
           }}
         >
-          次へ {!advanceResult.ok && step !== 'S07' ? `(要件未達)` : ''}
+          {t('wizard.nav.next')} {!advanceResult.ok && step !== 'S07' ? t('wizard.nav.nextBlocked') : ''}
         </Button>
       </div>
     </div>
