@@ -161,6 +161,15 @@ test('A08: 上限を狭めた探索計画を構築・確認・実行し、診断
   await page.getByRole('button', { name: '診断を実行する' }).click();
   await expect(page.getByText(/診断完了 \(engine/)).toBeVisible({ timeout: 30_000 });
 
+  // API 仕様 (OpenAPI JSON) から対象 URL を設定できる (design/f12)。
+  await page.getByLabel('API 仕様の label').fill('fixture API 仕様');
+  await page.getByLabel('OpenAPI/Swagger JSON').fill("{\"openapi\": \"3.1.0\", \"servers\": [{\"url\": \"http://fixture.target.test/api\"}], \"paths\": {\"/users\": {\"get\": {}}, \"/items\": {\"get\": {}}}}");
+  await page.getByRole('button', { name: 'API 仕様を取り込んで対象に設定する' }).click();
+  await expect(page.getByText('API 仕様を取り込みました (endpoint 2 件→対象 2 件・除外 server 0 件・警告 0 件)')).toBeVisible({ timeout: 30_000 });
+
+  // 取込で対象欄が上書かれたため、候補を対象に戻してから role 付き診断へ。
+  await page.getByRole('button', { name: '探索結果の候補をすべて対象に設定' }).click();
+
   // role を指定した診断は session cookie を適用する (design/08・login は API で setup)。
   await page.evaluate(async () => {
     const base = (window as { scopepilotDesktop?: { apiBase: string } }).scopepilotDesktop?.apiBase ?? '';

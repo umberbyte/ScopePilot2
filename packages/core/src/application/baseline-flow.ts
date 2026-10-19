@@ -92,6 +92,7 @@ import {
 } from '../domain/repeater.ts';
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
 import { assess, createSamplePlan, extractToken, reportProjection, SampleCollector } from '../domain/sequencer.ts';
+import { parseOpenApiDocument } from '../domain/api-scanning.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
 import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, LoginSessionCookie } from '../ports/engines.ts';
@@ -205,6 +206,9 @@ export class BaselineFlowService {
   private readonly payloadSetNames: string[] = [];
   private readonly payloadRegistrations = new Map<string, PayloadSetRegistration>();
   private readonly fuzzRuns: readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] = [];
+
+  /** 取り込んだ API 仕様の記録 (design/f12)。endpoint の一覧は都度応答する。 */
+  private readonly apiSpecImports: readonly { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[] = [];
 
   /** Sequencer session の台帳 (design/f07)。token 原文は保存しない (統計のみ)。 */
   private readonly sequencerSessions: readonly { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; executedAt: string }[] = [];
@@ -773,6 +777,48 @@ export class BaselineFlowService {
 
   listSequencerSessions(): readonly { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; executedAt: string }[] {
     return [...this.sequencerSessions];
+  }
+
+  /**
+   * OpenAPI/Swagger 仕様の取込 (design/f12)。文書内の instruction/script は実行しない。
+   * server は許可 Origin 内だけ候補化し (F12-UT-001)、endpoint (method+path+url) を
+   * 返す。path template ({id} 等) は警告付きでそのまま返す — 値は利用者が明示する。
+   * 生成された要求は呼出側で ExecutionPlan に入れて確認する (A08 の対象へ設定)。
+   */
+  importApiSpec(
+    operator: OperatorProfile,
+    input: { readonly documentLabel: string; readonly document: unknown },
+  ): { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; warnings: readonly string[] } {
+    this.requirePermission(operator, 'case.manage');
+    if (input.documentLabel.trim() === '') {
+      throw domainError('ValidationFailed', 'documentLabel must not be empty');
+    }
+    const caseRecord = this.currentCase();
+    const parsed = parseOpenApiDocument(input.document);
+    // server の scope 除外は domain と同一規則 (F12-UT-001)。URL 構築は basePath を
+    // 保持するため生 server 表記を使う (canonicalOrigin は path を落とす)。
+    const allowed = parsed.servers.filter((server) => ScopePolicy.decide(caseRecord.scope, server).allowed);
+    const excluded = parsed.servers.filter((server) => !ScopePolicy.decide(caseRecord.scope, server).allowed);
+    if (allowed.length === 0) {
+      throw domainError('OutOfScope', 'no api spec server is within the allowed origins');
+    }
+    const candidates = allowed.map((server) => server.replace(/\/+$/, ''));
+    const endpoints = candidates.flatMap((server) => parsed.endpoints.map((endpoint) => ({ method: endpoint.method, path: endpoint.path, url: `${server}${endpoint.path}` })));
+    const warnings = [...new Set(parsed.endpoints.filter((endpoint) => endpoint.path.includes('{')).map((endpoint) => `path template ${endpoint.path} needs explicit values`))];
+    const importedAt = this.deps.clock.now().toISOString();
+    (this.apiSpecImports as { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[]).push({ documentLabel: input.documentLabel, servers: candidates, excludedServers: excluded, endpoints, importedAt });
+    this.record({
+      type: 'ApiSpecImported',
+      at: importedAt,
+      documentLabel: input.documentLabel,
+      endpointCount: endpoints.length,
+      excludedServerCount: excluded.length,
+    });
+    return { documentLabel: input.documentLabel, servers: candidates, excludedServers: excluded, endpoints, warnings };
+  }
+
+  listApiSpecImports(): readonly { documentLabel: string; endpointCount: number; importedAt: string }[] {
+    return this.apiSpecImports.map((entry) => ({ documentLabel: entry.documentLabel, endpointCount: entry.endpoints.length, importedAt: entry.importedAt }));
   }
 
   /** draft の表示形 (UI 確認用に plan hash を添える)。 */

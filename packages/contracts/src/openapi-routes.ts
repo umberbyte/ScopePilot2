@@ -43,6 +43,8 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'POST', path: '/api/documents/hints', operationId: 'registerDocumentHints' },
   { method: 'GET', path: '/api/tools/sequencer/runs', operationId: 'listSequencerSessions' },
   { method: 'POST', path: '/api/tools/sequencer/runs', operationId: 'runSequencerSession' },
+  { method: 'GET', path: '/api/import/api-spec', operationId: 'listApiSpecImports' },
+  { method: 'POST', path: '/api/import/api-spec', operationId: 'importApiSpec' },
   { method: 'GET', path: '/api/documents/auth-hints', operationId: 'listDocumentAuthHints' },
   { method: 'POST', path: '/api/documents/auth-hints', operationId: 'registerDocumentAuthHints' },
   { method: 'GET', path: '/api/business-logic/checks', operationId: 'listBusinessLogicChecks' },

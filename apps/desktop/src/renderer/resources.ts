@@ -310,6 +310,13 @@ export const strings = {
   'a08.runExplore': '探索を実行する',
   'a08.scanTitle': '診断計画 (active scan)',
   'a08.scanRoleLabel': '診断 session の role (任意・A09 で login 済みの role。空なら非認証)',
+  'a08.apiSpecIntro':
+    'OpenAPI/Swagger 仕様 (JSON) から endpoint を取り込んで対象に設定できます。許可 Origin 内の server だけ候補化し、文書内の script は実行しません (design/f12)。',
+  'a08.apiSpecLabelField': 'API 仕様の label',
+  'a08.apiSpecTextField': 'OpenAPI/Swagger JSON',
+  'a08.apiSpecImport': 'API 仕様を取り込んで対象に設定する',
+  'a08.apiSpecImported': 'API 仕様を取り込みました (endpoint {endpoints} 件→対象 {targets} 件・除外 server {excluded} 件・警告 {warnings} 件)',
+  'a08.apiSpecInvalid': 'API 仕様が JSON として解析できません',
   'a08.sessionApplied': '(session cookie 適用: {cookies})',
   'a08.targetsLabel': '対象 URL (1行1件・探索で観測済みの URL)',
   'a08.adoptAll': '探索結果の候補をすべて対象に設定',

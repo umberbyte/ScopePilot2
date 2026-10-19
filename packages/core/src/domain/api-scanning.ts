@@ -99,6 +99,61 @@ export function resolveSchemaReference(root: { components(): Record<string, unkn
   throw domainError('ValidationFailed', `schema reference depth exceeds ${MAX_REFERENCE_DEPTH}`);
 }
 
+const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'] as const;
+
+/**
+ * OpenAPI (3.x) / Swagger (2.x) 文書の最小 parse。文書内の instruction/script は
+ * 実行しない (f12)。server 候補と path×method の endpoint 一覧を返す。
+ * path template ({id} 等) はそのまま返し、呼出側で警告として扱う。
+ */
+export function parseOpenApiDocument(document: unknown): { servers: readonly string[]; endpoints: readonly { method: string; path: string }[] } {
+  if (typeof document !== 'object' || document === null || Array.isArray(document)) {
+    throw domainError('ValidationFailed', 'api spec must be a JSON object');
+  }
+  const record = document as Record<string, unknown>;
+  const version = record.openapi ?? record.swagger;
+  if (typeof version !== 'string') {
+    throw domainError('ValidationFailed', 'api spec must declare openapi or swagger version');
+  }
+  const servers: string[] = [];
+  if (Array.isArray(record.servers)) {
+    for (const server of record.servers) {
+      if (typeof server === 'object' && server !== null && typeof (server as { url?: unknown }).url === 'string') {
+        servers.push((server as { url: string }).url);
+      }
+    }
+  }
+  if (servers.length === 0 && typeof record.host === 'string') {
+    const schemes = Array.isArray(record.schemes) && record.schemes.every((scheme) => typeof scheme === 'string') ? (record.schemes as string[]) : ['https'];
+    const basePath = typeof record.basePath === 'string' ? record.basePath : '';
+    for (const scheme of schemes) {
+      servers.push(`${scheme}://${record.host}${basePath}`);
+    }
+  }
+  if (servers.length === 0) {
+    throw domainError('ValidationFailed', 'api spec has no usable server entry');
+  }
+  const paths = record.paths;
+  if (typeof paths !== 'object' || paths === null || Array.isArray(paths)) {
+    throw domainError('ValidationFailed', 'api spec must have a paths object');
+  }
+  const endpoints: { method: string; path: string }[] = [];
+  for (const [path, item] of Object.entries(paths)) {
+    if (typeof item !== 'object' || item === null) {
+      continue;
+    }
+    for (const method of HTTP_METHODS) {
+      if ((item as Record<string, unknown>)[method] !== undefined) {
+        endpoints.push({ method: method.toUpperCase(), path });
+      }
+    }
+  }
+  if (endpoints.length === 0) {
+    throw domainError('ValidationFailed', 'api spec has no endpoint operations');
+  }
+  return { servers, endpoints };
+}
+
 /** 文書由来の候補は observed=false を保持する (F12-UT-008)。 */
 export function planApiCandidates(operations: readonly { readonly method: string; readonly path: string; readonly source: 'document' | 'observation' }[]): readonly { method: string; path: string; observed: boolean }[] {
   return operations.map((operation) => ({

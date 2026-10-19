@@ -269,6 +269,24 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/import/api-spec') {
+      return respondJson(response, 200, { imports: service.listApiSpecImports() });
+    }
+    if (route === 'POST /api/import/api-spec') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.importApiSpec(operator, {
+          documentLabel: stringField(body, 'documentLabel'),
+          document: body.document,
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/documents/hints') {
       return respondJson(response, 200, { hints: service.listDocumentHints() });
     }

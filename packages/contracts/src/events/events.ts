@@ -22,4 +22,5 @@ export type BaselineFlowEvent =
   | { readonly type: 'DocumentHintsRegistered'; readonly at: string; readonly documentLabel: string; readonly urlCount: number; readonly acceptedUrlCount: number }
   | { readonly type: 'DocumentAuthHintsRegistered'; readonly at: string; readonly documentLabel: string; readonly entryCount: number }
   | { readonly type: 'SequencerSessionCompleted'; readonly at: string; readonly sessionId: string; readonly targetUrl: string; readonly verdict: 'assessed' | 'insufficient'; readonly sampleCount: number; readonly duplicates: number; readonly missing: number }
+  | { readonly type: 'ApiSpecImported'; readonly at: string; readonly documentLabel: string; readonly endpointCount: number; readonly excludedServerCount: number }
   | { readonly type: 'ReportGenerated'; readonly at: string; readonly reportId: string; readonly modelHash: string };

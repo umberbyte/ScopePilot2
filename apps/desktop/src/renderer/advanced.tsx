@@ -423,6 +423,9 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const [exploreResult, setExploreResult] = useState('');
   const [candidates, setCandidates] = useState<readonly CandidateView[]>([]);
   const [targets, setTargets] = useState('');
+  const [apiSpecLabel, setApiSpecLabel] = useState('');
+  const [apiSpecText, setApiSpecText] = useState('');
+  const [apiSpecNotice, setApiSpecNotice] = useState('');
   const [scanRole, setScanRole] = useState('');
   const [scanLimits, setScanLimits] = useState({ maxRequests: '', maxPages: '', maxDurationMinutes: '' });
   const [scanPlan, setScanPlan] = useState<{ plan: { steps: readonly PlanStepView[] }; planHash: string; steps: readonly PlanStepView[] } | null>(null);
@@ -520,6 +523,23 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
       setCandidates(result.candidates);
       setExploreResult(t('a08.exploreDone', { observations: result.observations.length, candidates: result.candidates.length, denied: result.deniedUrls.length }));
     }), [apiBase, exploreConfirmation, explorePlan, exploreRole, run]);
+
+  const importApiSpec = useCallback(
+    () =>
+      run(async () => {
+        let document: unknown;
+        try {
+          document = JSON.parse(apiSpecText);
+        } catch {
+          throw new Error(t('a08.apiSpecInvalid'));
+        }
+        const result = await callJson<{ endpoints: readonly { url: string }[]; excludedServers: readonly string[]; warnings: readonly string[] }>(apiBase, 'POST', '/api/import/api-spec', { documentLabel: apiSpecLabel, document });
+        const urls = [...new Set(result.endpoints.map((endpoint) => endpoint.url))];
+        setTargets(urls.join('\n'));
+        setApiSpecNotice(t('a08.apiSpecImported', { endpoints: result.endpoints.length, targets: urls.length, excluded: result.excludedServers.length, warnings: result.warnings.length }));
+      }),
+    [apiBase, apiSpecLabel, apiSpecText, run],
+  );
 
   const buildScan = useCallback(() =>
     run(async () => {
@@ -625,6 +645,17 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
       <Field label={t('a08.scanRoleLabel')}>
         <Input value={scanRole} onChange={(_, data) => setScanRole(data.value)} />
       </Field>
+      <Text className={styles.muted}>{t('a08.apiSpecIntro')}</Text>
+      <Field label={t('a08.apiSpecLabelField')}>
+        <Input value={apiSpecLabel} onChange={(_, data) => setApiSpecLabel(data.value)} />
+      </Field>
+      <Field label={t('a08.apiSpecTextField')}>
+        <Textarea value={apiSpecText} onChange={(_, data) => setApiSpecText(data.value)} rows={4} />
+      </Field>
+      <Button disabled={busy} onClick={() => void importApiSpec()}>
+        {t('a08.apiSpecImport')}
+      </Button>
+      {apiSpecNotice !== '' && <Text role="status">{apiSpecNotice}</Text>}
       <Button disabled={busy || candidates.length === 0} onClick={() => setTargets(candidates.map((candidate) => candidate.url).join('\n'))}>
         {t('a08.adoptAll')}
       </Button>

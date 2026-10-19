@@ -1802,6 +1802,158 @@
         }
       }
     },
+    "/api/import/api-spec": {
+      "get": {
+        "operationId": "listApiSpecImports",
+        "summary": "取り込んだ API 仕様の一覧 (label と endpoint 数のみ)",
+        "responses": {
+          "200": {
+            "description": "imports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "imports"
+                  ],
+                  "properties": {
+                    "imports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "documentLabel",
+                          "endpointCount",
+                          "importedAt"
+                        ],
+                        "properties": {
+                          "documentLabel": {
+                            "type": "string"
+                          },
+                          "endpointCount": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "importedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "importApiSpec",
+        "summary": "OpenAPI/Swagger 仕様を parse して endpoint 候補を返す (design/f12)。文書内の instruction/script は実行しない。server は許可 Origin 内のみ",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "documentLabel",
+                  "document"
+                ],
+                "properties": {
+                  "documentLabel": {
+                    "type": "string"
+                  },
+                  "document": {
+                    "type": "object",
+                    "description": "OpenAPI/Swagger 文書 (JSON object)。openapi/swagger version・servers (または host)・paths が必要"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "取込結果 (endpoint 一覧・除外 server・警告)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "documentLabel",
+                    "servers",
+                    "excludedServers",
+                    "endpoints",
+                    "warnings"
+                  ],
+                  "properties": {
+                    "documentLabel": {
+                      "type": "string"
+                    },
+                    "servers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "excludedServers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "許可 Origin 外で候補化しなかった server (F12-UT-001)"
+                    },
+                    "endpoints": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "method",
+                          "path",
+                          "url"
+                        ],
+                        "properties": {
+                          "method": {
+                            "type": "string",
+                            "description": "HTTP method (大文字)"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string",
+                            "description": "server + path。template ({id} 等) は値の明示が必要 (warnings 参照)"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/documents/auth-hints": {
       "get": {
         "operationId": "listDocumentAuthHints",
@@ -3802,6 +3954,9 @@
             "$ref": "#/components/schemas/SequencerSessionCompletedEvent"
           },
           {
+            "$ref": "#/components/schemas/ApiSpecImportedEvent"
+          },
+          {
             "$ref": "#/components/schemas/ReportGeneratedEvent"
           }
         ]
@@ -4339,6 +4494,36 @@
             "minimum": 0
           },
           "missing": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ApiSpecImportedEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "documentLabel",
+          "endpointCount",
+          "excludedServerCount"
+        ],
+        "properties": {
+          "type": {
+            "const": "ApiSpecImported"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "documentLabel": {
+            "type": "string"
+          },
+          "endpointCount": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "excludedServerCount": {
             "type": "integer",
             "minimum": 0
           }

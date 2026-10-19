@@ -1114,6 +1114,33 @@ describe('Core API server (node:http)', () => {
     }
   });
 
+  test('import/api-spec は OpenAPI 仕様から endpoint を返す (design/f12)', async () => {
+    const imported = await fetch(`${baseUrl}/api/import/api-spec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentLabel: 'IT API 仕様', document: {"openapi": "3.1.0", "servers": [{"url": "http://fixture.target.test/api"}, {"url": "http://elsewhere.example/api"}], "paths": {"/users": {"get": {}, "post": {}}, "/users/{id}": {"get": {}}}} }),
+    });
+    assert.equal(imported.status, 200);
+    const result = (await imported.json()) as { servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; url: string }[]; warnings: readonly string[] };
+    assert.deepEqual(result.servers, ['http://fixture.target.test/api']);
+    assert.deepEqual(result.excludedServers, ['http://elsewhere.example/api']);
+    assert.equal(result.endpoints.length, 3);
+    assert.ok(result.endpoints.some((endpoint) => endpoint.url === 'http://fixture.target.test/api/users' && endpoint.method === 'POST'));
+    assert.equal(result.warnings.length, 1);
+
+    const malformed = await fetch(`${baseUrl}/api/import/api-spec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentLabel: 'x', document: { nope: true } }),
+    });
+    assert.equal(malformed.status, 400);
+
+    const list = (await (await fetch(`${baseUrl}/api/import/api-spec`)).json()) as { imports: readonly { documentLabel: string; endpointCount: number }[] };
+    assert.ok(list.imports.some((entry) => entry.documentLabel === 'IT API 仕様' && entry.endpointCount === 3));
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /ApiSpecImported/);
+  });
+
   test('tools/sequencer は token 統計を返し、token 原文を出さない (design/f07)', async () => {
     const run = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
       method: 'POST',
