@@ -5,6 +5,7 @@
  */
 import React, { useState } from 'react';
 import { Button, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, tokens } from '@fluentui/react-components';
+import { t } from './resources.ts';
 import catalogJson from '../../../../docs/generated/guideline-catalog.json';
 
 interface CatalogCheck {
@@ -69,15 +70,15 @@ export function GuidelinesCatalogScreen(): React.ReactElement {
     <div className={styles.section}>
       <Text weight="semibold">Guidelines & Check Catalog</Text>
       <Text className={styles.muted}>
-        {`catalog hash: ${CATALOG.catalogHash.slice(0, 16)}… / 元資料: ${CATALOG.source.workbookPath} (sha256 ${CATALOG.source.sha256.slice(0, 12)}…) / 診断項目 ${CATALOG.counts.guidelineChecks}・ZAP rule ${CATALOG.counts.zapRules}・ZAP 非対応 theme ${CATALOG.counts.zapUnsupportedThemes}`}
+        {t('a03.meta', { catalogHash: CATALOG.catalogHash.slice(0, 16), workbookPath: CATALOG.source.workbookPath, sha256: CATALOG.source.sha256.slice(0, 12), checks: CATALOG.counts.guidelineChecks, rules: CATALOG.counts.zapRules, themes: CATALOG.counts.zapUnsupportedThemes })}
       </Text>
       <div className={styles.section}>
         {(['checks', 'rules', 'themes'] as const).map((candidate) => (
           <Button key={candidate} appearance={tab === candidate ? 'primary' : 'secondary'} onClick={() => setTab(candidate)}>
-            {candidate === 'checks' ? 'ガイドライン診断項目' : candidate === 'rules' ? 'ZAP 診断ルール' : 'ZAP 非対応テーマ'}
+            {candidate === 'checks' ? t('a03.tab.checks') : candidate === 'rules' ? t('a03.tab.rules') : t('a03.tab.themes')}
           </Button>
         ))}
-        <Input placeholder="絞り込み (項目名・要求・章)" value={filter} onChange={(_, data) => setFilter(data.value)} />
+        <Input placeholder={t('a03.filterPlaceholder')} value={filter} onChange={(_, data) => setFilter(data.value)} />
       </div>
       {tab === 'checks' && guideline !== undefined && (
         <>
@@ -96,15 +97,15 @@ export function GuidelinesCatalogScreen(): React.ReactElement {
             ))}
           </div>
           <Text className={styles.muted}>{guideline.sourceNote}</Text>
-          <Text>{`${guideline.sheet}: ${checks.length} 件 (全 ${guideline.checks.length} 件中)`}</Text>
+          <Text>{t('a03.checksCount', { sheet: guideline.sheet, shown: checks.length, total: guideline.checks.length })}</Text>
           <div className={styles.scroll}>
-            <Table size="small" aria-label="診断項目一覧">
+            <Table size="small" aria-label={t('a03.table.aria')}>
               <TableHeader>
                 <TableRow>
                   <TableHeaderCell>no</TableHeaderCell>
-                  <TableHeaderCell>章 / item</TableHeaderCell>
-                  <TableHeaderCell>診断項目</TableHeaderCell>
-                  <TableHeaderCell>詳細</TableHeaderCell>
+                  <TableHeaderCell>{t('a03.col.chapter')}</TableHeaderCell>
+                  <TableHeaderCell>{t('a03.col.checkItem')}</TableHeaderCell>
+                  <TableHeaderCell>{t('a03.col.detail')}</TableHeaderCell>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -115,7 +116,7 @@ export function GuidelinesCatalogScreen(): React.ReactElement {
                     <TableCell>{check.checkItem}</TableCell>
                     <TableCell>
                       <Button size="small" onClick={() => setSelectedCheck(check)}>
-                        開く
+                        {t('a03.open')}
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -125,26 +126,26 @@ export function GuidelinesCatalogScreen(): React.ReactElement {
           </div>
           {selectedCheck !== null && (
             <div className={styles.section}>
-              <Text weight="semibold">{`項目 ${selectedCheck.no} ${selectedCheck.checkItem}`}</Text>
-              <Text>{`要求: ${selectedCheck.requirement}`}</Text>
-              <Text>{`検証方法: ${selectedCheck.method}`}</Text>
-              <Text>{`疑わしい挙動: ${selectedCheck.suspectedBehavior}`}</Text>
-              <Text>{`安全な状態: ${selectedCheck.safeState}`}</Text>
+              <Text weight="semibold">{t('a03.detailTitle', { no: selectedCheck.no, checkItem: selectedCheck.checkItem })}</Text>
+              <Text>{t('a03.detail.requirement', { requirement: selectedCheck.requirement })}</Text>
+              <Text>{t('a03.detail.method', { method: selectedCheck.method })}</Text>
+              <Text>{t('a03.detail.suspected', { suspectedBehavior: selectedCheck.suspectedBehavior })}</Text>
+              <Text>{t('a03.detail.safeState', { safeState: selectedCheck.safeState })}</Text>
             </div>
           )}
         </>
       )}
       {tab === 'rules' && (
         <>
-          <Text>{`ZAP 診断ルール: ${rules.length} 件 (全 ${CATALOG.zapRules.length} 件中)`}</Text>
+          <Text>{t('a03.rulesCount', { shown: rules.length, total: CATALOG.zapRules.length })}</Text>
           <div className={styles.scroll}>
-            <Table size="small" aria-label="ZAP 診断ルール一覧">
+            <Table size="small" aria-label={t('a03.rulesTable.aria')}>
               <TableHeader>
                 <TableRow>
                   <TableHeaderCell>no</TableHeaderCell>
-                  <TableHeaderCell>種別</TableHeaderCell>
+                  <TableHeaderCell>{t('a03.col.kind')}</TableHeaderCell>
                   <TableHeaderCell>ruleId</TableHeaderCell>
-                  <TableHeaderCell>名前</TableHeaderCell>
+                  <TableHeaderCell>{t('a03.col.name')}</TableHeaderCell>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -163,14 +164,14 @@ export function GuidelinesCatalogScreen(): React.ReactElement {
       )}
       {tab === 'themes' && (
         <>
-          <Text>{`ZAP 非対応テーマ: ${themes.length} 件 (全 ${CATALOG.zapUnsupportedThemes.length} 件中)`}</Text>
+          <Text>{t('a03.themesCount', { shown: themes.length, total: CATALOG.zapUnsupportedThemes.length })}</Text>
           <div className={styles.scroll}>
-            <Table size="small" aria-label="ZAP 非対応テーマ一覧">
+            <Table size="small" aria-label={t('a03.themesTable.aria')}>
               <TableHeader>
                 <TableRow>
                   <TableHeaderCell>no</TableHeaderCell>
-                  <TableHeaderCell>テーマ</TableHeaderCell>
-                  <TableHeaderCell>対象項目</TableHeaderCell>
+                  <TableHeaderCell>{t('a03.col.theme')}</TableHeaderCell>
+                  <TableHeaderCell>{t('a03.col.targetItems')}</TableHeaderCell>
                 </TableRow>
               </TableHeader>
               <TableBody>

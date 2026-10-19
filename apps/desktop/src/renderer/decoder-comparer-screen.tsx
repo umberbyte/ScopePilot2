@@ -5,6 +5,7 @@
  */
 import React, { useCallback, useState } from 'react';
 import { MessageBar, Button, Checkbox, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { t } from './resources.ts';
 
 const CODECS = ['base64', 'url', 'hex', 'html-entity', 'gzip', 'deflate-raw'] as const;
 
@@ -84,53 +85,53 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
           {`Error: ${error}`}
         </MessageBar>
       )}
-      <Text weight="semibold">Decoder (標準 codec の chain)</Text>
-      <Field label="入力 (text)">
+      <Text weight="semibold">{t('a10.decoderTitle')}</Text>
+      <Field label={t('a10.inputLabel')}>
         <Textarea value={inputText} onChange={(_, data) => setInputText(data.value)} rows={3} />
       </Field>
       <div className={styles.chips}>
         {CODECS.map((codec) => (
           <Button key={codec} size="small" disabled={busy} onClick={() => setChain((current) => [...current, codec])}>
-            {`${codec} を追加`}
+            {t('a10.addCodec', { codec })}
           </Button>
         ))}
       </div>
-      <Text className={styles.muted}>{chain.length === 0 ? 'codec chain 未構成' : `chain: ${chain.join(' → ')}`}</Text>
+      <Text className={styles.muted}>{chain.length === 0 ? t('a10.chainEmpty') : t('a10.chainBuilt', { chain: chain.join(' → ') })}</Text>
       {chain.length > 0 && (
         <Button size="small" onClick={() => setChain((current) => current.slice(0, -1))}>
-          最後の codec を削除
+          {t('a10.removeLastCodec')}
         </Button>
       )}
       <Button appearance="primary" disabled={busy || chain.length === 0 || inputText === ''} onClick={() => void runDecode()}>
-        復号する
+        {t('a10.decode')}
       </Button>
       {decodeResult !== null && (
         <div className={styles.section}>
-          <Text>{`出力 (${decodeResult.outputBytes} bytes):`}</Text>
+          <Text>{t('a10.output', { bytes: decodeResult.outputBytes })}</Text>
           <Text block style={{ whiteSpace: 'pre-wrap' }}>
-            {decodeResult.outputText ?? `(バイナリ出力) base64: ${decodeResult.outputBase64}`}
+            {decodeResult.outputText ?? t('a10.binaryOutput', { base64: decodeResult.outputBase64 })}
           </Text>
         </div>
       )}
-      <Text weight="semibold">Comparer (テキスト行差分)</Text>
-      <Field label="左">
+      <Text weight="semibold">{t('a10.comparerTitle')}</Text>
+      <Field label={t('a10.leftLabel')}>
         <Textarea value={left} onChange={(_, data) => setLeft(data.value)} rows={4} />
       </Field>
-      <Field label="右">
+      <Field label={t('a10.rightLabel')}>
         <Textarea value={right} onChange={(_, data) => setRight(data.value)} rows={4} />
       </Field>
-      <Checkbox label="改行 (LF/CRLF) を正規化して比較" checked={normalizeNewlines} onChange={(_, data) => setNormalizeNewlines(data.checked === true)} />
+      <Checkbox label={t('a10.normalizeLabel')} checked={normalizeNewlines} onChange={(_, data) => setNormalizeNewlines(data.checked === true)} />
       <Button appearance="primary" disabled={busy || left === '' || right === ''} onClick={() => void runCompare()}>
-        比較する
+        {t('a10.compare')}
       </Button>
       {compareResult !== null && (
         <div className={styles.section}>
-          <Text>{compareResult.equal ? '一致しました。' : `差分 ${compareResult.differingLines.length} 行 (左 ${compareResult.leftLineCount} 行 / 右 ${compareResult.rightLineCount} 行)`}</Text>
+          <Text>{compareResult.equal ? t('a10.equal') : t('a10.diff', { lines: compareResult.differingLines.length, left: compareResult.leftLineCount, right: compareResult.rightLineCount })}</Text>
           {compareResult.differingLines.length > 0 && (
             <Table size="small" aria-label="行差分">
               <TableHeader>
                 <TableRow>
-                  <TableHeaderCell>行</TableHeaderCell>
+                  <TableHeaderCell>{t('a10.col.line')}</TableHeaderCell>
                   <TableHeaderCell>左</TableHeaderCell>
                   <TableHeaderCell>右</TableHeaderCell>
                 </TableRow>
@@ -146,11 +147,11 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
               </TableBody>
             </Table>
           )}
-          <Text className={styles.muted}>{`provenance: 左 ${compareResult.provenance.leftHash.slice(0, 12)}… / 右 ${compareResult.provenance.rightHash.slice(0, 12)}…`}</Text>
+          <Text className={styles.muted}>{t('a10.provenance', { leftHash: compareResult.provenance.leftHash.slice(0, 12), rightHash: compareResult.provenance.rightHash.slice(0, 12) })}</Text>
         </div>
       )}
-      <Text weight="semibold">Sequencer</Text>
-      <Text className={styles.muted}>token 収集と乱数性解析は sample 収集機能と共に後続増分で提供します (design/f07)。</Text>
+      <Text weight="semibold">{t('a10.sequencerTitle')}</Text>
+      <Text className={styles.muted}>{t('a10.sequencerNote')}</Text>
     </div>
   );
 }

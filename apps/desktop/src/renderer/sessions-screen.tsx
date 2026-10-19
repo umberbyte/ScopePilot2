@@ -5,6 +5,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { t } from './resources.ts';
 
 interface SessionView {
   readonly role: string;
@@ -83,10 +84,10 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
         try {
           steps = JSON.parse(stepsText) as readonly unknown[];
         } catch {
-          throw new Error('steps が JSON 配列として解析できません');
+          throw new Error(t('a09.stepsInvalid'));
         }
         const result = await callJson<{ flow: { role: string; stepCount: number } }>(apiBase, 'POST', '/api/sessions/flows', { role, flowVersion, steps });
-        setNotice(`${result.flow.role} の flow を登録しました (${result.flow.stepCount} step・secret は参照のみ保持)`);
+        setNotice(t('a09.flowRegistered', { role: result.flow.role, stepCount: result.flow.stepCount }));
       }),
     [apiBase, flowVersion, role, run, stepsText],
   );
@@ -97,8 +98,8 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
         const result = await callJson<{ outcome: string; sessionRevision: number }>(apiBase, 'POST', '/api/sessions/refresh', { role: targetRole });
         setNotice(
           result.outcome === 'refreshed'
-            ? `${targetRole} の session を更新しました (revision ${result.sessionRevision})`
-            : `${targetRole} の refresh は lockout 回避のため停止しました`,
+            ? t('a09.sessionRefreshed', { role: targetRole, revision: result.sessionRevision })
+            : t('a09.refreshStopped', { role: targetRole }),
         );
       }),
     [apiBase, run],
@@ -111,8 +112,8 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
         const result = await callJson<{ role: string; shared: boolean }>(apiBase, 'POST', '/api/sessions/cookies', { role, cookieNames: names });
         setNotice(
           result.shared
-            ? `${result.role} の cookie は他 role と同名のため共有と判定されました (role 間で jar を共有しません)`
-            : `${result.role} に cookie jar を割り当てました`,
+            ? t('a09.cookiesShared', { role: result.role })
+            : t('a09.cookiesAssigned', { role: result.role }),
         );
       }),
     [apiBase, cookieNames, role, run],
@@ -140,41 +141,39 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
         </MessageBar>
       )}
       {notice !== '' && <Text role="status">{notice}</Text>}
-      <Text className={styles.muted}>
-        secret 値は画面・API のどちらにも入れません。flow は参照 (secretReference) のみ持ち、step は最大 10・種別は allowlist (navigate/fill/click/wait/extract/assert) です。
-      </Text>
-      <Text weight="semibold">login flow の登録</Text>
-      <Field label="role">
+      <Text className={styles.muted}>{t('a09.intro')}</Text>
+      <Text weight="semibold">{t('a09.flowTitle')}</Text>
+      <Field label={t('a09.roleLabel')}>
         <Input value={role} onChange={(_, data) => setRole(data.value)} />
       </Field>
-      <Field label="flow 版">
+      <Field label={t('a09.flowVersionLabel')}>
         <Input value={flowVersion} onChange={(_, data) => setFlowVersion(data.value)} />
       </Field>
-      <Field label="steps (JSON 配列)">
+      <Field label={t('a09.stepsLabel')}>
         <Textarea value={stepsText} onChange={(_, data) => setStepsText(data.value)} rows={6} />
       </Field>
       <Button appearance="primary" disabled={busy} onClick={() => void registerFlow()}>
-        flow を登録する
+        {t('a09.register')}
       </Button>
-      <Field label="cookie 名 (comma 区切・role へ割当)">
+      <Field label={t('a09.cookiesLabel')}>
         <Input value={cookieNames} onChange={(_, data) => setCookieNames(data.value)} />
       </Field>
       <Button disabled={busy} onClick={() => void assignCookies()}>
-        cookie jar を割り当てる
+        {t('a09.assignCookies')}
       </Button>
-      <Text weight="semibold">{`sessions (${sessions.length} role)`}</Text>
+      <Text weight="semibold">{t('a09.sessionsTitle', { count: sessions.length })}</Text>
       {sessions.length === 0 ? (
-        <Text className={styles.muted}>登録された flow はまだありません。</Text>
+        <Text className={styles.muted}>{t('a09.empty')}</Text>
       ) : (
-        <Table size="small" aria-label="session 一覧">
+        <Table size="small" aria-label={t('a09.sessionsTitle', { count: sessions.length })}>
           <TableHeader>
             <TableRow>
-              <TableHeaderCell>role</TableHeaderCell>
-              <TableHeaderCell>flow 版</TableHeaderCell>
-              <TableHeaderCell>step 数</TableHeaderCell>
-              <TableHeaderCell>cookie (名前のみ)</TableHeaderCell>
-              <TableHeaderCell>session revision</TableHeaderCell>
-              <TableHeaderCell>操作</TableHeaderCell>
+              <TableHeaderCell>{t('a09.col.role')}</TableHeaderCell>
+              <TableHeaderCell>{t('a09.col.flowVersion')}</TableHeaderCell>
+              <TableHeaderCell>{t('a09.col.stepCount')}</TableHeaderCell>
+              <TableHeaderCell>{t('a09.col.cookies')}</TableHeaderCell>
+              <TableHeaderCell>{t('a09.col.revision')}</TableHeaderCell>
+              <TableHeaderCell>{t('a09.col.actions')}</TableHeaderCell>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -187,7 +186,7 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
                 <TableCell>{String(session.sessionRevision)}</TableCell>
                 <TableCell>
                   <Button size="small" disabled={busy} onClick={() => void refresh(session.role)}>
-                    refresh
+                    {t('a09.refresh')}
                   </Button>
                 </TableCell>
               </TableRow>
@@ -195,26 +194,24 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
           </TableBody>
         </Table>
       )}
-      <Text weight="semibold">Business logic 検証 (role 差分)</Text>
-      <Text className={styles.muted}>
-        2 role 以上の差分検証です。認可が CrossRoleTest を許可している必要があります。観測が欠けた role (session 未 refresh) があると inconclusive となり、成功/失敗を推測しません。期待値 DSL は allowlist 演算のみです。
-      </Text>
-      <Field label="roles (comma 区切)">
+      <Text weight="semibold">{t('a09.bizTitle')}</Text>
+      <Text className={styles.muted}>{t('a09.bizIntro')}</Text>
+      <Field label={t('a09.rolesLabel')}>
         <Input value={bizRoles} onChange={(_, data) => setBizRoles(data.value)} />
       </Field>
-      <Field label="期待値 expression (allowlist)">
+      <Field label={t('a09.expressionLabel')}>
         <Input value={bizExpression} onChange={(_, data) => setBizExpression(data.value)} />
       </Field>
-      <Field label="期待値">
+      <Field label={t('a09.expectedLabel')}>
         <Input value={bizExpected} onChange={(_, data) => setBizExpected(data.value)} />
       </Field>
       <Button appearance="primary" disabled={busy} onClick={() => void runBusinessCheck()}>
-        業務ロジック検証を実行する
+        {t('a09.bizRun')}
       </Button>
       {bizResult !== null && (
         <div className={styles.section}>
-          <Text role="status">{`結果: ${bizResult.status} (比較 ${bizResult.comparison.outcome}・restore ${bizResult.restore.outcome}・証拠分離 ${bizResult.matrix.evidenceSeparated ? 'あり' : 'なし'})`}</Text>
-          <Text className={styles.muted}>{`観測: ${bizResult.observations.map((observation) => `${observation.role}=${observation.observation ?? '(欠落)'}`).join('・')}`}</Text>
+          <Text role="status">{t('a09.bizResult', { status: bizResult.status, comparison: bizResult.comparison.outcome, restore: bizResult.restore.outcome, evidence: bizResult.matrix.evidenceSeparated ? t('a09.evidenceYes') : t('a09.evidenceNo') })}</Text>
+          <Text className={styles.muted}>{t('a09.observations', { observations: bizResult.observations.map((observation) => `${observation.role}=${observation.observation ?? t('a09.observationMissing')}`).join('・') })}</Text>
         </div>
       )}
     </div>

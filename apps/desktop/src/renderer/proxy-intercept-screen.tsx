@@ -6,6 +6,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { t } from './resources.ts';
 
 interface BreakItemView {
   readonly itemId: string;
@@ -36,7 +37,7 @@ async function callJson<T>(apiBase: string, method: string, path: string, body?:
 }
 
 const stateLabel = (state: BreakItemView['state']): string =>
-  ({ Held: '保持中', Forwarded: '転送済み', Dropped: '破棄', Expired: '期限切れ (drop 済み)' })[state] ?? state;
+  ({ Held: t('a05.state.held'), Forwarded: t('a05.state.forwarded'), Dropped: t('a05.state.dropped'), Expired: t('a05.state.expired') })[state] ?? state;
 
 const useStyles = makeStyles({
   section: { display: 'flex', flexDirection: 'column', gap: '4px' },
@@ -99,8 +100,8 @@ export function ProxyInterceptScreen({ apiBase }: { apiBase: string }): React.Re
         });
         setNotice(
           result.decision.action === 'forward'
-            ? `${itemId} を転送しました。`
-            : `${itemId} は転送を拒否されました: ${result.decision.reason ?? ''}`,
+            ? t('a05.forwarded', { itemId })
+            : t('a05.rejected', { itemId, reason: result.decision.reason ?? '' }),
         );
       }),
     [apiBase, run, targetUrl],
@@ -110,7 +111,7 @@ export function ProxyInterceptScreen({ apiBase }: { apiBase: string }): React.Re
     (itemId: string) =>
       run(async () => {
         await callJson(apiBase, 'POST', '/api/proxy/intercept/drop', { itemId });
-        setNotice(`${itemId} を破棄しました (暗黙転送はしません)。`);
+        setNotice(t('a05.dropped', { itemId }));
       }),
     [apiBase, run],
   );
@@ -119,39 +120,37 @@ export function ProxyInterceptScreen({ apiBase }: { apiBase: string }): React.Re
 
   return (
     <div className={styles.section}>
-      <Text className={styles.muted}>
-        実 proxy listener (通信傍受・転送本体) は実 engine 接続と共に後続増分です。ここでは break queue への受付と判断 (forward / drop) を扱います。deadline 経過・queue 上限は既定で drop し、暗黙 forward はしません。
-      </Text>
+      <Text className={styles.muted}>{t('a05.intro')}</Text>
       {error !== '' && (
         <MessageBar intent="error">
           {`Error: ${error}`}
         </MessageBar>
       )}
       {notice !== '' && <Text role="status">{notice}</Text>}
-      <Text weight="semibold">{`break queue (${queue.items.length} 件・保持中 ${held.length} 件)`}</Text>
-      <Field label="方向">
+      <Text weight="semibold">{t('a05.queueTitle', { items: queue.items.length, held: held.length })}</Text>
+      <Field label={t('a05.directionLabel')}>
         <Input value={direction} onChange={(_, data) => setDirection(data.value === 'response' ? 'response' : 'request')} />
       </Field>
-      <Field label="messageReference (原本参照・秘密値を含めない)">
+      <Field label={t('a05.referenceLabel')}>
         <Textarea value={messageReference} onChange={(_, data) => setMessageReference(data.value)} rows={2} />
       </Field>
       <Button appearance="primary" disabled={busy || messageReference.trim() === ''} onClick={() => void intake()}>
-        受け取る (fixture 受付)
+        {t('a05.intake')}
       </Button>
-      <Field label="転送先 URL (scope 内であること。対象外は拒否されます)">
+      <Field label={t('a05.forwardUrlLabel')}>
         <Input value={targetUrl} onChange={(_, data) => setTargetUrl(data.value)} />
       </Field>
       {queue.items.length === 0 ? (
-        <Text className={styles.muted}>queue は空です。</Text>
+        <Text className={styles.muted}>{t('a05.empty')}</Text>
       ) : (
-        <Table size="small" aria-label="break queue 一覧">
+        <Table size="small" aria-label={t('a05.table.aria')}>
           <TableHeader>
             <TableRow>
               <TableHeaderCell>itemId</TableHeaderCell>
-              <TableHeaderCell>方向</TableHeaderCell>
-              <TableHeaderCell>状態</TableHeaderCell>
-              <TableHeaderCell>原本 hash</TableHeaderCell>
-              <TableHeaderCell>操作</TableHeaderCell>
+              <TableHeaderCell>{t('a05.directionLabel')}</TableHeaderCell>
+              <TableHeaderCell>{t('a05.col.state')}</TableHeaderCell>
+              <TableHeaderCell>{t('a05.col.hash')}</TableHeaderCell>
+              <TableHeaderCell>{t('a05.col.actions')}</TableHeaderCell>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -165,14 +164,14 @@ export function ProxyInterceptScreen({ apiBase }: { apiBase: string }): React.Re
                   {item.state === 'Held' ? (
                     <>
                       <Button size="small" disabled={busy} onClick={() => void forward(item.itemId)}>
-                        転送
+                        {t('a05.forward')}
                       </Button>
                       <Button size="small" disabled={busy} onClick={() => void drop(item.itemId)}>
-                        破棄
+                        {t('a05.drop')}
                       </Button>
                     </>
                   ) : (
-                    item.editedRequestHash !== undefined && `${item.editedRequestHash.slice(0, 12)}… へ編集`
+                    item.editedRequestHash !== undefined && t('a05.editedTo', { hash: item.editedRequestHash.slice(0, 12) })
                   )}
                 </TableCell>
               </TableRow>
@@ -180,7 +179,7 @@ export function ProxyInterceptScreen({ apiBase }: { apiBase: string }): React.Re
           </TableBody>
         </Table>
       )}
-      <Text className={styles.muted}>{`queue event: ${queue.events.map((event) => `${event.type}(${event.itemId})`).join('・') || 'なし'}`}</Text>
+      <Text className={styles.muted}>{t('a05.events', { events: queue.events.map((event) => `${event.type}(${event.itemId})`).join('・') || t('a05.eventsNone') })}</Text>
     </div>
   );
 }
