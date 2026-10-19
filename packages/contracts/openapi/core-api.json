@@ -1613,6 +1613,150 @@
         }
       }
     },
+    "/api/documents/auth-hints": {
+      "get": {
+        "operationId": "listDocumentAuthHints",
+        "summary": "登録済みの認証情報 hint (ロール・方式・文書内の所在。値は持たない・未確認)",
+        "responses": {
+          "200": {
+            "description": "auth hints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "hints"
+                  ],
+                  "properties": {
+                    "hints": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "documentLabel",
+                          "entries"
+                        ],
+                        "properties": {
+                          "documentLabel": {
+                            "type": "string"
+                          },
+                          "entries": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "role",
+                                "authMethod",
+                                "documentLocation"
+                              ],
+                              "properties": {
+                                "role": {
+                                  "type": "string"
+                                },
+                                "authMethod": {
+                                  "$ref": "#/components/schemas/DocumentAuthMethod"
+                                },
+                                "documentLocation": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "registerDocumentAuthHints",
+        "summary": "入力文書に記載された認証情報の所在を登録 (AGENTS.md・design/08 AuthMethod)。秘密値は受け付けない",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "documentLabel",
+                  "entries"
+                ],
+                "properties": {
+                  "documentLabel": {
+                    "type": "string"
+                  },
+                  "entries": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "role",
+                        "authMethod",
+                        "documentLocation"
+                      ],
+                      "properties": {
+                        "role": {
+                          "type": "string"
+                        },
+                        "authMethod": {
+                          "$ref": "#/components/schemas/DocumentAuthMethod"
+                        },
+                        "documentLocation": {
+                          "type": "string",
+                          "description": "文書内の所在 (例: p.13 「管理者ログイン」)"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "登録結果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "documentLabel",
+                    "entryCount"
+                  ],
+                  "properties": {
+                    "documentLabel": {
+                      "type": "string"
+                    },
+                    "entryCount": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/business-logic/checks": {
       "get": {
         "operationId": "listBusinessLogicChecks",
@@ -2013,6 +2157,17 @@
   },
   "components": {
     "schemas": {
+      "DocumentAuthMethod": {
+        "type": "string",
+        "enum": [
+          "Form",
+          "Bearer",
+          "Basic",
+          "ApiKey",
+          "Cookie"
+        ],
+        "description": "design/08 AuthMethod の種別"
+      },
       "HealthResponse": {
         "type": "object",
         "required": [
@@ -3452,6 +3607,9 @@
             "$ref": "#/components/schemas/DocumentHintsRegisteredEvent"
           },
           {
+            "$ref": "#/components/schemas/DocumentAuthHintsRegisteredEvent"
+          },
+          {
             "$ref": "#/components/schemas/ReportGeneratedEvent"
           }
         ]
@@ -3919,6 +4077,31 @@
           "acceptedUrlCount": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "DocumentAuthHintsRegisteredEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "documentLabel",
+          "entryCount"
+        ],
+        "properties": {
+          "type": {
+            "const": "DocumentAuthHintsRegistered"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "documentLabel": {
+            "type": "string"
+          },
+          "entryCount": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       },

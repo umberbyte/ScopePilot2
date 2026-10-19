@@ -9,5 +9,6 @@ export * from './explore/explore.ts';
 export * from './scan/scan.ts';
 export * from './findings/findings.ts';
 export * from './report/report.ts';
+export * from './documents/documents.ts';
 export * from './events/events.ts';
 export * from './openapi-routes.ts';

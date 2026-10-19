@@ -414,6 +414,9 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const [hintUrls, setHintUrls] = useState('');
   const [hints, setHints] = useState<readonly { documentLabel: string; urls: readonly string[] }[]>([]);
   const [hintNotice, setHintNotice] = useState('');
+  const [authHintRole, setAuthHintRole] = useState('');
+  const [authHintMethod, setAuthHintMethod] = useState('Form');
+  const [authHintLocation, setAuthHintLocation] = useState('');
   const [exploreLimits, setExploreLimits] = useState({ maxRequests: '', maxPages: '', maxDurationMinutes: '' });
   const [explorePlan, setExplorePlan] = useState<{ plan: { steps: readonly PlanStepView[] }; planHash: string; steps: readonly PlanStepView[] } | null>(null);
   const [exploreConfirmation, setExploreConfirmation] = useState<{ confirmationId: string } | null>(null);
@@ -468,6 +471,18 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
         await loadHints();
       }),
     [apiBase, hintLabel, hintUrls, loadHints, run],
+  );
+
+  const registerAuthHints = useCallback(
+    () =>
+      run(async () => {
+        const result = await callJson<{ documentLabel: string; entryCount: number }>(apiBase, 'POST', '/api/documents/auth-hints', {
+          documentLabel: hintLabel,
+          entries: [{ role: authHintRole, authMethod: authHintMethod, documentLocation: authHintLocation }],
+        });
+        setHintNotice(t('a08.authHintRegistered', { label: result.documentLabel, count: result.entryCount }));
+      }),
+    [apiBase, authHintLocation, authHintMethod, authHintRole, hintLabel, run],
   );
 
   const buildExplore = useCallback(() =>
@@ -562,6 +577,19 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
       {hints.length > 0 && (
         <Text className={styles.muted}>{t('a08.hintList', { documents: hints.map((hint) => `${hint.documentLabel} (${hint.urls.length} URL)`).join('・') })}</Text>
       )}
+      <Text className={styles.muted}>{t('a08.authHintIntro')}</Text>
+      <Field label={t('a08.authHintRoleLabel')}>
+        <Input value={authHintRole} onChange={(_, data) => setAuthHintRole(data.value)} />
+      </Field>
+      <Field label={t('a08.authHintMethodLabel')}>
+        <Input value={authHintMethod} onChange={(_, data) => setAuthHintMethod(data.value)} />
+      </Field>
+      <Field label={t('a08.authHintLocationLabel')}>
+        <Input value={authHintLocation} onChange={(_, data) => setAuthHintLocation(data.value)} />
+      </Field>
+      <Button disabled={busy} onClick={() => void registerAuthHints()}>
+        {t('a08.authHintRegister')}
+      </Button>
       <Text weight="semibold">{t('a08.exploreTitle')}</Text>
       {error !== '' && (
         <MessageBar intent="error">

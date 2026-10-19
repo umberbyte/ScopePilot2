@@ -1167,6 +1167,43 @@ describe('Core API server (node:http)', () => {
     assert.match(eventsText, /DocumentHintsRegistered/);
   });
 
+  test('documents/auth-hints は認証情報の所在を登録・一覧する (AGENTS.md・design/08)', async () => {
+    const post = async (path: string, body: unknown): Promise<Response> =>
+      fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    const inlineSecret = await post('/api/documents/auth-hints', {
+      documentLabel: 'API 仕様書',
+      entries: [{ role: 'admin', authMethod: 'Form', documentLocation: 'p.1', secretValue: 'x' }],
+    });
+    assert.equal(inlineSecret.status, 400, '秘密値の持込みは拒否');
+
+    const badMethod = await post('/api/documents/auth-hints', {
+      documentLabel: 'API 仕様書',
+      entries: [{ role: 'admin', authMethod: 'OAuth', documentLocation: 'p.1' }],
+    });
+    assert.equal(badMethod.status, 400);
+
+    const registered = await post('/api/documents/auth-hints', {
+      documentLabel: 'API 仕様書 (IT)',
+      entries: [
+        { role: 'admin', authMethod: 'Form', documentLocation: 'p.13 管理者ログイン' },
+        { role: 'api-client', authMethod: 'ApiKey', documentLocation: '付録 B' },
+      ],
+    });
+    assert.equal(registered.status, 201);
+    const registration = (await registered.json()) as { documentLabel: string; entryCount: number };
+    assert.deepEqual(registration, { documentLabel: 'API 仕様書 (IT)', entryCount: 2 });
+
+    const list = (await (await fetch(`${baseUrl}/api/documents/auth-hints`)).json()) as {
+      hints: readonly { documentLabel: string; entries: readonly { role: string; authMethod: string; documentLocation: string }[] }[];
+    };
+    assert.equal(list.hints[0]?.documentLabel, 'API 仕様書 (IT)');
+    assert.deepEqual(list.hints[0]?.entries[0], { role: 'admin', authMethod: 'Form', documentLocation: 'p.13 管理者ログイン' });
+
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /DocumentAuthHintsRegistered/);
+  });
+
   test('business-logic check は role 差分検証を inconclusive/pass/fail で返す (design/f17)', async () => {
     const post = async (path: string, body: unknown): Promise<Response> =>
       fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

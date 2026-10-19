@@ -52,6 +52,7 @@ const EXPECTED_EVENT_TYPES = [
   'BusinessLogicCheckCompleted',
   'LoginCompleted',
   'DocumentHintsRegistered',
+  'DocumentAuthHintsRegistered',
   'ReportGenerated',
 ];
 

@@ -8,7 +8,7 @@
  */
 import type { Server } from 'node:http';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { DomainError, hashStable, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
+import { DomainError, DocumentAuthMethods, hashStable, type DocumentAuthMethod, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
 import type { BaselineFlowService } from './baseline-flow.ts';
 import { CodecRegistry, compareText, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
 
@@ -263,6 +263,46 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         const result = service.registerDocumentHints(operator, {
           documentLabel: stringField(body, 'documentLabel'),
           urls: stringArrayField(body, 'urls'),
+        });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/documents/auth-hints') {
+      return respondJson(response, 200, { hints: service.listDocumentAuthHints() });
+    }
+    if (route === 'POST /api/documents/auth-hints') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const entriesValue = body.entries;
+        if (!Array.isArray(entriesValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field entries must be an array', false);
+        }
+        const entries = entriesValue.map((entry, index) => {
+          if (typeof entry !== 'object' || entry === null) {
+            throw new DomainError('ValidationFailed', `entries[${index}] must be an object`);
+          }
+          const record = entry as Record<string, unknown>;
+          if (record.secretValue !== undefined || record.secret !== undefined) {
+            throw new DomainError('ValidationFailed', `entries[${index}]: secret values are not accepted; document location only`);
+          }
+          const authMethod = stringField(record, 'authMethod');
+          if (!DocumentAuthMethods.includes(authMethod as DocumentAuthMethod)) {
+            throw new DomainError('ValidationFailed', `entries[${index}]: authMethod not allowed: ${authMethod}`);
+          }
+          return {
+            role: stringField(record, 'role'),
+            authMethod: authMethod as DocumentAuthMethod,
+            documentLocation: stringField(record, 'documentLocation'),
+          };
+        });
+        const result = service.registerDocumentAuthHints(operator, {
+          documentLabel: stringField(body, 'documentLabel'),
+          entries,
         });
         return respondJson(response, 201, result);
       } catch (cause) {

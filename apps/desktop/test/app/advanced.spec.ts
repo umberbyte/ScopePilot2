@@ -134,6 +134,13 @@ test('A08: 上限を狭めた探索計画を構築・確認・実行し、診断
   await page.getByRole('button', { name: 'hint を登録する' }).click();
   await expect(page.getByText('操作手順書 (app test) の hint を登録しました (許可内 1/1 URL・以後の探索計画に統合されます)')).toBeVisible({ timeout: 30_000 });
 
+  // 認証情報の所在 (ロール・方式・文書内の所在) も登録できる — 秘密値は持たない。
+  await page.getByLabel('認証情報の role').fill('admin');
+  await page.getByLabel('認証方式 (Form/Bearer/Basic/ApiKey/Cookie)').fill('Form');
+  await page.getByLabel('文書内の所在 (例: p.13 管理者ログイン)').fill('p.13 管理者ログイン');
+  await page.getByRole('button', { name: '認証情報の所在を登録する' }).click();
+  await expect(page.getByText('操作手順書 (app test) の認証情報 hint を 1 件登録しました (A09 に未確認付きで表示されます)')).toBeVisible({ timeout: 30_000 });
+
   // 上限 (ページ数) を 50 に狭めて計画を構築すると、計画表示に 50 が反映される。
   // 上限欄は探索・診断の両 section にあるため、先頭 (探索側) を指定する。
   await page.getByLabel('最大ページ数 (空=既定)').first().fill('50');
@@ -368,6 +375,9 @@ test('A07: payload 集合を登録し fuzz を実行して cluster 集約を見�
 
 test('A09: login flow を登録し session refresh と cookie jar 割当を行う', async () => {
   await page.getByRole('button', { name: /A09 Sessions/ }).click();
+
+  // A08 で登録した認証情報 hint が「文書の記載 (未確認)」として参照できる。
+  await expect(page.getByText('文書の記載 (未確認・値は持たない): 操作手順書 (app test): admin は Form (p.13 管理者ログイン)')).toBeVisible({ timeout: 30_000 });
 
   // 既定入力のまま flow を登録する (secret は参照のみ)。
   await page.getByRole('button', { name: 'flow を登録する' }).click();

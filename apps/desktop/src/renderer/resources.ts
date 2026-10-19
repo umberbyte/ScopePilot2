@@ -145,6 +145,8 @@ export const strings = {
   'a09.intro':
     'secret 値は画面・API のどちらにも入れません。flow は参照 (secretReference) のみ持ち、step は最大 10・種別は allowlist (navigate/fill/click/wait/extract/assert) です。',
   'a09.flowTitle': 'login flow の登録',
+  'a09.authHintReference': '文書の記載 (未確認・値は持たない): {entries}',
+  'a09.authHintEntry': '{label}: {role} は {method} ({location})',
   'a09.roleLabel': 'role',
   'a09.flowVersionLabel': 'flow 版',
   'a09.stepsLabel': 'steps (JSON 配列)',
@@ -284,6 +286,13 @@ export const strings = {
   'a08.hintRegister': 'hint を登録する',
   'a08.hintRegistered': '{label} の hint を登録しました (許可内 {accepted}/{total} URL・以後の探索計画に統合されます)',
   'a08.hintList': '登録済み: {documents}',
+  'a08.authHintIntro':
+    '文書に記載された認証情報の所在 (ロール・方式・文書内の所在) を登録します。秘密値は入れられません。A09 で「文書の記載 (未確認)」として参照できます。',
+  'a08.authHintRoleLabel': '認証情報の role',
+  'a08.authHintMethodLabel': '認証方式 (Form/Bearer/Basic/ApiKey/Cookie)',
+  'a08.authHintLocationLabel': '文書内の所在 (例: p.13 管理者ログイン)',
+  'a08.authHintRegister': '認証情報の所在を登録する',
+  'a08.authHintRegistered': '{label} の認証情報 hint を {count} 件登録しました (A09 に未確認付きで表示されます)',
   'a08.exploreTitle': '探索計画 (crawl)',
   'a08.seedsLabel': '開始 URL (1行1件)',
   'a08.exploreRoleLabel': '探索 session の role (任意・A09 で login 済みの role。空なら非認証)',

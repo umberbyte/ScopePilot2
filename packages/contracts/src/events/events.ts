@@ -20,4 +20,5 @@ export type BaselineFlowEvent =
   | { readonly type: 'BusinessLogicCheckCompleted'; readonly at: string; readonly checkId: string; readonly roles: readonly string[]; readonly status: string }
   | { readonly type: 'LoginCompleted'; readonly at: string; readonly role: string; readonly authenticated: boolean; readonly secretReferences: readonly string[] }
   | { readonly type: 'DocumentHintsRegistered'; readonly at: string; readonly documentLabel: string; readonly urlCount: number; readonly acceptedUrlCount: number }
+  | { readonly type: 'DocumentAuthHintsRegistered'; readonly at: string; readonly documentLabel: string; readonly entryCount: number }
   | { readonly type: 'ReportGenerated'; readonly at: string; readonly reportId: string; readonly modelHash: string };

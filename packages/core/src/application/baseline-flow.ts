@@ -30,6 +30,9 @@ import {
   type ScopeLimits,
   type StopReason,
   type ActiveScanRequest,
+  type DocumentAuthHint,
+  type DocumentAuthHintEntry,
+  DocumentAuthMethods,
 } from '@scopepilot2/contracts';
 import { ScopePolicy } from '../domain/scope-policy.ts';
 import { mergeDocumentHintSeeds } from '../domain/exploration.ts';
@@ -218,6 +221,8 @@ export class BaselineFlowService {
    * URL は計画構築時に許可 Origin 内だけ追加開始点へ統合され、単独では観測を作らない。
    */
   private readonly documentHintDocuments: { documentLabel: string; urls: readonly string[] }[] = [];
+  /** 入力文書由来の認証情報 hint (AGENTS.md・design/08)。所在のみで秘密値は持たない。 */
+  private readonly documentAuthHintDocuments: DocumentAuthHintEntry[] = [];
   /** 計画ごとの hint 由来開始点 (canonical)。観測の由来 (document-hint) 判定に使う。 */
   private readonly explorationHintSeeds = new Map<string, ReadonlySet<string>>();
   /** runLogin で得た role session (cookie 値は service 内部のみ。API・監査へ出さない)。 */
@@ -288,6 +293,48 @@ export class BaselineFlowService {
   /** 登録済み document hints (文書 label と URL の一覧)。 */
   listDocumentHints(): readonly { documentLabel: string; urls: readonly string[] }[] {
     return [...this.documentHintDocuments];
+  }
+
+  /**
+   * 入力文書由来の認証情報 hint の登録 (AGENTS.md・design/08 AuthMethod)。
+   * ロール・認証方式・文書内の所在のみを扱い、秘密値は受け付けない
+   * (「文書の記載」であり観測事実ではないため未確認として表示する)。
+   */
+  registerDocumentAuthHints(
+    operator: OperatorProfile,
+    input: { readonly documentLabel: string; readonly entries: readonly DocumentAuthHint[] },
+  ): { documentLabel: string; entryCount: number } {
+    this.requirePermission(operator, 'case.manage');
+    if (input.documentLabel.trim() === '') {
+      throw domainError('ValidationFailed', 'documentLabel must not be empty');
+    }
+    if (input.entries.length === 0) {
+      throw domainError('ValidationFailed', 'auth hints need at least one entry');
+    }
+    for (const [index, entry] of input.entries.entries()) {
+      if (entry.role.trim() === '') {
+        throw domainError('ValidationFailed', `auth hints[${index}]: role must not be empty`);
+      }
+      if (!DocumentAuthMethods.includes(entry.authMethod)) {
+        throw domainError('ValidationFailed', `auth hints[${index}]: authMethod not allowed: ${String(entry.authMethod)}`);
+      }
+      if (entry.documentLocation.trim() === '') {
+        throw domainError('ValidationFailed', `auth hints[${index}]: documentLocation must not be empty`);
+      }
+    }
+    this.documentAuthHintDocuments.push({ documentLabel: input.documentLabel, entries: [...input.entries] });
+    this.record({
+      type: 'DocumentAuthHintsRegistered',
+      at: this.deps.clock.now().toISOString(),
+      documentLabel: input.documentLabel,
+      entryCount: input.entries.length,
+    });
+    return { documentLabel: input.documentLabel, entryCount: input.entries.length };
+  }
+
+  /** 登録済みの認証情報 hint (文書 label・所在のみ。値は保持しない)。 */
+  listDocumentAuthHints(): readonly DocumentAuthHintEntry[] {
+    return [...this.documentAuthHintDocuments];
   }
 
   /** 観測通信の記録 (traffic log と endpoint 集約の両方に入れる)。 */

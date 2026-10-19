@@ -37,6 +37,7 @@ const useStyles = makeStyles({
 export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const styles = useStyles();
   const [sessions, setSessions] = useState<readonly SessionView[]>([]);
+  const [authHints, setAuthHints] = useState<readonly { documentLabel: string; entries: readonly { role: string; authMethod: string; documentLocation: string }[] }[]>([]);
   const [role, setRole] = useState('admin');
   const [flowVersion, setFlowVersion] = useState('flow-1');
   const [stepsText, setStepsText] = useState('[\n  { "kind": "navigate", "target": "http://fixture.target.test/login.php" },\n  { "kind": "fill", "target": "#username", "secretReference": "vault://admin-user" },\n  { "kind": "fill", "target": "#password", "secretReference": "vault://admin-pass" },\n  { "kind": "click", "target": "input[type=submit]" },\n  { "kind": "assert", "target": "Fixture Target Home" }\n]');
@@ -58,6 +59,8 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
     try {
       const body = await callJson<{ sessions: readonly SessionView[] }>(apiBase, 'GET', '/api/sessions');
       setSessions(body.sessions);
+      const authHints = await callJson<{ hints: readonly { documentLabel: string; entries: readonly { role: string; authMethod: string; documentLocation: string }[] }[] }>(apiBase, 'GET', '/api/documents/auth-hints');
+      setAuthHints(authHints.hints);
     } catch (cause) {
       setError(String(cause));
     }
@@ -178,6 +181,15 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
       {notice !== '' && <Text role="status">{notice}</Text>}
       <Text className={styles.muted}>{t('a09.intro')}</Text>
       <Text weight="semibold">{t('a09.flowTitle')}</Text>
+      {authHints.length > 0 && (
+        <Text className={styles.muted}>
+          {t('a09.authHintReference', {
+            entries: authHints
+              .flatMap((hint) => hint.entries.map((entry) => t('a09.authHintEntry', { role: entry.role, method: entry.authMethod, label: hint.documentLabel, location: entry.documentLocation })))
+              .join('・'),
+          })}
+        </Text>
+      )}
       <Field label={t('a09.roleLabel')}>
         <Input value={role} onChange={(_, data) => setRole(data.value)} />
       </Field>

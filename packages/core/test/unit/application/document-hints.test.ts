@@ -45,6 +45,47 @@ describe('document hints (入力ドキュメントの活用)', () => {
     assert.ok(eventsText.includes('操作手順書 v2'));
   });
 
+  test('認証情報 hint は所在のみ登録でき、秘密値の持込みは最初から拒否される', async () => {
+    const { service, operator } = await bootstrapFlow();
+    const registered = service.registerDocumentAuthHints(operator, {
+      documentLabel: '操作手順書 v2',
+      entries: [
+        { role: 'admin', authMethod: 'Form', documentLocation: 'p.13 管理者ログイン' },
+        { role: 'api-client', authMethod: 'Bearer', documentLocation: '付録 B' },
+      ],
+    });
+    assert.deepEqual(registered, { documentLabel: '操作手順書 v2', entryCount: 2 });
+    assert.deepEqual(service.listDocumentAuthHints(), [
+      {
+        documentLabel: '操作手順書 v2',
+        entries: [
+          { role: 'admin', authMethod: 'Form', documentLocation: 'p.13 管理者ログイン' },
+          { role: 'api-client', authMethod: 'Bearer', documentLocation: '付録 B' },
+        ],
+      },
+    ]);
+    // 監査 event は文書 label と件数のみを記録する。
+    const events = service.events() as readonly { type: string; documentLabel?: string; entryCount?: number }[];
+    const event = events.find((candidate) => candidate.type === 'DocumentAuthHintsRegistered');
+    assert.ok(event !== undefined);
+    assert.equal(event.documentLabel, '操作手順書 v2');
+    assert.equal(event.entryCount, 2);
+
+    // allowlist 外の方式・空欄は拒否。
+    assert.throws(
+      () => service.registerDocumentAuthHints(operator, { documentLabel: 'd', entries: [{ role: 'admin', authMethod: 'OAuth' as never, documentLocation: 'p.1' }] }),
+      /authMethod not allowed/,
+    );
+    assert.throws(
+      () => service.registerDocumentAuthHints(operator, { documentLabel: 'd', entries: [{ role: '', authMethod: 'Form', documentLocation: 'p.1' }] }),
+      /role must not be empty/,
+    );
+    assert.throws(
+      () => service.registerDocumentAuthHints(operator, { documentLabel: 'd', entries: [] }),
+      /at least one entry/,
+    );
+  });
+
   test('空 label・空 URL 一覧は検証 error。権限なしは拒否', async () => {
     const { service, operator } = await bootstrapFlow();
     assert.throws(
