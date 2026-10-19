@@ -162,7 +162,27 @@ test('A04: site map に観測一覧と scope 拒否が表示される', async ()
   await expect(page.getByText('HTTP history (通信一覧・仮想化表示) は後続増分で提供します。')).toBeVisible();
 });
 
-test('未実装画面はプレースホルダで明示される (A03)', async () => {
+test('A03: catalog の診断項目をガイドライン切替・絞り込み・詳細表示できる', async () => {
   await page.getByRole('button', { name: /A03 Guidelines & Check Catalog/ }).click();
+  // 成果物の計数と由来 (catalog hash・元資料) が見える。
+  await expect(page.getByText(/診断項目 769・ZAP rule 102・ZAP 非対応 theme 92/)).toBeVisible();
+  await expect(page.getByText(/catalog hash: /)).toBeVisible();
+
+  // ガイドラインを切り替えると表示項目が変わる。
+  await page.getByRole('button', { name: 'OWASP WSTG 4.2' }).click();
+  await expect(page.getByText(/件 \(全 \d+ 件中\)/)).toBeVisible();
+
+  // 絞り込み→詳細で検証方法が出る。
+  await page.getByPlaceholder('絞り込み (項目名・要求・章)').fill('セッション');
+  await page.getByRole('button', { name: '開く' }).first().click();
+  await expect(page.getByText(/検証方法: /).first()).toBeVisible();
+
+  // ZAP ルール tab も切替できる。
+  await page.getByRole('button', { name: 'ZAP 診断ルール' }).click();
+  await expect(page.getByText(/ZAP 診断ルール: \d+ 件/)).toBeVisible();
+});
+
+test('未実装画面はプレースホルダで明示される (A05)', async () => {
+  await page.getByRole('button', { name: /A05 Proxy \/ Intercept/ }).click();
   await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toBeVisible();
 });

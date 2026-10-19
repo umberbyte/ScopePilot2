@@ -10,6 +10,7 @@ import { Badge, Button, Field, Input, makeStyles, Table, TableBody, TableCell, T
 import { advancedDefaultRoute, advancedNavItems, type AdvancedNavItem } from '@scopepilot2/ui';
 import { revisionConflictDecision } from '@scopepilot2/ui';
 import type { AuthorizationRecord, CaseRecord, EngineCapabilitySnapshot, OperatorPermission, RunRecord } from '@scopepilot2/contracts';
+import { GuidelinesCatalogScreen } from './guidelines-catalog.tsx';
 
 /** desktop harness の operator (fixture・全権限)。operator 照会 API は後続増分で追加する。 */
 const OPERATOR_PERMISSIONS: readonly OperatorPermission[] = ['case.manage', 'case.read', 'run.manage', 'finding.confirm', 'report.export'];
@@ -814,7 +815,8 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {activeRoute === 'findings' && <FindingsOrganizerScreen apiBase={apiBase} />}
         {activeRoute === 'scan-plans' && <ScanPlansScreen apiBase={apiBase} />}
         {activeRoute === 'browser.site-map' && <SiteMapScreen apiBase={apiBase} />}
-        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && (
+        {activeRoute === 'advanced.guidelines' && <GuidelinesCatalogScreen />}
+        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && (
           <Text className={styles.muted}>この画面は未実装です (後続増分で提供します)。</Text>
         )}
       </div>
