@@ -1114,6 +1114,32 @@ describe('Core API server (node:http)', () => {
     }
   });
 
+  test('tools/dom-flows は観測から source→sink 候補を返す (design/f16)', async () => {
+    const analyzed = await fetch(`${baseUrl}/api/tools/dom-flows`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetUrl: 'http://fixture.target.test/app',
+        observations: [
+          { api: 'location.search', marker: 'q=1' },
+          { api: 'innerHTML', marker: 'q=1' },
+        ],
+        nodes: [{ text: 'plain', looksLikePii: false }, { text: 'secret-mail', looksLikePii: true }],
+      }),
+    });
+    assert.equal(analyzed.status, 200);
+    const result = (await analyzed.json()) as { candidates: readonly { sourceApi: string; sinkApi: string; confidence: number }[]; evidence: readonly string[] };
+    assert.deepEqual(result.candidates, [{ sourceApi: 'location.search', sinkApi: 'innerHTML', confidence: 0.9, marker: 'q=1' }]);
+    assert.deepEqual(result.evidence, ['plain', '[redacted: potential PII]']);
+
+    const outOfScope = await fetch(`${baseUrl}/api/tools/dom-flows`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://elsewhere.example/app', observations: [] }),
+    });
+    assert.equal(outOfScope.status, 403);
+  });
+
   test('tools/transport は選択と header 検証を扱う (design/f15)', async () => {
     const post = async (path: string, body: unknown): Promise<Response> =>
       fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

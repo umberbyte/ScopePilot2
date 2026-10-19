@@ -2587,6 +2587,131 @@
         }
       }
     },
+    "/api/tools/dom-flows": {
+      "post": {
+        "operationId": "analyzeDomFlows",
+        "summary": "観測済み DOM API 呼び出しから source→sink 候補を導く (design/f16)。観測なしでは候補を作らない。PII と推定される node は redact",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetUrl",
+                  "observations"
+                ],
+                "properties": {
+                  "targetUrl": {
+                    "type": "string"
+                  },
+                  "observations": {
+                    "type": "array",
+                    "description": "観測済み API 呼び出し (api は source:/sink: 接頭辞または既知 API 名)",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "api",
+                        "marker"
+                      ],
+                      "properties": {
+                        "api": {
+                          "type": "string"
+                        },
+                        "marker": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "nodes": {
+                    "type": "array",
+                    "description": "証跡に含める node (任意)。looksLikePii は redact される",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "text",
+                        "looksLikePii"
+                      ],
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "looksLikePii": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "調査結果 (候補と redact 済み証跡)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "candidates",
+                    "evidence"
+                  ],
+                  "properties": {
+                    "candidates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "sourceApi",
+                          "sinkApi",
+                          "confidence",
+                          "marker"
+                        ],
+                        "properties": {
+                          "sourceApi": {
+                            "type": "string"
+                          },
+                          "sinkApi": {
+                            "type": "string"
+                          },
+                          "confidence": {
+                            "type": "number",
+                            "description": "同一 marker は 0.9・部分一致は 0.3"
+                          },
+                          "marker": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "evidence": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/documents/auth-hints": {
       "get": {
         "operationId": "listDocumentAuthHints",

@@ -307,6 +307,14 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await expect(page.getByText('protocol h2 (downgrade なし)・ALPN h2・runtime fixture-transport')).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: 'header を検証する' }).click();
   await expect(page.getByText(/検証 OK \(pseudo header: :method, :scheme, :authority, :path・authority: fixture\.target\.test\)/)).toBeVisible({ timeout: 30_000 });
+
+  // DOM 調査: source→sink 候補と PII redact (design/f16)。
+  await page.getByLabel('観測 (1行1件・api: marker)').fill('location.search: q=1\ninnerHTML: q=1');
+  await page.getByLabel('証跡 node (1行1件・pii: 接頭辞で redact)').fill('div content\npii: user@example.example');
+  await page.getByRole('button', { name: 'value flow を分析する' }).click();
+  await expect(page.getByText('候補 1 件')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/location\.search → innerHTML \(confidence 0\.9・marker q=1\)/)).toBeVisible();
+  await expect(page.getByText(/\[redacted: potential PII\]/)).toBeVisible();
 });
 
 test('A05: break queue の受付・転送・破棄と対象外 URL の拒否を扱う', async () => {

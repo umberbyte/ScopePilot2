@@ -158,6 +158,15 @@ export const strings = {
   'a10.transportHeadersLabel': 'header (1行1件・Name: Value)',
   'a10.transportValidate': 'header を検証する',
   'a10.transportHeadersOk': '検証 OK (pseudo header: {ordered}・authority: {authority})',
+  'a10.domTitle': 'DOM 調査 (value flow)',
+  'a10.domIntro':
+    '観測済み DOM API 呼び出しから source→sink の値流れ候補を導きます (design/f16)。観測なしでは候補を作らず、PII と推定される node は redact します。',
+  'a10.domObservationsLabel': '観測 (1行1件・api: marker)',
+  'a10.domNodesLabel': '証跡 node (1行1件・pii: 接頭辞で redact)',
+  'a10.domAnalyze': 'value flow を分析する',
+  'a10.domResult': '候補 {count} 件',
+  'a10.domCandidate': '{source} → {sink} (confidence {confidence}・marker {marker})',
+  'a10.domEvidence': '証跡: {evidence}',
 
   'a05.intro':
     '実 proxy listener (通信傍受・転送本体) は実 engine 接続と共に後続増分です。ここでは break queue への受付と判断 (forward / drop) を扱います。deadline 経過・queue 上限は既定で drop し、暗黙 forward はしません。',

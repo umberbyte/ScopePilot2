@@ -96,6 +96,7 @@ import { parseOpenApiDocument } from '../domain/api-scanning.ts';
 import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, TokenIssuer, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
 import { buildWsSendPlan, importFrames, sendWithPolicy, wsEvidence, type WsFrame } from '../domain/websocket.ts';
 import { checkAuthorityScope, negotiateTransport, transportCapability, transportEvidence, validateHeaderValues, validatePseudoHeaders } from '../domain/advanced-transport.ts';
+import { buildDomCandidate, domEvidenceProjection } from '../domain/dom-investigation.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
 import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, LoginSessionCookie } from '../ports/engines.ts';
@@ -1061,6 +1062,32 @@ export class BaselineFlowService {
     }
     const authority = input.headers.find(([name]) => name === ':authority')?.[1] ?? '';
     return { ordered, authority };
+  }
+
+  /**
+   * DOM value-flow 調査 (design/f16)。観測済み API 呼び出し (api + marker) から
+   * source→sink 候補を導く。観測なしでは候補を作らない (F16-UT-005)。証跡表示は
+   * PII と推定される node を redact する (F16-UT-006)。集計 tool のため監査 event なし
+   * (decode/compare と同じ扱い)。
+   */
+  analyzeDomFlows(
+    operator: OperatorProfile,
+    input: {
+      readonly targetUrl: string;
+      readonly observations: readonly { readonly api: string; readonly marker: string }[];
+      readonly nodes?: readonly { readonly text: string; readonly looksLikePii: boolean }[];
+    },
+  ): { candidates: readonly { sourceApi: string; sinkApi: string; confidence: number; marker: string }[]; evidence: readonly string[] } {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
+    const decision = ScopePolicy.decide(caseRecord.scope, canonical);
+    if (!decision.allowed) {
+      throw domainError('OutOfScope', `dom investigation target is out of scope: ${decision.reason}`);
+    }
+    const candidates = buildDomCandidate(input.observations);
+    const evidence = domEvidenceProjection(input.nodes ?? []);
+    return { candidates, evidence };
   }
 
   listApiSpecImports(): readonly { documentLabel: string; endpointCount: number; importedAt: string }[] {

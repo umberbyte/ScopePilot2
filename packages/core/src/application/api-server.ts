@@ -411,6 +411,41 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'POST /api/tools/dom-flows') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const observationsValue = body.observations;
+        if (!Array.isArray(observationsValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field observations must be an array', false);
+        }
+        const observations = observationsValue.map((observation, index) => {
+          if (typeof observation !== 'object' || observation === null) {
+            throw new DomainError('ValidationFailed', `observations[${index}] must be an object`);
+          }
+          const record = observation as Record<string, unknown>;
+          return { api: stringField(record, 'api'), marker: stringField(record, 'marker') };
+        });
+        const nodesValue = body.nodes;
+        const nodes = nodesValue === undefined || !Array.isArray(nodesValue) ? undefined : nodesValue.map((node: unknown, index: number) => {
+          if (typeof node !== 'object' || node === null) {
+            throw new DomainError('ValidationFailed', `nodes[${index}] must be an object`);
+          }
+          const record = node as Record<string, unknown>;
+          return { text: stringField(record, 'text'), looksLikePii: record.looksLikePii === true };
+        });
+        const result = service.analyzeDomFlows(operator, {
+          targetUrl: stringField(body, 'targetUrl'),
+          observations,
+          ...(nodes === undefined ? {} : { nodes }),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/documents/hints') {
       return respondJson(response, 200, { hints: service.listDocumentHints() });
     }
