@@ -48,6 +48,16 @@ import {
 import { FindingImporter } from '../domain/finding-importer.ts';
 import { BreakQueue, decideIntercept, type BreakItem, type BreakQueueEvent, type InterceptDecision } from '../domain/proxy-intercept.ts';
 import {
+  PayloadCatalog,
+  clusterResponses,
+  combinationAt,
+  planCombinations,
+  runFuzz,
+  type FuzzPosition,
+  type FuzzResponseOutcome,
+  type PayloadSetRegistration,
+} from '../domain/fuzzer.ts';
+import {
   DraftRegistry,
   applyEdit,
   recordSendAttempt,
@@ -144,6 +154,12 @@ export class BaselineFlowService {
   /** proxy の break queue (design/f02)。deadline 経過は既定で drop (暗黙 forward しない)。 */
   private readonly breakQueue = new BreakQueue(100);
 
+  /** Fuzzer の payload catalog (design/f05)。供給元・版・license 登録を必須とする。 */
+  private readonly payloadCatalog = new PayloadCatalog();
+  private readonly payloadSetNames: string[] = [];
+  private readonly payloadRegistrations = new Map<string, PayloadSetRegistration>();
+  private readonly fuzzRuns: readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] = [];
+
   /** Repeater の draft 台帳 (design/f04)。tab 上限は domain (20)。 */
   private readonly repeaterDrafts = new DraftRegistry();
   private readonly repeaterDraftOrder: string[] = [];
@@ -230,6 +246,85 @@ export class BaselineFlowService {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     return decideIntercept(this.breakQueue, itemId, edited, caseRecord.scope);
+  }
+
+  /** payload 集合の登録 (F05-UT-006: 供給元・版・license は必須)。 */
+  registerPayloadSet(operator: OperatorProfile, registration: PayloadSetRegistration): { name: string; valueCount: number } {
+    this.requirePermission(operator, 'run.manage');
+    this.payloadCatalog.register(registration);
+    this.payloadRegistrations.set(registration.name, registration);
+    if (!this.payloadSetNames.includes(registration.name)) {
+      this.payloadSetNames.push(registration.name);
+    }
+    return { name: registration.name, valueCount: registration.values.length };
+  }
+
+  listPayloadSets(): readonly { name: string; source: string; version: string; license: string; sha256: string; values: readonly string[] }[] {
+    return this.payloadSetNames.map((name) => {
+      const values = this.payloadCatalog.get(name);
+      // get は values しか返さないため、登録情報は台帳から返す。
+      const registration = this.payloadRegistrations.get(name);
+      if (registration === undefined) {
+        throw domainError('ValidationFailed', `payload set ${name} is not registered`);
+      }
+      return { ...registration, values };
+    });
+  }
+
+  /**
+   * fuzz session の実行 (design/f05)。組合せ総数が上限 (既定は案件上限と 200 の小さい方) を
+   * 超えたら送信前に拒否する (F05-UT-001)。fixture adapter は組合せから決定的な応答を作り、
+   * rate は仮想時計で進める (実時間を待たない)。応答は cluster 集約して返す (F05-UT-008)。
+   */
+  async runFuzzSession(
+    operator: OperatorProfile,
+    input: { readonly targetUrl: string; readonly positions: readonly FuzzPosition[]; readonly maxRequests?: number },
+  ): Promise<{ runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[] }> {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
+    const decision = ScopePolicy.decide(caseRecord.scope, canonical);
+    if (!decision.allowed) {
+      throw domainError('OutOfScope', `fuzz target is out of scope: ${decision.reason}`);
+    }
+    if (input.positions.length === 0) {
+      throw domainError('ValidationFailed', 'fuzz needs at least one position');
+    }
+    const cap = input.maxRequests ?? Math.min(200, caseRecord.scope.limits.maxRequests);
+    const { total } = planCombinations(input.positions, cap);
+    let virtualNowMs = 0;
+    const outcomes: FuzzResponseOutcome[] = [];
+    const result = await runFuzz(
+      {
+        send: async (_index, combination) => {
+          // fixture adapter: 応答は先頭 position の値だけで決まる (cluster 集約の実演)。
+          const body = `resp:${combination[0] ?? ''}`;
+          outcomes.push({ status: 200, contentLength: body.length, bodyHash: hashStable('scopepilot2.fuzz.body', body) });
+        },
+      },
+      input.positions,
+      total,
+      {
+        isCancelled: () => false,
+        now: () => virtualNowMs,
+        sleep: async (ms) => {
+          virtualNowMs += ms;
+        },
+      },
+    );
+    const clusters = clusterResponses(outcomes).map((cluster) => ({
+      ...cluster,
+      representative: combinationAt(input.positions, cluster.members[0] ?? 0),
+    }));
+    const runId = this.deps.ids.next('fuzz');
+    const record = { runId, targetUrl: canonical, total, sent: result.sent, clusters, executedAt: this.deps.clock.now().toISOString() };
+    (this.fuzzRuns as { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[]).push(record);
+    this.record({ type: 'FuzzRunCompleted', at: record.executedAt, runId, targetUrl: canonical, total, sent: result.sent });
+    return { runId, targetUrl: canonical, total, sent: result.sent, clusters };
+  }
+
+  listFuzzRuns(): readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] {
+    return [...this.fuzzRuns];
   }
 
   /** draft の表示形 (UI 確認用に plan hash を添える)。 */

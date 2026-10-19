@@ -417,6 +417,58 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/fuzzer/payload-sets') {
+      return respondJson(response, 200, { sets: service.listPayloadSets() });
+    }
+    if (route === 'POST /api/fuzzer/payload-sets') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.registerPayloadSet(operator, {
+          name: stringField(body, 'name'),
+          source: stringField(body, 'source'),
+          version: stringField(body, 'version'),
+          license: stringField(body, 'license'),
+          sha256: stringField(body, 'sha256'),
+          values: stringArrayField(body, 'values'),
+        });
+        return respondJson(response, 201, { set: result });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/fuzzer/runs') {
+      return respondJson(response, 200, { runs: service.listFuzzRuns() });
+    }
+    if (route === 'POST /api/fuzzer/runs') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const positionsValue = body.positions;
+        if (!Array.isArray(positionsValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field positions must be an array', false);
+        }
+        const positions = positionsValue.map((position, index) => {
+          if (typeof position !== 'object' || position === null) {
+            throw new DomainError('ValidationFailed', `positions[${index}] must be an object`);
+          }
+          const record = position as Record<string, unknown>;
+          return { name: stringField(record, 'name'), values: stringArrayField(record, 'values') };
+        });
+        const result = await service.runFuzzSession(operator, {
+          targetUrl: stringField(body, 'targetUrl'),
+          positions,
+          ...(body.maxRequests === undefined ? {} : { maxRequests: numberField(body, 'maxRequests') }),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/runs/interrupted') {
       if (runRepository === undefined) {
         return respondError(response, 501, 'Unsupported', 'run persistence is not configured for this server', false);

@@ -264,7 +264,28 @@ test('A06: Repeater draft を編集し表示 hash で確認送信する', async 
   await expect(page.getByText(/fixture response for/)).toBeVisible();
 });
 
-test('未実装画面はプレースホルダで明示される (A07)', async () => {
+test('A07: payload 集合を登録し fuzz を実行して cluster 集約を見る', async () => {
   await page.getByRole('button', { name: /A07 Fuzzer/ }).click();
+
+  // 供給元・版・license を添えて payload 集合を登録する。
+  await page.getByLabel('名前').fill('xss-basic');
+  await page.getByLabel('供給元 (source)').fill('fixture-handbook');
+  await page.getByLabel('版').fill('1.0.0');
+  await page.getByLabel('license').fill('MIT');
+  await page.getByLabel(/値 \(1行1件\)/).fill('<script>1</script>\n<img src=x onerror=1>');
+  await page.getByRole('button', { name: 'payload 集合を登録する' }).click();
+  await expect(page.getByText(/登録済み: xss-basic \(fixture-handbook 1\.0\.0・MIT・2 件\)/)).toBeVisible({ timeout: 30_000 });
+
+  // positions を実行して cluster 集約を確認する。
+  await page.getByLabel(/positions \(1行1件/).fill('user: admin, guest\nid: 1, 2');
+  await page.getByRole('button', { name: 'fuzz を実行する' }).click();
+  await expect(page.getByText(/組合せ 4 件中 4 件送信 → 2 cluster/)).toBeVisible({ timeout: 30_000 });
+  // fixture 応答は先頭 position の値だけで決まるため、各 cluster に 2 member 集約される。
+  await expect(page.getByRole('cell', { name: '2' }).first()).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'admin | 1' })).toBeVisible();
+});
+
+test('未実装画面はプレースホルダで明示される (A09)', async () => {
+  await page.getByRole('button', { name: /A09 Sessions/ }).click();
   await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toBeVisible();
 });

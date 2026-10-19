@@ -737,6 +737,71 @@ describe('Core API server (node:http)', () => {
     assert.equal(outOfScope.status, 403);
   });
 
+  test('fuzzer は payload 登録と組合せ実行 (cluster 集約) を API 経路で扱う (design/f05)', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'fuzzer-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+
+    // 供給元・版・license なしの登録は 400。
+    const missing = await fetch(`${baseUrl}/api/fuzzer/payload-sets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'x', source: '', version: '1', license: 'MIT', sha256: 'a', values: ['v'] }),
+    });
+    assert.equal(missing.status, 400);
+    const registered = await fetch(`${baseUrl}/api/fuzzer/payload-sets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'it-sqli', source: 'fixture-handbook', version: '1.0.0', license: 'MIT', sha256: 'a1b2c3', values: ["' OR '1'='1", "' OR '1'='2"] }),
+    });
+    assert.equal(registered.status, 201);
+    const sets = (await (await fetch(`${baseUrl}/api/fuzzer/payload-sets`)).json()) as { sets: readonly { name: string; license: string }[] };
+    assert.ok(sets.sets.some((set) => set.name === 'it-sqli' && set.license === 'MIT'));
+
+    const run = await fetch(`${baseUrl}/api/fuzzer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetUrl: 'http://fixture.target.test/fuzz',
+        positions: [
+          { name: 'user', values: ['admin', 'guest'] },
+          { name: 'id', values: ['1', '2'] },
+        ],
+      }),
+    });
+    assert.equal(run.status, 200);
+    const runBody = (await run.json()) as { total: number; sent: number; clusters: readonly { members: readonly number[]; representative: readonly string[] }[] };
+    assert.equal(runBody.total, 4);
+    assert.equal(runBody.sent, 4);
+    assert.equal(runBody.clusters.length, 2, 'fixture 応答は先頭 position で集約');
+
+    // 組合せ上限超過は 400。
+    const overLimit = await fetch(`${baseUrl}/api/fuzzer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetUrl: 'http://fixture.target.test/fuzz',
+        positions: [
+          { name: 'a', values: ['1', '2', '3', '4'] },
+          { name: 'b', values: ['1', '2', '3', '4'] },
+        ],
+        maxRequests: 10,
+      }),
+    });
+    assert.equal(overLimit.status, 400);
+
+    // 実行は監査 event に残る。
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /FuzzRunCompleted/);
+  });
+
   test('GET /api/observations は site map 用の観測一覧と scope 拒否を返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',
