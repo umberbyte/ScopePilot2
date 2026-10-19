@@ -858,6 +858,66 @@ describe('Core API server (node:http)', () => {
     assert.deepEqual(admin?.cookieNames, ['PHPSESSID']);
   });
 
+  test('business-logic check は role 差分検証を inconclusive/pass/fail で返す (design/f17)', async () => {
+    const post = async (path: string, body: unknown): Promise<Response> =>
+      fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    await post('/api/case', {
+      name: 'bizlogic-it',
+      allowedOrigins: ['http://fixture.target.test'],
+      deniedOrigins: [],
+      limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+    });
+    // CrossRoleTest を許可する認可。
+    await post('/api/authorization', {
+      allowedOperationClasses: ['Browse', 'ActiveScan', 'CrossRoleTest'],
+      targetRoles: ['admin', 'guest'],
+      validFrom: '2026-10-18T00:00:00.000Z',
+      validUntil: '2026-10-19T00:00:00.000Z',
+      evidenceLabel: '認可(IT)',
+      evidenceContent: 'it authorization evidence',
+    });
+    const steps = [{ kind: 'navigate', target: 'http://fixture.target.test/login.php' }];
+    await post('/api/sessions/flows', { role: 'admin', flowVersion: 'f1', steps });
+    await post('/api/sessions/flows', { role: 'guest', flowVersion: 'f1', steps });
+    await post('/api/sessions/refresh', { role: 'admin' });
+    await post('/api/sessions/refresh', { role: 'guest' });
+
+    // 期待と一致すれば pass。
+    const pass = await post('/api/business-logic/checks', {
+      roles: ['admin', 'guest'],
+      targetUrl: 'http://fixture.target.test/admin-only',
+      expectation: { expression: 'body.contains', args: ['business-response:admin'] },
+    });
+    assert.equal(pass.status, 200);
+    const passBody = (await pass.json()) as { status: string; comparison: { outcome: string }; matrix: { evidenceSeparated: boolean } };
+    assert.equal(passBody.comparison.outcome, 'pass');
+    assert.equal(passBody.status, 'pass');
+    assert.equal(passBody.matrix.evidenceSeparated, true);
+
+    // 期待と不一致なら fail + restore-failed。
+    const fail = await post('/api/business-logic/checks', {
+      roles: ['admin', 'guest'],
+      targetUrl: 'http://fixture.target.test/admin-only',
+      expectation: { expression: 'body.contains', args: ['business-response:guest'] },
+    });
+    const failBody = (await fail.json()) as { status: string; comparison: { outcome: string }; restore: { outcome: string } };
+    assert.equal(failBody.comparison.outcome, 'fail');
+    assert.equal(failBody.restore.outcome, 'restore-failed');
+
+    // allowlist 外 expression は 400。履歴と監査に残る。
+    const bad = await post('/api/business-logic/checks', {
+      roles: ['admin', 'guest'],
+      targetUrl: 'http://fixture.target.test/admin-only',
+      expectation: { expression: 'eval.js', args: [] },
+    });
+    assert.equal(bad.status, 400);
+    const history = (await (await fetch(`${baseUrl}/api/business-logic/checks`)).json()) as { checks: readonly { checkId: string; status: string }[] };
+    assert.equal(history.checks.length, 2);
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /BusinessLogicCheckCompleted/);
+  });
+
   test('GET /api/observations は site map 用の観測一覧と scope 拒否を返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',

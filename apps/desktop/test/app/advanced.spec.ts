@@ -299,8 +299,32 @@ test('A09: login flow を登録し session refresh と cookie jar 割当を行�
   await expect(page.getByText(/session を更新しました \(revision 1\)/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('cell', { name: 'PHPSESSID' })).toBeVisible();
 
-  // 業務ロジック検証は後続増分である旨の明示。
-  await expect(page.getByText(/design\/f17/)).toBeVisible();
+  // guest flow も登録して両 role の session を揃える。
+  await page.getByLabel('role').first().fill('guest');
+  await page.getByRole('button', { name: 'flow を登録する' }).click();
+  await expect(page.getByText(/guest の flow を登録しました/)).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'refresh' }).last().click();
+  await expect(page.getByText(/guest の session を更新しました/)).toBeVisible({ timeout: 30_000 });
+
+  // CrossRoleTest を許可する認可に付替え、業務ロジック検証 (role 差分) を実行する。
+  await page.evaluate(async () => {
+    const base = (window as { scopepilotDesktop?: { apiBase: string } }).scopepilotDesktop?.apiBase ?? '';
+    await fetch(`${base}/api/authorization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allowedOperationClasses: ['Browse', 'ActiveScan', 'CrossRoleTest'],
+        targetRoles: ['admin', 'guest'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可 (デスクトップ)',
+        evidenceContent: 'cross-role evidence',
+      }),
+    });
+  });
+  await page.getByRole('button', { name: '業務ロジック検証を実行する' }).click();
+  await expect(page.getByText(/結果: pass \(比較 pass・restore restored・証拠分離 あり\)/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/観測: admin=business-response:admin・guest=business-response:guest/)).toBeVisible();
 });
 
 test('未実装プレースホルダはもう残っていない (全 Advanced 画面が実装済み)', async () => {

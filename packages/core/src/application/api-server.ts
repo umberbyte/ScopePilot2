@@ -534,6 +534,34 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/business-logic/checks') {
+      return respondJson(response, 200, { checks: service.listBusinessLogicChecks() });
+    }
+    if (route === 'POST /api/business-logic/checks') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const expectationValue = body.expectation;
+        if (typeof expectationValue !== 'object' || expectationValue === null) {
+          return respondError(response, 400, 'ValidationFailed', 'field expectation must be an object', false);
+        }
+        const expectationRecord = expectationValue as Record<string, unknown>;
+        const argsValue = expectationRecord.args;
+        if (!Array.isArray(argsValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field expectation.args must be an array', false);
+        }
+        const result = await service.runBusinessLogicCheck(operator, {
+          roles: stringArrayField(body, 'roles'),
+          targetUrl: stringField(body, 'targetUrl'),
+          expectation: { expression: stringField(expectationRecord, 'expression'), args: argsValue },
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/runs/interrupted') {
       if (runRepository === undefined) {
         return respondError(response, 501, 'Unsupported', 'run persistence is not configured for this server', false);

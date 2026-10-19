@@ -48,6 +48,15 @@ import {
 import { FindingImporter } from '../domain/finding-importer.ts';
 import { BreakQueue, decideIntercept, type BreakItem, type BreakQueueEvent, type InterceptDecision } from '../domain/proxy-intercept.ts';
 import {
+  businessTargetInScope,
+  compareObservations,
+  evaluateRestore,
+  parseExpectation,
+  planRoleMatrix,
+  resolveOutcome,
+  type ComparisonOutcome,
+} from '../domain/business-logic.ts';
+import {
   RoleSessionRegistry,
   SessionCoordinator,
   validateLoginFlow,
@@ -161,6 +170,9 @@ export class BaselineFlowService {
   /** proxy の break queue (design/f02)。deadline 経過は既定で drop (暗黙 forward しない)。 */
   private readonly breakQueue = new BreakQueue(100);
 
+  /** 業務ロジック検証の実行履歴 (design/f17)。 */
+  private readonly businessChecks: readonly { checkId: string; roles: readonly string[]; targetUrl: string; status: string; comparison: string; restore: string; executedAt: string }[] = [];
+
   /** 認証・session 管理 (design/f09)。secret 値は参照のみ保持し、値は受け付けない。 */
   private readonly loginFlows = new Map<string, { flowVersion: string; steps: readonly LoginFlowStep[]; secretReferences: readonly string[] }>();
   private readonly roleRegistry = new RoleSessionRegistry();
@@ -264,6 +276,87 @@ export class BaselineFlowService {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     return decideIntercept(this.breakQueue, itemId, edited, caseRecord.scope);
+  }
+
+  /**
+   * 業務ロジック (認可・role 差分) 検証の実行 (design/f17)。
+   * 認可が CrossRoleTest を許可していること・対象 URL が scope 内であること。
+   * 観測は role ごとの session (refresh 済みか) から作り、欠落は inconclusive として
+   * 成功/失敗を推測しない (F17-UT-003)。restore 不一致は全体を成功扱いしない (F17-UT-004)。
+   */
+  async runBusinessLogicCheck(
+    operator: OperatorProfile,
+    input: { readonly roles: readonly string[]; readonly targetUrl: string; readonly expectation: { readonly expression: string; readonly args: readonly unknown[] } },
+  ): Promise<{
+    checkId: string;
+    roles: readonly string[];
+    matrix: { readonly evidenceSeparated: boolean };
+    observations: readonly { role: string; observation: string | null }[];
+    comparison: { readonly outcome: ComparisonOutcome };
+    restore: { readonly outcome: 'restored' | 'restore-failed' };
+    status: 'pass' | 'fail' | 'not-run';
+    reason?: string;
+  }> {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const authorization = this.currentAuthorization();
+    if (!authorization.allowedOperationClasses.includes('CrossRoleTest')) {
+      throw domainError('OutOfScope', 'authorization does not allow CrossRoleTest for this case');
+    }
+    if (input.roles.length < 2 || new Set(input.roles).size !== input.roles.length) {
+      throw domainError('ValidationFailed', 'business logic check needs 2 or more distinct roles');
+    }
+    for (const role of input.roles) {
+      if (!this.loginFlows.has(role)) {
+        throw domainError('ValidationFailed', `login flow for ${role} is not registered`);
+      }
+    }
+    if (!businessTargetInScope(input.targetUrl, caseRecord.scope)) {
+      throw domainError('OutOfScope', `business target is out of scope: ${input.targetUrl}`);
+    }
+    parseExpectation(input.expectation);
+    const matrix = planRoleMatrix(input.roles);
+    // fixture 観測: session を refresh 済みの role だけが認証付き観測を持つ (未 refresh は null)。
+    const observations = input.roles.map((role) => ({
+      role,
+      observation: this.sessionRevisions.get(role) !== undefined ? `business-response:${role}` : null,
+    }));
+    const primary = observations[0]?.observation ?? null;
+    const expected = typeof input.expectation.args[0] === 'string' ? (input.expectation.args[0] as string) : null;
+    // どれかの role でも観測が欠けたら inconclusive (成功/失敗を推測しない)。
+    const missingObservation = observations.some((entry) => entry.observation === null);
+    const comparison = missingObservation ? { outcome: 'inconclusive' as const } : compareObservations(expected, primary);
+    const restore = evaluateRestore([
+      { name: 'verify-state', passed: comparison.outcome !== 'fail' },
+      { name: 'restore-navigate', passed: true },
+    ]);
+    const outcome = resolveOutcome({ setupBlocked: false, assertionPassed: comparison.outcome === 'pass' && restore.outcome === 'restored' });
+    const checkId = this.deps.ids.next('bizcheck');
+    const record = {
+      checkId,
+      roles: [...input.roles],
+      targetUrl: input.targetUrl,
+      status: outcome.status,
+      comparison: comparison.outcome,
+      restore: restore.outcome,
+      executedAt: this.deps.clock.now().toISOString(),
+    };
+    (this.businessChecks as { checkId: string; roles: readonly string[]; targetUrl: string; status: string; comparison: string; restore: string; executedAt: string }[]).push(record);
+    this.record({ type: 'BusinessLogicCheckCompleted', at: record.executedAt, checkId, roles: [...input.roles], status: outcome.status });
+    return {
+      checkId,
+      roles: [...input.roles],
+      matrix: { evidenceSeparated: matrix.evidenceSeparated },
+      observations,
+      comparison,
+      restore,
+      status: outcome.status,
+      ...(outcome.reason === undefined ? {} : { reason: outcome.reason }),
+    };
+  }
+
+  listBusinessLogicChecks(): readonly { checkId: string; roles: readonly string[]; targetUrl: string; status: string; comparison: string; restore: string; executedAt: string }[] {
+    return [...this.businessChecks];
   }
 
   /** login flow の登録 (design/f09)。step 構成は domain 検証 (上限 10・allowlist・fill は secret 参照必須)。 */

@@ -38,6 +38,10 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
   const [flowVersion, setFlowVersion] = useState('flow-1');
   const [stepsText, setStepsText] = useState('[\n  { "kind": "navigate", "target": "http://fixture.target.test/login.php" },\n  { "kind": "fill", "target": "#username", "secretReference": "vault://admin-user" },\n  { "kind": "click", "target": "input[type=submit]" }\n]');
   const [cookieNames, setCookieNames] = useState('PHPSESSID');
+  const [bizRoles, setBizRoles] = useState('admin, guest');
+  const [bizExpression, setBizExpression] = useState('body.contains');
+  const [bizExpected, setBizExpected] = useState('business-response:admin');
+  const [bizResult, setBizResult] = useState<{ status: string; comparison: { outcome: string }; restore: { outcome: string }; matrix: { evidenceSeparated: boolean }; observations: readonly { role: string; observation: string | null }[] } | null>(null);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -114,6 +118,20 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
     [apiBase, cookieNames, role, run],
   );
 
+  const runBusinessCheck = useCallback(
+    () =>
+      run(async () => {
+        const roles = bizRoles.split(',').map((value) => value.trim()).filter((value) => value !== '');
+        const result = await callJson<{ status: string; comparison: { outcome: string }; restore: { outcome: string }; matrix: { evidenceSeparated: boolean }; observations: readonly { role: string; observation: string | null }[] }>(apiBase, 'POST', '/api/business-logic/checks', {
+          roles,
+          targetUrl: 'http://fixture.target.test/admin-only',
+          expectation: { expression: bizExpression, args: [bizExpected] },
+        });
+        setBizResult(result);
+      }),
+    [apiBase, bizExpected, bizExpression, bizRoles, run],
+  );
+
   return (
     <div className={styles.section}>
       {error !== '' && (
@@ -177,10 +195,28 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
           </TableBody>
         </Table>
       )}
-      <Text weight="semibold">Business logic 検証</Text>
+      <Text weight="semibold">Business logic 検証 (role 差分)</Text>
       <Text className={styles.muted}>
-        業務ロジック検証 (role 組合せ matrix・期待値 DSL・restore 検証。design/f17) は後続増分で提供します。
+        2 role 以上の差分検証です。認可が CrossRoleTest を許可している必要があります。観測が欠けた role (session 未 refresh) があると inconclusive となり、成功/失敗を推測しません。期待値 DSL は allowlist 演算のみです。
       </Text>
+      <Field label="roles (comma 区切)">
+        <Input value={bizRoles} onChange={(_, data) => setBizRoles(data.value)} />
+      </Field>
+      <Field label="期待値 expression (allowlist)">
+        <Input value={bizExpression} onChange={(_, data) => setBizExpression(data.value)} />
+      </Field>
+      <Field label="期待値">
+        <Input value={bizExpected} onChange={(_, data) => setBizExpected(data.value)} />
+      </Field>
+      <Button appearance="primary" disabled={busy} onClick={() => void runBusinessCheck()}>
+        業務ロジック検証を実行する
+      </Button>
+      {bizResult !== null && (
+        <div className={styles.section}>
+          <Text>{`結果: ${bizResult.status} (比較 ${bizResult.comparison.outcome}・restore ${bizResult.restore.outcome}・証拠分離 ${bizResult.matrix.evidenceSeparated ? 'あり' : 'なし'})`}</Text>
+          <Text className={styles.muted}>{`観測: ${bizResult.observations.map((observation) => `${observation.role}=${observation.observation ?? '(欠落)'}`).join('・')}`}</Text>
+        </div>
+      )}
     </div>
   );
 }

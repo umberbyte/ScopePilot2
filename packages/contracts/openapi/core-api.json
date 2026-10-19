@@ -1373,6 +1373,248 @@
           }
         }
       }
+    },
+    "/api/business-logic/checks": {
+      "get": {
+        "operationId": "listBusinessLogicChecks",
+        "summary": "業務ロジック検証の実行履歴",
+        "responses": {
+          "200": {
+            "description": "checks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "checks"
+                  ],
+                  "properties": {
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "checkId",
+                          "roles",
+                          "targetUrl",
+                          "status",
+                          "comparison",
+                          "restore",
+                          "executedAt"
+                        ],
+                        "properties": {
+                          "checkId": {
+                            "type": "string"
+                          },
+                          "roles": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "targetUrl": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "comparison": {
+                            "type": "string"
+                          },
+                          "restore": {
+                            "type": "string"
+                          },
+                          "executedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "runBusinessLogicCheck",
+        "summary": "業務ロジック (認可・role 差分) 検証の実行 (認可は CrossRoleTest を許可要。観測欠落は inconclusive)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "roles",
+                  "targetUrl",
+                  "expectation"
+                ],
+                "properties": {
+                  "roles": {
+                    "type": "array",
+                    "minItems": 2,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "targetUrl": {
+                    "type": "string"
+                  },
+                  "expectation": {
+                    "type": "object",
+                    "required": [
+                      "expression",
+                      "args"
+                    ],
+                    "properties": {
+                      "expression": {
+                        "type": "string",
+                        "enum": [
+                          "status.equals",
+                          "status.in",
+                          "body.contains",
+                          "body.notContains",
+                          "body.jsonPath",
+                          "header.equals",
+                          "elapsedMs.lessThan",
+                          "elapsedMs.greaterThan"
+                        ]
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {}
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "check result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "checkId",
+                    "roles",
+                    "matrix",
+                    "observations",
+                    "comparison",
+                    "restore",
+                    "status"
+                  ],
+                  "properties": {
+                    "checkId": {
+                      "type": "string"
+                    },
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "matrix": {
+                      "type": "object",
+                      "required": [
+                        "evidenceSeparated"
+                      ],
+                      "properties": {
+                        "evidenceSeparated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "observations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "role",
+                          "observation"
+                        ],
+                        "properties": {
+                          "role": {
+                            "type": "string"
+                          },
+                          "observation": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "comparison": {
+                      "type": "object",
+                      "required": [
+                        "outcome"
+                      ],
+                      "properties": {
+                        "outcome": {
+                          "type": "string",
+                          "enum": [
+                            "pass",
+                            "fail",
+                            "inconclusive"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "restore": {
+                      "type": "object",
+                      "required": [
+                        "outcome"
+                      ],
+                      "properties": {
+                        "outcome": {
+                          "type": "string",
+                          "enum": [
+                            "restored",
+                            "restore-failed"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pass",
+                        "fail",
+                        "not-run"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
