@@ -5,11 +5,13 @@
  */
 import { join } from 'node:path';
 import { app, BrowserWindow } from 'electron';
-import { createCoreApiServer } from '@scopepilot2/core';
+import { createCoreApiServer, SystemClock } from '@scopepilot2/core';
+import { composeEngines } from '@scopepilot2/adapters';
 import { CaseRepository, migrate, openDatabase, RunRepository } from '@scopepilot2/storage';
 import { createHarness, FIXTURE_OPERATOR } from '@scopepilot2/simulation';
 
 let window: BrowserWindow | null = null;
+let closeEngines: (() => Promise<void>) | null = null;
 
 function createWindow(apiBase: string): void {
   window = new BrowserWindow({
@@ -38,8 +40,25 @@ async function bootstrap(): Promise<void> {
   migrate(db);
   const runRepository = new RunRepository(db);
   const caseRepository = new CaseRepository(db);
-  // runs 表は cases 表を参照するため、案件も作成・更新時に保存する。
-  const harness = createHarness({ runSink: runRepository, caseSink: caseRepository });
+  // engine は環境変数で明示 opt-in したときだけ実物 (SCOPEPILOT_ZAP_BASE_URL・
+  // SCOPEPILOT_EXPLORER=playwright)。既定は fixture。実 engine 時は実時間で記録する。
+  const engines = await composeEngines();
+  closeEngines = () => engines.close();
+  const harness = createHarness({
+    runSink: runRepository,
+    caseSink: caseRepository,
+    ...(engines.mode === 'fixture'
+      ? {}
+      : {
+          engines: {
+            explorer: engines.explorer,
+            scanEngine: engines.scanEngine,
+            capabilities: engines.capabilities,
+            clock: new SystemClock(),
+            ...(engines.runtimeBundleHash === undefined ? {} : { runtimeBundleHash: engines.runtimeBundleHash }),
+          },
+        }),
+  });
   const server = createCoreApiServer({ service: harness.service, operator: FIXTURE_OPERATOR, runRepository });
   const binding = await new Promise<{ host: string; port: number }>((resolve, reject) => {
     server.once('error', reject);
@@ -57,6 +76,7 @@ async function bootstrap(): Promise<void> {
   const shutdown = (): void => {
     server.close();
     db.close();
+    void closeEngines?.().catch(() => undefined);
   };
   app.on('window-all-closed', () => {
     shutdown();

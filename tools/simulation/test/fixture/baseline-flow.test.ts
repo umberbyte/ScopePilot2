@@ -4,6 +4,7 @@ import { DomainError } from '@scopepilot2/contracts';
 import {
   FIXTURE_NUCLEI_VERSION,
   FIXTURE_ZAP_VERSION,
+  FixtureExplorer,
   runBaselineScenario,
   zapAlertsFixtureHash,
 } from '@scopepilot2/simulation';
@@ -58,8 +59,9 @@ describe('A0 基準シナリオ (探索→能動診断→所見)', () => {
 
   test('[F21-FT-003] 探索 (Enforced) は scope 外 URL を adapter へ渡さず拒否記録を残す', async () => {
     const result = await runBaselineScenario();
-    const calls = result.harness.explorer.calls();
-    assert.ok(calls.every((url) => url.startsWith('http://fixture.target.test/')));
+    // 既定 harness の explorer は FixtureExplorer (呼出記録を持つ)。
+    const calls = (result.harness.explorer as FixtureExplorer).calls();
+    assert.ok(calls.every((url: string) => url.startsWith('http://fixture.target.test/')));
     assert.ok(!calls.includes('http://elsewhere.example/out-of-scope'));
     assert.deepEqual(result.exploration.deniedUrls.map((entry) => entry.url), ['http://elsewhere.example/out-of-scope']);
     assert.ok(result.events.some((event) => event.type === 'EgressDenied'));

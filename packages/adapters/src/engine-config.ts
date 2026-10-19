@@ -2,23 +2,54 @@
  * engine 構成の解決。fixture (simulation) と実 adapter の切替を環境変数で行う。
  * 秘密値 (ZAP API key) は環境変数のみで受け、argv・設定 file に置かない (F21-UT-007)。
  * 実行環境に ZAP が無ければ fixture のまま — 実 engine 指定は明示的な opt-in。
+ *
+ * 環境変数:
+ * - SCOPEPILOT_ZAP_BASE_URL: 実 ZAP daemon の API base (例 http://127.0.0.1:8090)。
+ *   設定時のみ能動診断を ZAP へ委譲 (Delegated)。
+ * - SCOPEPILOT_EXPLORER: 'playwright' で実 browser 探索 (Enforced)。既定は fixture。
+ *   実探索は許可 origin を SCOPEPILOT_EXPLORER_ALLOWED_ORIGINS (カンマ区切り・
+ *   http(s) origin) に明示させる — adapter 入口の送信前拒否はこの origin 集合に
+ *   対して効く (core の案件 scope とは別の防御線)。
+ * - SCOPEPILOT_ZAP_API_KEY: ZAP API key (adapter が直接読む)。
  */
-import type { ActiveScanEnginePort } from '@scopepilot2/core';
-import { FixtureZapEngine } from '@scopepilot2/simulation';
+import type { ActiveScanEnginePort, ExplorationPort } from '@scopepilot2/core';
+import type { EngineCapabilitySnapshot } from '@scopepilot2/contracts';
+import { FixtureExplorer, FixtureZapEngine } from '@scopepilot2/simulation';
 import { ZapEngineAdapter } from './zap-engine.ts';
+import { PlaywrightExplorerAdapter } from './playwright-explorer.ts';
 
 export interface EngineSelection {
   readonly mode: 'fixture' | 'zap';
   readonly zapBaseUrl?: string;
+  readonly explorer: 'fixture' | 'playwright';
+  /** 実探索の許可 origin (explorer=playwright のとき必須)。 */
+  readonly explorerAllowedOrigins?: readonly string[];
 }
 
 /** 環境変数から engine 選択を解決する。SCOPEPILOT_ZAP_BASE_URL があるときのみ実 ZAP。 */
 export function resolveEngineSelection(env: Readonly<Record<string, string | undefined>> = process.env): EngineSelection {
   const zapBaseUrl = env['SCOPEPILOT_ZAP_BASE_URL'];
-  if (zapBaseUrl !== undefined && zapBaseUrl !== '') {
-    return { mode: 'zap', zapBaseUrl };
+  const useZap = zapBaseUrl !== undefined && zapBaseUrl !== '';
+  if (env['SCOPEPILOT_EXPLORER'] === 'playwright') {
+    const raw = env['SCOPEPILOT_EXPLORER_ALLOWED_ORIGINS'] ?? '';
+    const origins = raw.split(',').map((origin) => origin.trim()).filter((origin) => origin !== '');
+    if (origins.length === 0) {
+      throw new Error('SCOPEPILOT_EXPLORER=playwright requires SCOPEPILOT_EXPLORER_ALLOWED_ORIGINS (comma-separated http(s) origins)');
+    }
+    for (const origin of origins) {
+      if (!/^https?:\/\/[^/]+\/?$/.test(origin)) {
+        throw new Error(`SCOPEPILOT_EXPLORER_ALLOWED_ORIGINS must be http(s) origins: ${origin}`);
+      }
+    }
+    if (useZap && zapBaseUrl !== undefined) {
+      return { mode: 'zap', zapBaseUrl, explorer: 'playwright', explorerAllowedOrigins: origins };
+    }
+    return { mode: 'fixture', explorer: 'playwright', explorerAllowedOrigins: origins };
   }
-  return { mode: 'fixture' };
+  if (useZap && zapBaseUrl !== undefined) {
+    return { mode: 'zap', zapBaseUrl, explorer: 'fixture' };
+  }
+  return { mode: 'fixture', explorer: 'fixture' };
 }
 
 /** 選択に応じた能動診断 engine を組み立てる。fixture は simulation の固定実装。 */
@@ -27,4 +58,112 @@ export function createScanEngine(selection: EngineSelection = resolveEngineSelec
     return new ZapEngineAdapter({ baseUrl: selection.zapBaseUrl });
   }
   return new FixtureZapEngine();
+}
+
+/** 選択に応じた探索 engine。fixture のときは FixtureExplorer (simulation)。 */
+export function createExplorerEngine(selection: EngineSelection = resolveEngineSelection()): ExplorationPort {
+  if (selection.explorer === 'playwright' && selection.explorerAllowedOrigins !== undefined) {
+    return new PlaywrightExplorerAdapter({
+      scope: { allowedOrigins: selection.explorerAllowedOrigins, deniedOrigins: [] },
+    });
+  }
+  return new FixtureExplorer();
+}
+
+/** 能力表を作る。実 engine は source=measured、版は engine の申告値で固定。 */
+export function createCapabilitySnapshots(input: {
+  readonly zap: { readonly engineVersion: string; readonly real: boolean };
+  readonly explorer: { readonly engineVersion: string; readonly real: boolean };
+  readonly measuredAt: string;
+}): readonly EngineCapabilitySnapshot[] {
+  const enforced = {
+    preSendScopeEnforcement: 'Enforced',
+    stopControl: 'Enforced',
+    budgetLease: 'Enforced',
+    rateLimit: 'Enforced',
+  } as const;
+  const delegated = {
+    preSendScopeEnforcement: 'Delegated',
+    stopControl: 'Delegated',
+    budgetLease: 'Delegated',
+    rateLimit: 'Delegated',
+  } as const;
+  return [
+    {
+      engineKind: 'playwright',
+      engineVersion: input.explorer.engineVersion,
+      source: input.explorer.real ? 'measured' : 'fixture',
+      guaranteeLevels: enforced,
+      maxOvershootRatio: 0,
+      measuredAt: input.measuredAt,
+    },
+    {
+      engineKind: 'zap',
+      engineVersion: input.zap.engineVersion,
+      source: input.zap.real ? 'measured' : 'fixture',
+      guaranteeLevels: delegated,
+      maxOvershootRatio: 0.05,
+      measuredAt: input.measuredAt,
+    },
+  ];
+}
+
+export interface ComposedEngines {
+  readonly mode: 'fixture' | 'real';
+  readonly explorer: ExplorationPort;
+  readonly scanEngine: ActiveScanEnginePort;
+  readonly capabilities: readonly EngineCapabilitySnapshot[];
+  /** 実 engine 時の監査記録用 hash。fixture のときは呼出側の既定を使う。 */
+  readonly runtimeBundleHash?: string;
+  /** 実 playwright の後始末。fixture は何もしない。 */
+  close(): Promise<void>;
+}
+
+/**
+ * 環境変数から engine 群を組み立てる。実 ZAP 指定時は版を解決 (await) してから
+ * 能力表を作る — runActiveScan は能力表の版と engine の版の一致を検証するため、
+ * 未解決の版 (「zap-api (未確認)」) のまま能力表を作ると診断が始まらない。
+ */
+export async function composeEngines(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<ComposedEngines> {
+  const selection = resolveEngineSelection(env);
+  const realZap = selection.mode === 'zap';
+  const realExplorer = selection.explorer === 'playwright';
+  if (!realZap && !realExplorer) {
+    return {
+      mode: 'fixture',
+      explorer: new FixtureExplorer(),
+      scanEngine: new FixtureZapEngine(),
+      capabilities: createCapabilitySnapshots({
+        zap: { engineVersion: new FixtureZapEngine().engineVersion, real: false },
+        explorer: { engineVersion: new FixtureExplorer().engineVersion, real: false },
+        measuredAt: new Date(0).toISOString(),
+      }),
+      close: async () => {},
+    };
+  }
+  const scanEngine: ActiveScanEnginePort =
+    realZap && selection.zapBaseUrl !== undefined ? new ZapEngineAdapter({ baseUrl: selection.zapBaseUrl }) : new FixtureZapEngine();
+  if (scanEngine instanceof ZapEngineAdapter) {
+    await scanEngine.resolvedVersion();
+  }
+  const explorer = createExplorerEngine(selection);
+  const playwrightAdapter = explorer instanceof PlaywrightExplorerAdapter ? explorer : null;
+  return {
+    mode: 'real',
+    explorer,
+    scanEngine,
+    capabilities: createCapabilitySnapshots({
+      zap: { engineVersion: scanEngine.engineVersion, real: realZap },
+      explorer: { engineVersion: explorer.engineVersion, real: realExplorer },
+      measuredAt: new Date().toISOString(),
+    }),
+    ...(realExplorer ? { runtimeBundleHash: `real-engines:${scanEngine.engineVersion}` } : {}),
+    close: async () => {
+      if (playwrightAdapter !== null) {
+        await playwrightAdapter.close();
+      }
+    },
+  };
 }

@@ -44,6 +44,13 @@ export class FixedClock implements Clock {
   }
 }
 
+/** 実システム時刻。実 engine 実行 (認可の有効期間・監査記録の時刻) で使う。 */
+export class SystemClock implements Clock {
+  now(): Date {
+    return new Date();
+  }
+}
+
 /** 連番 ID。fixture で決定的な ID を作る。 */
 export class SequentialIdGenerator implements IdGenerator {
   private counters = new Map<string, number>();

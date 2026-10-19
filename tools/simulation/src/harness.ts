@@ -2,9 +2,13 @@
  * simulation harness の組み立て。固定 clock・連番 ID・in-memory 証拠保存と
  * fixture adapter を配線し、決定的に基準シナリオを実行できる環境を作る。
  * `docs/detailed-design/f21-cli-automation.md` 3章 (SimulationHarness)。
+ *
+ * engines option で実 engine (adapters の composeEngines 由来) を差し込める。
+ * 実 engine 時は SystemClock と実測能力表を渡すこと (呼出側の責務)。
  */
 import { BaselineFlowService } from '@scopepilot2/core';
 import { FixedClock, InMemoryEvidenceStore, SequentialIdGenerator } from '@scopepilot2/core';
+import type { ActiveScanEnginePort, Clock, ExplorationPort } from '@scopepilot2/core';
 import type { EngineCapabilitySnapshot, OperatorProfile } from '@scopepilot2/contracts';
 import { FixtureExplorer } from './adapters/fixture-explorer.ts';
 import { FixtureZapEngine } from './adapters/fixture-zap.ts';
@@ -35,8 +39,8 @@ export const FIXTURE_OPERATOR: OperatorProfile = {
 
 export interface SimulationHarness {
   readonly service: BaselineFlowService;
-  readonly explorer: FixtureExplorer;
-  readonly scanEngine: FixtureZapEngine;
+  readonly explorer: ExplorationPort;
+  readonly scanEngine: ActiveScanEnginePort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   readonly runtimeBundleHash: string;
 }
@@ -45,22 +49,32 @@ export interface SimulationHarness {
 export interface HarnessOptions {
   readonly runSink?: { save(record: import('@scopepilot2/contracts').RunRecord): void };
   readonly caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
+  /** 実 engine 差し込み (adapters の composeEngines 由来)。既定は fixture 構成。 */
+  readonly engines?: {
+    readonly explorer: ExplorationPort;
+    readonly scanEngine: ActiveScanEnginePort;
+    readonly capabilities: readonly EngineCapabilitySnapshot[];
+    readonly clock?: Clock;
+    readonly runtimeBundleHash?: string;
+  };
 }
 
 export function createHarness(options: HarnessOptions = {}): SimulationHarness {
-  const explorer = new FixtureExplorer();
-  const scanEngine = new FixtureZapEngine();
-  const capabilities = fixtureCapabilitySnapshots();
+  const explorer: ExplorationPort = options.engines?.explorer ?? new FixtureExplorer();
+  const scanEngine: ActiveScanEnginePort = options.engines?.scanEngine ?? new FixtureZapEngine();
+  const capabilities = options.engines?.capabilities ?? fixtureCapabilitySnapshots();
+  const runtimeBundleHash = options.engines?.runtimeBundleHash ?? FIXTURE_RUNTIME_BUNDLE_HASH;
   const service = new BaselineFlowService({
-    clock: new FixedClock(FIXTURE_CLOCK_TIMES),
+    // 実 engine 時は実時間 (認可の有効期間・監査記録)。既定は決定的な固定 clock。
+    clock: options.engines?.clock ?? new FixedClock(FIXTURE_CLOCK_TIMES),
     ids: new SequentialIdGenerator(),
     evidence: new InMemoryEvidenceStore(),
     explorer,
     scanEngine,
     capabilities,
-    runtimeBundleHash: FIXTURE_RUNTIME_BUNDLE_HASH,
+    runtimeBundleHash,
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
     ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });
-  return { service, explorer, scanEngine, capabilities, runtimeBundleHash: FIXTURE_RUNTIME_BUNDLE_HASH };
+  return { service, explorer, scanEngine, capabilities, runtimeBundleHash };
 }
