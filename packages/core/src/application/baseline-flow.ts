@@ -51,6 +51,9 @@ import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
 import type { ActiveScanEnginePort, ExplorationPort } from '../ports/engines.ts';
 
+/** 計画の並列度・rate が超えられない安全上天井 (UI 指定でも引き上げ不可)。 */
+const PLAN_SAFETY_CEILING = { maxConcurrency: 2, requestsPerSecond: 2 } as const;
+
 export interface BaselineFlowDeps {
   readonly clock: Clock;
   readonly ids: IdGenerator;
@@ -287,14 +290,22 @@ export class BaselineFlowService {
   }
 
   /** 探索計画。既定上限と案件上限の狭い方を使う。 */
-  buildExplorationPlan(operator: OperatorProfile, seeds: readonly string[]): { plan: ExecutionPlan; planHash: string } {
+  buildExplorationPlan(
+    operator: OperatorProfile,
+    seeds: readonly string[],
+    limitsRequest?: { readonly maxRequests: number; readonly maxPages: number; readonly maxDurationMinutes: number },
+  ): { plan: ExecutionPlan; planHash: string } {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const authorization = this.currentAuthorization();
     if (seeds.length === 0) {
       throw domainError('ValidationFailed', 'exploration needs at least one seed URL');
     }
-    const limits = this.planLimits(DEFAULT_EXPLORE_LIMITS, caseRecord.scope.limits);
+    if (limitsRequest !== undefined) {
+      // UI からの上限指定は案件上限へクランプされる (Advanced モードの上限編集・design/02 §3)。
+      this.requirePositiveLimits(limitsRequest, 'plan.explore');
+    }
+    const limits = this.planLimits({ ...DEFAULT_EXPLORE_LIMITS, ...limitsRequest }, caseRecord.scope.limits);
     const inputEvidenceHash = hashStable('scopepilot2.plan.input', seeds.map((url) => ScopePolicy.canonicalUrl(url)).sort());
     const plan = buildPlan({
       planId: this.deps.ids.next('plan'),
@@ -321,14 +332,21 @@ export class BaselineFlowService {
   }
 
   /** 能動診断計画。対象は採用済み候補の canonical URL の固定 snapshot。 */
-  buildActiveScanPlan(operator: OperatorProfile, targets: readonly string[]): { plan: ExecutionPlan; planHash: string } {
+  buildActiveScanPlan(
+    operator: OperatorProfile,
+    targets: readonly string[],
+    limitsRequest?: { readonly maxRequests: number; readonly maxPages: number; readonly maxDurationMinutes: number },
+  ): { plan: ExecutionPlan; planHash: string } {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const authorization = this.currentAuthorization();
     if (targets.length === 0) {
       throw domainError('ValidationFailed', 'active scan needs at least one adopted target');
     }
-    const limits = this.planLimits(DEFAULT_ACTIVE_SCAN_LIMITS, caseRecord.scope.limits);
+    if (limitsRequest !== undefined) {
+      this.requirePositiveLimits(limitsRequest, 'plan.scan');
+    }
+    const limits = this.planLimits({ ...DEFAULT_ACTIVE_SCAN_LIMITS, ...limitsRequest }, caseRecord.scope.limits);
     const inputEvidenceHash = hashStable('scopepilot2.plan.input', targets.map((url) => ScopePolicy.canonicalUrl(url)).sort());
     const plan = buildPlan({
       planId: this.deps.ids.next('plan'),
@@ -764,13 +782,14 @@ export class BaselineFlowService {
     }
   }
 
-  private planLimits(defaults: PlanLimits, caseLimits: ScopeLimits): PlanLimits {
+  private planLimits(requested: PlanLimits, caseLimits: ScopeLimits): PlanLimits {
     return {
-      maxRequests: Math.min(defaults.maxRequests, caseLimits.maxRequests),
-      maxPages: Math.min(defaults.maxPages, caseLimits.maxPages),
-      maxDurationMinutes: Math.min(defaults.maxDurationMinutes, caseLimits.maxDurationMinutes),
-      maxConcurrency: defaults.maxConcurrency,
-      requestsPerSecond: defaults.requestsPerSecond,
+      maxRequests: Math.min(requested.maxRequests, caseLimits.maxRequests),
+      maxPages: Math.min(requested.maxPages, caseLimits.maxPages),
+      maxDurationMinutes: Math.min(requested.maxDurationMinutes, caseLimits.maxDurationMinutes),
+      // 並列度・rate は安全規定値を超えられない (案件上限に含まれないため既定で頭打ち)。
+      maxConcurrency: Math.min(requested.maxConcurrency, PLAN_SAFETY_CEILING.maxConcurrency),
+      requestsPerSecond: Math.min(requested.requestsPerSecond, PLAN_SAFETY_CEILING.requestsPerSecond),
     };
   }
 

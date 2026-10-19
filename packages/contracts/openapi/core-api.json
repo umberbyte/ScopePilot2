@@ -1066,6 +1066,30 @@
               "format": "uri"
             },
             "minItems": 1
+          },
+          "limits": {
+            "type": "object",
+            "description": "任意の上限指定 (案件上限へクランプ。未指定なら既定)",
+            "required": [
+              "maxRequests",
+              "maxPages",
+              "maxDurationMinutes"
+            ],
+            "properties": {
+              "maxRequests": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxPages": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxDurationMinutes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
           }
         }
       },
@@ -1098,6 +1122,30 @@
               "format": "uri"
             },
             "minItems": 1
+          },
+          "limits": {
+            "type": "object",
+            "description": "任意の上限指定 (案件上限へクランプ。未指定なら既定)",
+            "required": [
+              "maxRequests",
+              "maxPages",
+              "maxDurationMinutes"
+            ],
+            "properties": {
+              "maxRequests": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxPages": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxDurationMinutes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
           }
         }
       },

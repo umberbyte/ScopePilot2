@@ -58,7 +58,7 @@ test('A02: scope を編集して保存し、競合時は再読込を案内する
 
   // 別 window による更新を擬似する (page 内から直接 scope を更新して revision 3 へ)。
   await page.evaluate(async () => {
-    const base = window.scopepilotDesktop?.apiBase ?? '';
+    const base = (window as { scopepilotDesktop?: { apiBase: string } }).scopepilotDesktop?.apiBase ?? '';
     const current = (await (await fetch(`${base}/api/case`)).json()) as {
       revision: number;
       scope: { allowedOrigins: readonly string[]; deniedOrigins: readonly string[]; limits: { maxRequests: number; maxPages: number; maxDurationMinutes: number } };
@@ -87,7 +87,7 @@ test('A11: 所見一覧から確定/棄却でき、報告書を生成できる',
   // engine は探索で観測済みの URL しか診断できない (URL Does not Exist 回避) ため、
   // 探索から実行する。
   await page.evaluate(async () => {
-    const base = window.scopepilotDesktop?.apiBase ?? '';
+    const base = (window as { scopepilotDesktop?: { apiBase: string } }).scopepilotDesktop?.apiBase ?? '';
     const post = async <T>(path: string, body: unknown): Promise<T> => {
       const response = await fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!response.ok) {
@@ -123,6 +123,30 @@ test('A11: 所見一覧から確定/棄却でき、報告書を生成できる',
   // 報告書を生成できる (限界開示を含む markdown)。
   await page.getByRole('button', { name: '報告書を生成する' }).click();
   await expect(page.getByText(/診断報告書/)).toBeVisible({ timeout: 30_000 });
+});
+
+test('A08: 上限を狭めた探索計画を構築・確認・実行し、診断まで実行できる', async () => {
+  await page.getByRole('button', { name: /A08 Scan plans/ }).click();
+
+  // 上限 (ページ数) を 50 に狭めて計画を構築すると、計画表示に 50 が反映される。
+  // 上限欄は探索・診断の両 section にあるため、先頭 (探索側) を指定する。
+  await page.getByLabel('最大ページ数 (空=既定)').first().fill('50');
+  await page.getByRole('button', { name: '探索計画を構築する' }).click();
+  await expect(page.getByText(/50 page/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/計画 hash: /)).toBeVisible();
+
+  await page.getByRole('button', { name: '探索計画を確認する' }).click();
+  await expect(page.getByText(/確認 ID: /)).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: '探索を実行する' }).click();
+  await expect(page.getByText(/探索完了: 観測 \d+ 件・候補 \d+ 件/)).toBeVisible({ timeout: 30_000 });
+
+  // 探索候補を対象に診断計画を構築・確認・実行する。
+  await page.getByRole('button', { name: '探索結果の候補をすべて対象に設定' }).click();
+  await page.getByRole('button', { name: '診断計画を構築する' }).click();
+  await expect(page.getByText(/active-scan: 対象 \d+ 件/)).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: '診断計画を確認する' }).click();
+  await page.getByRole('button', { name: '診断を実行する' }).click();
+  await expect(page.getByText(/診断完了 \(engine/)).toBeVisible({ timeout: 30_000 });
 });
 
 test('未実装画面はプレースホルダで明示される (A03)', async () => {

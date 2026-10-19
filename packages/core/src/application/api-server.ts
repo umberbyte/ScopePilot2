@@ -131,7 +131,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return;
       }
       try {
-        const result = service.buildExplorationPlan(operator, stringArrayField(body, 'seeds'));
+        const result = service.buildExplorationPlan(operator, stringArrayField(body, 'seeds'), optionalLimitsField(body));
         service.authorizePlan(result.plan);
         return respondJson(response, 200, { plan: result.plan, planHash: result.planHash });
       } catch (cause) {
@@ -144,7 +144,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return;
       }
       try {
-        const result = service.buildActiveScanPlan(operator, stringArrayField(body, 'targets'));
+        const result = service.buildActiveScanPlan(operator, stringArrayField(body, 'targets'), optionalLimitsField(body));
         service.authorizePlan(result.plan);
         return respondJson(response, 200, { plan: result.plan, planHash: result.planHash });
       } catch (cause) {
@@ -374,6 +374,14 @@ function stringArrayField(body: Record<string, unknown>, field: string): readonl
     throw new DomainError('ValidationFailed', `field ${field} must be an array of strings`);
   }
   return value as readonly string[];
+}
+
+/** 計画 API の任意上限指定。未指定なら service 既定。指定時は正の整数 3 点のみ許す。 */
+function optionalLimitsField(body: Record<string, unknown>): { maxRequests: number; maxPages: number; maxDurationMinutes: number } | undefined {
+  if (body.limits === undefined) {
+    return undefined;
+  }
+  return limitsField(body);
 }
 
 function limitsField(body: Record<string, unknown>): { maxRequests: number; maxPages: number; maxDurationMinutes: number } {

@@ -555,6 +555,45 @@ describe('Core API server (node:http)', () => {
 `));
   });
 
+  test('POST /api/plan/explore の任意 limits は案件上限へクランプされる', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'plan-limits-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+    await fetch(`${baseUrl}/api/authorization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['unauthenticated'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      }),
+    });
+    const response = await fetch(`${baseUrl}/api/plan/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        seeds: ['http://fixture.target.test/'],
+        limits: { maxRequests: 999_999, maxPages: 50, maxDurationMinutes: 5 },
+      }),
+    });
+    assert.equal(response.status, 200);
+    const { plan } = (await response.json()) as { plan: { steps: readonly { limits: { maxRequests: number; maxPages: number; maxDurationMinutes: number } }[] } };
+    const limits = plan.steps[0]?.limits;
+    assert.equal(limits?.maxRequests, 5000, '案件上限へクランプ');
+    assert.equal(limits?.maxPages, 50, '指定値はそのまま');
+    assert.equal(limits?.maxDurationMinutes, 5);
+  });
+
   test('GET /api/findings と POST /api/findings/status は所見確認状態を監査付きで扱う', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',

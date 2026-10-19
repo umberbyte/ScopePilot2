@@ -343,6 +343,215 @@ function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactE
   );
 }
 
+interface PlanStepView {
+  readonly kind: string;
+  readonly targetSnapshot: readonly string[];
+  readonly limits: { readonly maxRequests: number; readonly maxPages: number; readonly maxDurationMinutes: number };
+}
+
+interface CandidateView {
+  readonly candidateId: string;
+  readonly url: string;
+  readonly method: string;
+  readonly category: string;
+  readonly guidelineBasis: readonly string[];
+  readonly confidence: number;
+  readonly observationUrl: string;
+}
+
+/** limits 入力欄 (空 = 既定)。3 点のみで、service が案件上限へクランプする。 */
+function LimitsFields({
+  values,
+  onChange,
+}: {
+  values: { maxRequests: string; maxPages: string; maxDurationMinutes: string };
+  onChange: (next: { maxRequests: string; maxPages: string; maxDurationMinutes: string }) => void;
+}): React.ReactElement {
+  return (
+    <>
+      <Field label="最大リクエスト数 (空=既定)">
+        <Input type="number" value={values.maxRequests} onChange={(_, data) => onChange({ ...values, maxRequests: data.value })} />
+      </Field>
+      <Field label="最大ページ数 (空=既定)">
+        <Input type="number" value={values.maxPages} onChange={(_, data) => onChange({ ...values, maxPages: data.value })} />
+      </Field>
+      <Field label="最大実行分 (空=既定)">
+        <Input type="number" value={values.maxDurationMinutes} onChange={(_, data) => onChange({ ...values, maxDurationMinutes: data.value })} />
+      </Field>
+    </>
+  );
+}
+
+function limitsPayload(values: { maxRequests: string; maxPages: string; maxDurationMinutes: string }): { maxRequests: number; maxPages: number; maxDurationMinutes: number } | undefined {
+  if (values.maxRequests === '' && values.maxPages === '' && values.maxDurationMinutes === '') {
+    return undefined;
+  }
+  return {
+    maxRequests: values.maxRequests === '' ? Number.MAX_SAFE_INTEGER : Number(values.maxRequests),
+    maxPages: values.maxPages === '' ? Number.MAX_SAFE_INTEGER : Number(values.maxPages),
+    maxDurationMinutes: values.maxDurationMinutes === '' ? Number.MAX_SAFE_INTEGER : Number(values.maxDurationMinutes),
+  };
+}
+
+function planSummaryLines(steps: readonly PlanStepView[], planHash: string): string {
+  return steps
+    .map((step) => `${step.kind}: 対象 ${step.targetSnapshot.length} 件・上限 ${step.limits.maxRequests} req / ${step.limits.maxPages} page / ${step.limits.maxDurationMinutes} 分`)
+    .join('\n') + `\n計画 hash: ${planHash.slice(0, 16)}…`;
+}
+
+/** A08 Scan plans。探索・診断計画の構築 (上限編集) → 確認 → 実行を 1 画面で行う。 */
+function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
+  const styles = useStyles();
+  const [seeds, setSeeds] = useState('http://fixture.target.test/');
+  const [exploreLimits, setExploreLimits] = useState({ maxRequests: '', maxPages: '', maxDurationMinutes: '' });
+  const [explorePlan, setExplorePlan] = useState<{ plan: { steps: readonly PlanStepView[] }; planHash: string; steps: readonly PlanStepView[] } | null>(null);
+  const [exploreConfirmation, setExploreConfirmation] = useState<{ confirmationId: string } | null>(null);
+  const [exploreResult, setExploreResult] = useState('');
+  const [candidates, setCandidates] = useState<readonly CandidateView[]>([]);
+  const [targets, setTargets] = useState('');
+  const [scanLimits, setScanLimits] = useState({ maxRequests: '', maxPages: '', maxDurationMinutes: '' });
+  const [scanPlan, setScanPlan] = useState<{ plan: { steps: readonly PlanStepView[] }; planHash: string; steps: readonly PlanStepView[] } | null>(null);
+  const [scanConfirmation, setScanConfirmation] = useState<{ confirmationId: string } | null>(null);
+  const [scanResult, setScanResult] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const run = useCallback(
+    async (action: () => Promise<void>): Promise<void> => {
+      setBusy(true);
+      setError('');
+      try {
+        await action();
+      } catch (cause) {
+        setError(String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
+  const buildExplore = useCallback(() =>
+    run(async () => {
+      const result = await callJson<{ plan: { steps: readonly PlanStepView[] }; planHash: string }>(apiBase, 'POST', '/api/plan/explore', {
+        seeds: seeds.split('\n').map((line) => line.trim()).filter((line) => line !== ''),
+        ...(limitsPayload(exploreLimits) === undefined ? {} : { limits: limitsPayload(exploreLimits) }),
+      });
+      setExplorePlan({ plan: result.plan, planHash: result.planHash, steps: result.plan.steps });
+      setExploreConfirmation(null);
+      setExploreResult('');
+    }), [apiBase, exploreLimits, run, seeds]);
+
+  const confirmExplore = useCallback(() =>
+    run(async () => {
+      if (explorePlan === null) {
+        return;
+      }
+      const confirmation = await callJson<{ confirmationId: string; planHash: string }>(apiBase, 'POST', '/api/plan/confirm', { plan: explorePlan.plan });
+      setExploreConfirmation(confirmation);
+    }), [apiBase, explorePlan, run]);
+
+  const executeExplore = useCallback(() =>
+    run(async () => {
+      if (explorePlan === null || exploreConfirmation === null) {
+        return;
+      }
+      const result = await callJson<{ observations: readonly unknown[]; deniedUrls: readonly string[]; candidates: readonly CandidateView[] }>(apiBase, 'POST', '/api/run/explore', {
+        plan: explorePlan.plan,
+        confirmation: exploreConfirmation,
+        maxDepth: 5,
+      });
+      setCandidates(result.candidates);
+      setExploreResult(`探索完了: 観測 ${result.observations.length} 件・候補 ${result.candidates.length} 件・scope 外拒否 ${result.deniedUrls.length} 件`);
+    }), [apiBase, exploreConfirmation, explorePlan, run]);
+
+  const buildScan = useCallback(() =>
+    run(async () => {
+      const targetList = targets.split('\n').map((line) => line.trim()).filter((line) => line !== '');
+      const result = await callJson<{ plan: { steps: readonly PlanStepView[] }; planHash: string }>(apiBase, 'POST', '/api/plan/scan', {
+        targets: targetList,
+        ...(limitsPayload(scanLimits) === undefined ? {} : { limits: limitsPayload(scanLimits) }),
+      });
+      setScanPlan({ plan: result.plan, planHash: result.planHash, steps: result.plan.steps });
+      setScanConfirmation(null);
+      setScanResult('');
+    }), [apiBase, run, scanLimits, targets]);
+
+  const confirmScan = useCallback(() =>
+    run(async () => {
+      if (scanPlan === null) {
+        return;
+      }
+      const confirmation = await callJson<{ confirmationId: string; planHash: string }>(apiBase, 'POST', '/api/plan/confirm', { plan: scanPlan.plan });
+      setScanConfirmation(confirmation);
+    }), [apiBase, run, scanPlan]);
+
+  const executeScan = useCallback(() =>
+    run(async () => {
+      if (scanPlan === null || scanConfirmation === null || candidates.length === 0) {
+        return;
+      }
+      const result = await callJson<{ findings: readonly unknown[]; engineVersion: string }>(apiBase, 'POST', '/api/run/scan', {
+        plan: scanPlan.plan,
+        confirmation: scanConfirmation,
+        adopted: candidates,
+      });
+      setScanResult(`診断完了 (engine ${result.engineVersion}): 所見 ${result.findings.length} 件 — A11 で確認できます`);
+    }), [apiBase, candidates, run, scanConfirmation, scanPlan]);
+
+  return (
+    <div className={styles.section}>
+      <Text weight="semibold">探索計画 (crawl)</Text>
+      {error !== '' && (
+        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+          {`Error: ${error}`}
+        </Text>
+      )}
+      <Field label="開始 URL (1行1件)">
+        <Textarea value={seeds} onChange={(_, data) => setSeeds(data.value)} rows={2} />
+      </Field>
+      <LimitsFields values={exploreLimits} onChange={setExploreLimits} />
+      <div className={styles.section}>
+        <Button appearance="primary" disabled={busy} onClick={() => void buildExplore()}>
+          探索計画を構築する
+        </Button>
+        <Button disabled={busy || explorePlan === null} onClick={() => void confirmExplore()}>
+          探索計画を確認する
+        </Button>
+        <Button disabled={busy || exploreConfirmation === null} onClick={() => void executeExplore()}>
+          探索を実行する
+        </Button>
+      </div>
+      {explorePlan !== null && <Text block style={{ whiteSpace: 'pre-wrap' }}>{`計画:\n${planSummaryLines(explorePlan.steps, explorePlan.planHash)}`}</Text>}
+      {exploreConfirmation !== null && <Text>{`確認 ID: ${exploreConfirmation.confirmationId}`}</Text>}
+      {exploreResult !== '' && <Text>{exploreResult}</Text>}
+
+      <Text weight="semibold">診断計画 (active scan)</Text>
+      <Field label="対象 URL (1行1件・探索で観測済みの URL)">
+        <Textarea value={targets} onChange={(_, data) => setTargets(data.value)} rows={3} />
+      </Field>
+      <Button disabled={busy || candidates.length === 0} onClick={() => setTargets(candidates.map((candidate) => candidate.url).join('\n'))}>
+        探索結果の候補をすべて対象に設定
+      </Button>
+      <LimitsFields values={scanLimits} onChange={setScanLimits} />
+      <div className={styles.section}>
+        <Button appearance="primary" disabled={busy} onClick={() => void buildScan()}>
+          診断計画を構築する
+        </Button>
+        <Button disabled={busy || scanPlan === null} onClick={() => void confirmScan()}>
+          診断計画を確認する
+        </Button>
+        <Button disabled={busy || scanConfirmation === null || candidates.length === 0} onClick={() => void executeScan()}>
+          診断を実行する
+        </Button>
+      </div>
+      {scanPlan !== null && <Text block style={{ whiteSpace: 'pre-wrap' }}>{`計画:\n${planSummaryLines(scanPlan.steps, scanPlan.planHash)}`}</Text>}
+      {scanConfirmation !== null && <Text>{`確認 ID: ${scanConfirmation.confirmationId}`}</Text>}
+      {scanResult !== '' && <Text>{scanResult}</Text>}
+    </div>
+  );
+}
+
 export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElement {
   const styles = useStyles();
   const [items] = useState<readonly AdvancedNavItem[]>(() => advancedNavItems(OPERATOR_PERMISSIONS));
@@ -516,7 +725,8 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         )}
         {activeRoute === 'advanced.scope' && <ScopeAuthorizationScreen apiBase={apiBase} />}
         {activeRoute === 'findings' && <FindingsOrganizerScreen apiBase={apiBase} />}
-        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && (
+        {activeRoute === 'scan-plans' && <ScanPlansScreen apiBase={apiBase} />}
+        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && (
           <Text className={styles.muted}>この画面は未実装です (後続増分で提供します)。</Text>
         )}
       </div>
