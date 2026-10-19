@@ -218,6 +218,22 @@ test('A08: 上限を狭めた探索計画を構築・確認・実行し、診断
 });
 
 test('A04: site map に観測一覧と scope 拒否が表示される', async () => {
+  // 通信一覧の仮想化検証用に 60 件の交換を追加しておく (Repeater 送信 60 回)。
+  await page.evaluate(async () => {
+    const base = (window as { scopepilotDesktop?: { apiBase: string } }).scopepilotDesktop?.apiBase ?? '';
+    const created = (await (await fetch(`${base}/api/repeater/drafts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: `http://fixture.target.test/traffic-seed`, protocol: 'http/1.1' }),
+    })).json()) as { draft: { draftId: string; planHash: string } };
+    for (let index = 0; index < 60; index += 1) {
+      await fetch(`${base}/api/repeater/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draftId: created.draft.draftId, confirmedPlanHash: created.draft.planHash }),
+      });
+    }
+  });
   await page.getByRole('button', { name: /A04 Browser \/ Site map/ }).click();
   // A08 の探索で観測済み (fixture home とその配下)。
   await expect(page.getByText(/観測済み page \(\d+ 件\)/)).toBeVisible();
@@ -231,7 +247,16 @@ test('A04: site map に観測一覧と scope 拒否が表示される', async ()
   await expect(page.getByText(/elsewhere\.example\/out-of-scope/).first()).toBeVisible();
   // HTTP history と endpoint 集約 (探索・Repeater の観測通信が記録されている)。
   await expect(page.getByText(/HTTP history \(通信 \d+ 件\)/)).toBeVisible();
+  // 仮想化: 既定の窓 (50 件) を超える分は「次の 50 件を表示する」で広げる。
+  const trafficLines = page.getByText(/^GET http:\/\/fixture\.target\.test\//);
+  const before = await trafficLines.count();
+  await expect(page.getByRole('button', { name: /次の \d+ 件を表示する/ })).toBeVisible();
+  await page.getByRole('button', { name: /次の \d+ 件を表示する/ }).click();
+  await expect
+    .poll(async () => await trafficLines.count(), { timeout: 30_000 })
+    .toBeGreaterThan(before);
   await expect(page.getByText(/GET http:\/\/fixture.target.test\/ → 200/).first()).toBeVisible();
+
   await expect(page.getByText(/endpoint 集約 \(\d+ 件・query は同一視\)/)).toBeVisible();
   await expect(page.getByText(/\(\d+ URL\)/).first()).toBeVisible();
 });
@@ -368,6 +393,9 @@ test('A05: break queue の受付・転送・破棄と対象外 URL の拒否を�
 test('A06: Repeater draft を編集し表示 hash で確認送信する', async () => {
   await page.getByRole('button', { name: /A06 Repeater/ }).click();
   await page.getByRole('button', { name: '新規 draft を作る' }).click();
+  // A04 test が seed 用 draft を残しているため、作成した最新 tab を明示的に選ぶ。
+  await expect(page.getByRole('button', { name: /draft-\d+ \(r1\)/ })).toHaveCount(2, { timeout: 30_000 });
+  await page.getByRole('button', { name: /draft-\d+ \(r1\)/ }).last().click();
   await expect(page.getByText(/draft-\d+ — http:\/\/fixture.target.test\/repeater/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/計画 hash: /)).toBeVisible();
 

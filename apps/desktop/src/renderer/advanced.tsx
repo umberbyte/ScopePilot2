@@ -776,6 +776,8 @@ function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const [error, setError] = useState('');
   const [traffic, setTraffic] = useState<{ mode: 'list' | 'summary'; total: number; entries?: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: string }[] } | null>(null);
   const [endpoints, setEndpoints] = useState<readonly { key: string; path: string; method: string; status: number; observedUrls: number }[]>([]);
+  // 通信一覧の仮想化 (仕様書 6.5): 一度に描画する窓。50 件ずつ広げる。
+  const [trafficWindow, setTrafficWindow] = useState(50);
 
   useEffect(() => {
     void (async () => {
@@ -784,7 +786,7 @@ function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
         setObservations(body.observations);
         setDeniedUrls(body.deniedUrls);
         setLoaded(true);
-        const trafficBody = await callJson<{ mode: 'list' | 'summary'; total: number; entries?: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: string }[] }>(apiBase, 'GET', '/api/traffic?limit=100');
+        const trafficBody = await callJson<{ mode: 'list' | 'summary'; total: number; entries?: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: string }[] }>(apiBase, 'GET', '/api/traffic?limit=500');
         setTraffic(trafficBody);
         const endpointBody = await callJson<{ endpoints: readonly { key: string; path: string; method: string; status: number; observedUrls: number }[] }>(apiBase, 'GET', '/api/traffic/site-map');
         setEndpoints(endpointBody.endpoints);
@@ -854,12 +856,19 @@ function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
         <Text className={styles.muted}>{t('a04.trafficEmpty')}</Text>
       ) : (
         <div className={styles.section}>
-          {(traffic.entries ?? []).slice(0, 20).map((entry) => (
+          {(traffic.entries ?? []).slice(0, trafficWindow).map((entry) => (
             <Text key={entry.exchangeId} block>
               {t('a04.trafficLine', { method: entry.method, url: entry.url, status: String(entry.status), contentType: entry.contentType.split(';')[0], source: entry.source })}
             </Text>
           ))}
-          {traffic.total > 20 ? <Text className={styles.muted}>{t('a04.trafficMore', { count: traffic.total - 20 })}</Text> : null}
+          {(traffic.entries ?? []).length > trafficWindow ? (
+            <Button size="small" onClick={() => setTrafficWindow((current) => current + 50)}>
+              {t('a04.trafficShowMore', { count: Math.min(50, (traffic.entries ?? []).length - trafficWindow) })}
+            </Button>
+          ) : null}
+          {traffic.total > (traffic.entries ?? []).length ? (
+            <Text className={styles.muted}>{t('a04.trafficBeyond', { count: traffic.total - (traffic.entries ?? []).length })}</Text>
+          ) : null}
         </div>
       )}
       <Text weight="semibold">{t('a04.endpointsTitle', { count: endpoints.length })}</Text>
