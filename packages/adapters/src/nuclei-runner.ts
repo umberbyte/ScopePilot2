@@ -6,13 +6,12 @@
  * 秘密値を引数に置かない (F21-UT-007)。対象は temp file 経由で渡す
  * (コマンドライン長・argv に多数の URL を並べないため)。
  */
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 export interface NucleiRunnerOptions {
   /** nuclei binary の path。既定 'nuclei' (PATH 上)。 */
@@ -45,17 +44,49 @@ export class NucleiRunner {
   }
 
   private async exec(args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
-    const { stdout, stderr } = await execFileAsync(this.command, [...this.argsPrefix, ...args], {
-      timeout: this.timeoutMs,
-      maxBuffer: 64 * 1024 * 1024,
+    return await new Promise((resolve, reject) => {
+      // stdin は ignore で閉じる: 開いたままの stdin pipe を nuclei が待ち続け、
+      // 実機 (v3.11.1) で完了しないことを確認済み (execFile の stdin pipe で hang)。
+      const child = spawn(this.command, [...this.argsPrefix, ...args], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: this.timeoutMs,
+        windowsHide: true,
+      });
+      let stdout = '';
+      let stderr = '';
+      let bytes = 0;
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (chunk: string) => {
+        stdout += chunk;
+        bytes += chunk.length;
+        if (bytes > MAX_OUTPUT_BYTES) {
+          child.kill();
+        }
+      });
+      child.stderr.on('data', (chunk: string) => {
+        stderr += chunk;
+        bytes += chunk.length;
+        if (bytes > MAX_OUTPUT_BYTES) {
+          child.kill();
+        }
+      });
+      child.on('error', reject);
+      child.on('close', (code, signal) => {
+        if (code === 0) {
+          resolve({ stdout, stderr });
+          return;
+        }
+        const suffix = signal === null ? '' : ` (signal ${signal})`;
+        reject(new Error(`nuclei exited with code ${code === null ? 'unknown' : String(code)}${suffix}`));
+      });
     });
-    return { stdout, stderr };
   }
 
-  /** nuclei -version の出力から版を取り出す (stderr に出る)。 */
+  /** nuclei -version の出力から版を取り出す (v3 は Engine Version、v2 は Current Version)。 */
   async version(): Promise<string> {
     const { stderr, stdout } = await this.exec(['-version']);
-    const match = /Current Version:\s*(\S+)/i.exec(`${stderr}\n${stdout}`);
+    const match = /(?:Engine Version|Current Version):\s*(\S+)/i.exec(`${stderr}\n${stdout}`);
     return match === null ? 'nuclei (version unknown)' : `nuclei ${match[1] ?? ''}`.trim();
   }
 
