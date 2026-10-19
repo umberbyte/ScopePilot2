@@ -12,9 +12,10 @@
  *   対して効く (core の案件 scope とは別の防御線)。
  * - SCOPEPILOT_ZAP_API_KEY: ZAP API key (adapter が直接読む)。
  */
-import type { ActiveScanEnginePort, ExplorationPort } from '@scopepilot2/core';
+import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort } from '@scopepilot2/core';
 import type { EngineCapabilitySnapshot } from '@scopepilot2/contracts';
 import { FixtureExplorer, FixtureZapEngine } from '@scopepilot2/simulation';
+import { PlaywrightLoginExecutor } from './login-executor.ts';
 import { ZapEngineAdapter } from './zap-engine.ts';
 import { PlaywrightExplorerAdapter } from './playwright-explorer.ts';
 
@@ -112,6 +113,8 @@ export interface ComposedEngines {
   readonly mode: 'fixture' | 'real';
   readonly explorer: ExplorationPort;
   readonly scanEngine: ActiveScanEnginePort;
+  /** login 実行器 (design/f09)。実 engine 時のみ構成 (browser 駆動・遅延起動)。 */
+  readonly loginExecutor?: LoginExecutorPort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   /** 実 engine 時の監査記録用 hash。fixture のときは呼出側の既定を使う。 */
   readonly runtimeBundleHash?: string;
@@ -150,10 +153,13 @@ export async function composeEngines(
   }
   const explorer = createExplorerEngine(selection);
   const playwrightAdapter = explorer instanceof PlaywrightExplorerAdapter ? explorer : null;
+  // login 実行器は実 engine 構成で常に使えるようにする (browser は execute 時に遅延起動)。
+  const loginExecutor = new PlaywrightLoginExecutor();
   return {
     mode: 'real',
     explorer,
     scanEngine,
+    loginExecutor,
     capabilities: createCapabilitySnapshots({
       zap: { engineVersion: scanEngine.engineVersion, real: realZap },
       explorer: { engineVersion: explorer.engineVersion, real: realExplorer },
@@ -164,6 +170,7 @@ export async function composeEngines(
       if (playwrightAdapter !== null) {
         await playwrightAdapter.close();
       }
+      await loginExecutor.close();
     },
   };
 }

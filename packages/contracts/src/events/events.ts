@@ -18,4 +18,5 @@ export type BaselineFlowEvent =
   | { readonly type: 'FindingStatusChanged'; readonly at: string; readonly findingId: string; readonly from: string; readonly to: string; readonly changedBy: string }
   | { readonly type: 'FuzzRunCompleted'; readonly at: string; readonly runId: string; readonly targetUrl: string; readonly total: number; readonly sent: number }
   | { readonly type: 'BusinessLogicCheckCompleted'; readonly at: string; readonly checkId: string; readonly roles: readonly string[]; readonly status: string }
+  | { readonly type: 'LoginCompleted'; readonly at: string; readonly role: string; readonly authenticated: boolean; readonly secretReferences: readonly string[] }
   | { readonly type: 'ReportGenerated'; readonly at: string; readonly reportId: string; readonly modelHash: string };

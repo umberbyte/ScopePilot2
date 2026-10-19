@@ -60,6 +60,7 @@ import {
 import {
   RoleSessionRegistry,
   SessionCoordinator,
+  checkFlowDeadline,
   validateLoginFlow,
   vaultEvidenceProjection,
   type LoginFlowStep,
@@ -87,7 +88,7 @@ import {
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
-import type { ActiveScanEnginePort, ExplorationPort } from '../ports/engines.ts';
+import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, LoginSessionCookie } from '../ports/engines.ts';
 
 /** 計画の並列度・rate が超えられない安全上天井 (UI 指定でも引き上げ不可)。 */
 const PLAN_SAFETY_CEILING = { maxConcurrency: 2, requestsPerSecond: 2 } as const;
@@ -104,6 +105,8 @@ export interface BaselineFlowDeps {
   readonly runSink?: import('../ports/infra.ts').RunSinkPort;
   /** 案件記録の永続化 (任意)。作成・scope 更新時に保存する (runs FK の参照先)。 */
   readonly caseSink?: { save(record: CaseRecord): void };
+  /** login 実行器 (design/f09)。未構成の service では runLogin が ValidationFailed。 */
+  readonly loginExecutor?: LoginExecutorPort;
 }
 
 export interface CreateCaseInput {
@@ -123,6 +126,8 @@ export interface GrantAuthorizationInput {
 
 export interface ExploreRunInput {
   readonly maxDepth: number;
+  /** runLogin 済みの role。指定時はその role の session cookie で観測する (design/f09)。 */
+  readonly role?: string;
 }
 
 export interface ExploreRunResult {
@@ -206,6 +211,8 @@ export class BaselineFlowService {
   private readonly observationsByUrl = new Map<string, PageObservation>();
   /** scope により拒否された URL の記録 (design/02 A04 の開示用)。 */
   private readonly deniedUrlLog: readonly { url: string; reason: string }[] = [];
+  /** runLogin で得た role session (cookie 値は service 内部のみ。API・監査へ出さない)。 */
+  private readonly roleSessionCookies = new Map<string, { readonly cookies: readonly LoginSessionCookie[]; readonly createdAt: string }>();
   private exploredUrlCount = 0;
   private scannedUrlCount = 0;
   private delegatedSteps: {
@@ -418,9 +425,61 @@ export class BaselineFlowService {
     return { role: input.role, stepCount, secretReferences };
   }
 
+  /**
+   * 登録済み login flow の実行 (design/f09 §4)。認証済みなら session cookie を
+   * role に保存し、以後の探索 (runExploration の role 指定) で使えるようにする。
+   * 秘密値は実行中のみ executor へ渡し、監査 event には参照のみ残す (F09-UT-006)。
+   */
+  async runLogin(
+    operator: OperatorProfile,
+    input: {
+      readonly role: string;
+      readonly baseUrl: string;
+      readonly secretValues: Readonly<Record<string, string>>;
+      readonly expectedUrlPrefix: string;
+      readonly proxyServer?: string;
+    },
+  ): Promise<{ role: string; authenticated: boolean; finalUrl: string; cookieNames: readonly string[]; sharedCookieNames: boolean }> {
+    this.requirePermission(operator, 'run.manage');
+    const flow = this.loginFlows.get(input.role);
+    if (flow === undefined) {
+      throw domainError('ValidationFailed', `login flow for ${input.role} is not registered`);
+    }
+    const executor = this.deps.loginExecutor;
+    if (executor === undefined) {
+      throw domainError('ValidationFailed', 'login executor is not configured for this service');
+    }
+    for (const reference of flow.secretReferences) {
+      if (input.secretValues[reference] === undefined) {
+        throw domainError('NeedsInput', `secret value for reference '${reference}' was not provided`);
+      }
+    }
+    const startedAtMs = this.deps.clock.now().getTime();
+    const result = await executor.execute({
+      baseUrl: input.baseUrl,
+      steps: flow.steps,
+      secretValues: input.secretValues,
+      expectedUrlPrefix: input.expectedUrlPrefix,
+      ...(input.proxyServer === undefined ? {} : { proxyServer: input.proxyServer }),
+    });
+    checkFlowDeadline(this.deps.clock.now().getTime() - startedAtMs);
+    if (result.authenticated) {
+      this.roleSessionCookies.set(input.role, { cookies: result.cookies, createdAt: this.deps.clock.now().toISOString() });
+    }
+    const cookieNames = result.cookies.map((cookie) => cookie.name);
+    const jar = this.roleRegistry.assignJar(input.role, cookieNames);
+    this.record({
+      type: 'LoginCompleted',
+      at: this.deps.clock.now().toISOString(),
+      role: input.role,
+      authenticated: result.authenticated,
+      secretReferences: flow.secretReferences,
+    });
+    return { role: input.role, authenticated: result.authenticated, finalUrl: result.finalUrl, cookieNames, sharedCookieNames: jar.shared };
+  }
+
   /** role ごとの session 状態 (cookie 名の一覧のみ。値は保持しない)。 */
-  listSessions(): readonly { role: string; flowVersion: string; stepCount: number; cookieNames: readonly string[]; sessionRevision: number }[] {
-    return [...this.loginFlows.keys()].map((role) => {
+  listSessions(): readonly { role: string; flowVersion: string; stepCount: number; cookieNames: readonly string[]; sessionRevision: number }[] {    return [...this.loginFlows.keys()].map((role) => {
       const flow = this.loginFlows.get(role);
       if (flow === undefined) {
         throw domainError('ValidationFailed', `login flow for ${role} is not registered`);
@@ -940,6 +999,22 @@ export class BaselineFlowService {
     if (input.maxDepth < 1) {
       throw domainError('ValidationFailed', 'maxDepth must be at least 1');
     }
+    // role 指定探索 (design/f09): runLogin 済み session のみ。cookie は探索の間だけ
+    // explorer へ渡し、記録・応答へは出さない。
+    let sessionCookies: readonly LoginSessionCookie[] | undefined;
+    if (input.role !== undefined) {
+      const session = this.roleSessionCookies.get(input.role);
+      if (session === undefined) {
+        throw domainError('ValidationFailed', `no session for role '${input.role}'; run login first`);
+      }
+      const sessionAware = this.deps.explorer as ExplorationPort & {
+        observeWithSession?: (url: string, session: { cookies: readonly LoginSessionCookie[] }) => Promise<PageObservation | null>;
+      };
+      if (typeof sessionAware.observeWithSession !== 'function') {
+        throw domainError('ValidationFailed', 'configured explorer does not support session observation');
+      }
+      sessionCookies = session.cookies;
+    }
 
     const runId = this.deps.ids.next('run');
     const planHash = planHashOf(plan);
@@ -983,7 +1058,12 @@ export class BaselineFlowService {
       }
 
       requests += 1;
-      const observed = await this.deps.explorer.observe(canonical);
+      const observed =
+        sessionCookies === undefined
+          ? await this.deps.explorer.observe(canonical)
+          : await (this.deps.explorer as ExplorationPort & {
+              observeWithSession: (url: string, session: { cookies: readonly LoginSessionCookie[] }) => Promise<PageObservation | null>;
+            }).observeWithSession(canonical, { cookies: sessionCookies });
       if (observed === null) {
         continue;
       }

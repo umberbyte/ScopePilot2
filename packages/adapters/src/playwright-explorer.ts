@@ -13,7 +13,8 @@ import { ScopePolicy } from '@scopepilot2/core';
 
 /** テスト差替え用の最小 browser 面 (playwright の該当部分に対応)。 */
 export interface StubBrowserContext {
-  newPage(): Promise<StubPage>;
+  /** session cookie を指定した観測 (observeWithSession 経由)。差替え実装は引数を無視できる。 */
+  newPage(cookies?: readonly BrowserCookie[]): Promise<StubPage>;
   close(): Promise<void>;
 }
 
@@ -37,15 +38,16 @@ export interface BrowserCookie {
 }
 
 /** 既定 launcher: playwright を動的 import して chromium を起動する。 */
-const createDefaultLauncher = (cookies?: readonly BrowserCookie[]): BrowserLauncher => {
+const createDefaultLauncher = (fixedCookies?: readonly BrowserCookie[]): BrowserLauncher => {
   return async () => {
     const playwright = await import('playwright');
     const browser = await playwright.chromium.launch();
     return {
-      newPage: async () => {
+      newPage: async (perCallCookies?: readonly BrowserCookie[]) => {
         const context = await browser.newContext();
-        if (cookies !== undefined && cookies.length > 0) {
-          // 認証済み session (design/f09) を探索に使う: cookie は context 単位で注入する。
+        // 構成時 cookie と呼出時 cookie (runLogin で得た session) を context へ注入する。
+        const cookies = [...(fixedCookies ?? []), ...(perCallCookies ?? [])];
+        if (cookies.length > 0) {
           await context.addCookies(cookies.map((cookie) => ({
             name: cookie.name,
             value: cookie.value,
@@ -108,12 +110,27 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
   }
 
   async observe(url: string): Promise<PageObservation | null> {
+    return await this.observeInternal(url, undefined);
+  }
+
+  /**
+   * 認証済み session での観測 (design/f09 の探索経路)。cookie は呼出ごとに context へ
+   * 注入し、adapter 自身には保持しない。scope 強制は observe と同じ入口で行う (Enforced)。
+   */
+  async observeWithSession(
+    url: string,
+    session: { readonly cookies: readonly { readonly name: string; readonly value: string; readonly domain: string; readonly path: string }[] },
+  ): Promise<PageObservation | null> {
+    return await this.observeInternal(url, session.cookies);
+  }
+
+  private async observeInternal(url: string, sessionCookies: readonly BrowserCookie[] | undefined): Promise<PageObservation | null> {
     // scope 強制は経路の入口でも行う (Enforced: ここは送信前)。
     if (!ScopePolicy.decide(this.scope, url).allowed) {
       return null;
     }
     const context = await this.ensureContext();
-    const page = await context.newPage();
+    const page = await context.newPage(sessionCookies);
     try {
       const response = await page.goto(url);
       if (response === null) {

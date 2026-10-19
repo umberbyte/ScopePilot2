@@ -6,12 +6,14 @@ import {
   InMemoryEvidenceStore,
   ScopePolicy,
   SequentialIdGenerator,
+  SystemClock,
   type ActiveScanEnginePort,
   type ExplorationPort,
 } from '@scopepilot2/core';
 import type { EngineCapabilitySnapshot, OperatorProfile, PlanConfirmation, ScanCandidate } from '@scopepilot2/contracts';
 import { ZapEngineAdapter } from '../src/zap-engine.ts';
 import { PlaywrightExplorerAdapter } from '../src/playwright-explorer.ts';
+import { PlaywrightLoginExecutor } from '../src/login-executor.ts';
 import { loginDvwaDirect, loginDvwaViaZapProxy } from './dvwa-login.ts';
 
 /**
@@ -164,6 +166,11 @@ const dvwaUsername = process.env['SCOPEPILOT_DVWA_USERNAME'] ?? '';
 const dvwaPassword = process.env['SCOPEPILOT_DVWA_PASSWORD'] ?? '';
 const gatedAuthenticated = dvwaBase !== '' && zapBaseUrl !== '' && dvwaUsername !== '' && dvwaPassword !== '' ? describe : describe.skip;
 
+/** ZAP daemon の proxy アドレス (API と同 port)。 */
+function zapProxyServer(): string {
+  return zapBaseUrl;
+}
+
 gatedAuthenticated('DVWA 認証付きワークフロー確認 (login → security Low → 探索・診断)', () => {
   test(
     'login session で認証後頁を探索し、ZAP も同じ session で診断できる',
@@ -300,4 +307,109 @@ gatedAuthenticated('DVWA 認証付きワークフロー確認 (login → securit
       }
     },
   );
+});
+
+/**
+ * 製品経路 (design/f09 §4) の実機確認: service の runLogin (実 PlaywrightLoginExecutor・
+ * ZAP proxy 経由) で session を作り、runExploration の role 指定で実 chromium 探索に
+ * session を渡す。harness (dvwa-login.ts) ではなく本体の port/adapter 経路であること
+ * が前 test との違い。
+ */
+gatedAuthenticated('DVWA 製品経路 login (f09) → role session 探索', () => {
+  test('runLogin (実 executor) → runExploration role 指定で認証後頁を探索できる', { timeout: 300_000 }, async () => {
+    const explorer = new PlaywrightExplorerAdapter({
+      scope: { allowedOrigins: [dvwaBase], deniedOrigins: [] },
+    });
+    const loginExecutor = new PlaywrightLoginExecutor();
+    try {
+      const zap = new ZapEngineAdapter({ baseUrl: zapBaseUrl, timeoutMs: 60_000 });
+      const zapVersion = await zap.resolvedVersion();
+      const enforced = {
+        preSendScopeEnforcement: 'Enforced',
+        stopControl: 'Enforced',
+        budgetLease: 'Enforced',
+        rateLimit: 'Enforced',
+      } as const;
+      const delegated = {
+        preSendScopeEnforcement: 'Delegated',
+        stopControl: 'Delegated',
+        budgetLease: 'Delegated',
+        rateLimit: 'Delegated',
+      } as const;
+      const capabilities: readonly EngineCapabilitySnapshot[] = [
+        { engineKind: 'playwright', engineVersion: explorer.engineVersion, source: 'measured', guaranteeLevels: enforced, maxOvershootRatio: 0, measuredAt: NOW },
+        { engineKind: 'zap', engineVersion: zapVersion, source: 'measured', guaranteeLevels: delegated, maxOvershootRatio: 0.05, measuredAt: NOW },
+      ];
+      const service = new BaselineFlowService({
+        clock: new SystemClock(),
+        ids: new SequentialIdGenerator(),
+        evidence: new InMemoryEvidenceStore(),
+        explorer: explorer as ExplorationPort,
+        scanEngine: zap as ActiveScanEnginePort,
+        capabilities,
+        runtimeBundleHash: 'acceptance-dvwa-login',
+        loginExecutor,
+      });
+      service.createCase(ACCEPTANCE_OPERATOR, {
+        name: 'dvwa-acceptance-login',
+        allowedOrigins: [dvwaBase],
+        deniedOrigins: [],
+        limits: { maxRequests: 1000, maxPages: 200, maxDurationMinutes: 20 },
+      });
+      await service.grantAuthorization(ACCEPTANCE_OPERATOR, {
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['admin'],
+        validFrom: '2026-10-19T00:00:00.000Z',
+        validUntil: '2026-10-21T00:00:00.000Z',
+        evidence: { label: '認可(DVWA製品経路login)', content: 'dvwa product-path login evidence' },
+      });
+
+      // 1. login flow 登録 (fill は秘密値の参照のみ) と runLogin (ZAP proxy 経由)。
+      service.registerLoginFlow(ACCEPTANCE_OPERATOR, {
+        role: 'admin',
+        flowVersion: 'dvwa-login-1',
+        steps: [
+          { kind: 'navigate', target: '/login.php' },
+          { kind: 'fill', target: "input[name='username']", secretReference: 'dvwa-username' },
+          { kind: 'fill', target: "input[name='password']", secretReference: 'dvwa-password' },
+          { kind: 'click', target: "input[name='Login']" },
+          { kind: 'assert', target: 'Welcome' },
+        ],
+      });
+      const login = await service.runLogin(ACCEPTANCE_OPERATOR, {
+        role: 'admin',
+        baseUrl: dvwaBase,
+        secretValues: { 'dvwa-username': dvwaUsername, 'dvwa-password': dvwaPassword },
+        expectedUrlPrefix: `${dvwaBase}/`,
+        proxyServer: zapProxyServer(),
+      });
+      assert.equal(login.authenticated, true, `login が認証済みにならない (finalUrl: ${login.finalUrl})`);
+      assert.ok(login.cookieNames.includes('PHPSESSID'));
+      // 監査には参照のみ (値が出ない)。値は JSON 内で quote されて現れるため
+      // quote 付きで検査する (参照名 'dvwa-password' が部分一致しないように)。
+      const eventsText = JSON.stringify(service.events());
+      assert.ok(eventsText.includes('LoginCompleted'));
+      assert.ok(!eventsText.includes(JSON.stringify(dvwaPassword)));
+
+      // 2. role 指定探索: runLogin の session で認証後 menu が見える。
+      const { plan } = service.buildExplorationPlan(ACCEPTANCE_OPERATOR, [`${dvwaBase}/index.php`, `${dvwaBase}/vulnerabilities/sqli/`], {
+        maxRequests: 150,
+        maxPages: 80,
+        maxDurationMinutes: 8,
+      });
+      service.authorizePlan(plan);
+      const confirmation: PlanConfirmation = service.confirmPlan(plan, ACCEPTANCE_OPERATOR);
+      const run = await service.runExploration(ACCEPTANCE_OPERATOR, plan, confirmation, { maxDepth: 2, role: 'admin' });
+      assert.equal(run.runRecord.stopReason, 'completed');
+      const urls = run.observations.map((observation) => observation.url);
+      assert.ok(urls.length >= 10, `観測が少なすぎる: ${urls.length}`);
+      assert.ok(urls.some((url) => url.includes('/vulnerabilities/')), `認証後 menu が発見できない: ${urls.join(' ')}`);
+      for (const observation of run.observations) {
+        assert.ok(observation.url.startsWith(`${dvwaBase}/`), `scope 外観測: ${observation.url}`);
+      }
+    } finally {
+      await explorer.close();
+      await loginExecutor.close();
+    }
+  });
 });

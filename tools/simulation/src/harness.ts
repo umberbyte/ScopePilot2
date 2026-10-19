@@ -8,7 +8,7 @@
  */
 import { BaselineFlowService } from '@scopepilot2/core';
 import { FixedClock, InMemoryEvidenceStore, SequentialIdGenerator } from '@scopepilot2/core';
-import type { ActiveScanEnginePort, Clock, ExplorationPort } from '@scopepilot2/core';
+import type { ActiveScanEnginePort, Clock, ExplorationPort, LoginExecutorPort } from '@scopepilot2/core';
 import type { EngineCapabilitySnapshot, OperatorProfile } from '@scopepilot2/contracts';
 import { FixtureExplorer } from './adapters/fixture-explorer.ts';
 import { FixtureZapEngine } from './adapters/fixture-zap.ts';
@@ -56,6 +56,7 @@ export interface HarnessOptions {
     readonly capabilities: readonly EngineCapabilitySnapshot[];
     readonly clock?: Clock;
     readonly runtimeBundleHash?: string;
+    readonly loginExecutor?: LoginExecutorPort;
   };
 }
 
@@ -73,6 +74,7 @@ export function createHarness(options: HarnessOptions = {}): SimulationHarness {
     scanEngine,
     capabilities,
     runtimeBundleHash,
+    ...(options.engines?.loginExecutor === undefined ? {} : { loginExecutor: options.engines.loginExecutor }),
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
     ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });

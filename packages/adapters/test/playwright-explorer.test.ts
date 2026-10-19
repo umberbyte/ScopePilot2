@@ -102,4 +102,32 @@ describe('Playwright explorer adapter (stub browser 契約検証)', () => {
     assert.deepEqual(observation?.links, [], '4xx は page 解析 (link 抽出) を行わない');
     await notFound.close();
   });
+
+  test('observeWithSession は session cookie を page 生成へ渡し、scope 強制も同じ入口で効く', async () => {
+    const receivedCookies: (readonly { name: string; value: string; domain: string; path: string }[] | undefined)[] = [];
+    const adapter = new PlaywrightExplorerAdapter({
+      scope: { allowedOrigins: ['http://fixture.target.test'], deniedOrigins: [] },
+      launcher: async () => ({
+        newPage: async (cookies?: readonly { name: string; value: string; domain: string; path: string }[]) => {
+          receivedCookies.push(cookies);
+          return stubPage({ url: 'http://fixture.target.test/authed', status: 200, contentType: 'text/html', title: 'Authed', hrefs: [] });
+        },
+        close: async () => undefined,
+      }),
+    });
+    const session = {
+      cookies: [{ name: 'PHPSESSID', value: 'sid-1', domain: 'fixture.target.test', path: '/' }],
+    };
+    const observation = await adapter.observeWithSession('http://fixture.target.test/authed', session);
+    assert.notEqual(observation, null);
+    assert.equal(observation?.title, 'Authed');
+    assert.deepEqual(receivedCookies, [session.cookies]);
+
+    // scope 外は session があっても送信前に拒否 (page を開かない)。
+    receivedCookies.length = 0;
+    const denied = await adapter.observeWithSession('http://elsewhere.example/authed', session);
+    assert.equal(denied, null);
+    assert.deepEqual(receivedCookies, []);
+    await adapter.close();
+  });
 });

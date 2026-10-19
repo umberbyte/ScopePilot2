@@ -129,6 +129,10 @@ export interface BootstrapOptions {
   readonly operatorPermissions?: readonly OperatorPermission[];
   readonly evidenceFailure?: boolean;
   readonly zapCapabilityVersion?: string;
+  /** login 実行器 (design/f09 の runLogin 検証用 fake を渡す)。 */
+  readonly loginExecutor?: import('../../../src/ports/engines.ts').LoginExecutorPort;
+  /** explorer 差替え (session 対応 explorer の検証用)。 */
+  readonly explorer?: import('../../../src/ports/engines.ts').ExplorationPort;
 }
 
 export interface TestFlow {
@@ -140,12 +144,12 @@ export interface TestFlow {
 
 /** 案件作成前の状態から使える service を組み立てる。 */
 export function createTestService(
-  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion'> & {
+  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'explorer'> & {
     runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
     caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
   } = {},
 ): TestFlow {
-  const explorer = new FakeExplorer();
+  const explorer = options.explorer ?? new FakeExplorer();
   const scanEngine = new FakeScanEngine();
   const service = new BaselineFlowService({
     clock: new FixedClock([TEST_NOW]),
@@ -155,6 +159,7 @@ export function createTestService(
     scanEngine,
     capabilities: testCapabilities(options.zapCapabilityVersion),
     runtimeBundleHash: 'test-runtime-bundle',
+    ...(options.loginExecutor === undefined ? {} : { loginExecutor: options.loginExecutor }),
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
     ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });
@@ -162,7 +167,8 @@ export function createTestService(
     ...TEST_OPERATOR,
     ...(options.operatorPermissions === undefined ? {} : { permissions: options.operatorPermissions }),
   };
-  return { service, explorer, scanEngine, operator };
+  // options.explorer 差替え時は FakeExplorer ではないため cast (TestFlow 型は既定構成の便宜)。
+  return { service, explorer: explorer as FakeExplorer, scanEngine, operator };
 }
 
 /** 案件作成と認可付与まで済ませた flow を組み立てる。 */

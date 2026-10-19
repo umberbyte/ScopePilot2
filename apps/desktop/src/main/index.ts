@@ -55,6 +55,7 @@ async function bootstrap(): Promise<void> {
             scanEngine: engines.scanEngine,
             capabilities: engines.capabilities,
             clock: new SystemClock(),
+            ...(engines.loginExecutor === undefined ? {} : { loginExecutor: engines.loginExecutor }),
             ...(engines.runtimeBundleHash === undefined ? {} : { runtimeBundleHash: engines.runtimeBundleHash }),
           },
         }),
