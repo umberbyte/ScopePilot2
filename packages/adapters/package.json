@@ -1,5 +1,16 @@
 {
   "name": "@scopepilot2/adapters",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "@scopepilot2/contracts": "*",
+    "@scopepilot2/core": "*",
+    "@scopepilot2/simulation": "*"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\""
+  }
 }
