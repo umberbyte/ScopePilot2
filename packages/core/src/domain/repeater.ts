@@ -63,10 +63,39 @@ export function applyEdit(draft: RepeaterDraft, edit: RequestEdit): { requestByt
   return { requestBytes, revision: draft.revision };
 }
 
+/** 送信時に適用する session cookie (design/08: F04/F05/F11 へ Cookie として適用)。 */
+export interface SessionCookieForSend {
+  readonly name: string;
+  readonly value: string;
+  readonly domain: string;
+  readonly path: string;
+}
+
 export interface SendCommand {
   readonly draftId: string;
   readonly revision: number;
   readonly planHash: string;
+  /** role session の cookie (指定時のみ)。実 adapter が要求へ付けて送る。 */
+  readonly sessionCookies?: readonly SessionCookieForSend[];
+}
+
+/**
+ * session cookie の適用判定 (design/08: 別 Origin への認証送信は拒否)。
+ * 対象 URL の host・path に一致する cookie だけを適用する (簡易 browser 規則:
+ * domain は host そのものか親 domain、path は前方一致。先頭 dot は無視)。
+ */
+export function applicableSessionCookies(
+  cookies: readonly SessionCookieForSend[],
+  targetUrl: string,
+): readonly SessionCookieForSend[] {
+  const target = new URL(targetUrl);
+  const host = target.hostname.toLowerCase();
+  return cookies.filter((cookie) => {
+    const domain = cookie.domain.toLowerCase().replace(/^\.+/, '');
+    const hostMatches = host === domain || host.endsWith(`.${domain}`);
+    const pathMatches = cookie.path === '/' || target.pathname.startsWith(cookie.path.endsWith('/') ? cookie.path : `${cookie.path}/`);
+    return hostMatches && pathMatches;
+  });
 }
 
 /** confirmation hash 不一致なら adapter を呼ばない (F04-UT-003)。 */
@@ -74,12 +103,13 @@ export async function sendCommand(
   draft: RepeaterDraft,
   confirmedPlanHash: string,
   adapter: { send(command: SendCommand): Promise<void> },
+  sessionCookies?: readonly SessionCookieForSend[],
 ): Promise<{ sent: boolean }> {
   const planHash = hashStable('scopepilot2.repeater.request', { bytes: draft.requestBytes, revision: draft.revision, target: draft.targetUrl });
   if (planHash !== confirmedPlanHash) {
     return { sent: false };
   }
-  await adapter.send({ draftId: draft.draftId, revision: draft.revision, planHash });
+  await adapter.send({ draftId: draft.draftId, revision: draft.revision, planHash, ...(sessionCookies === undefined ? {} : { sessionCookies }) });
   return { sent: true };
 }
 

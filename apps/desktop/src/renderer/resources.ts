@@ -68,6 +68,8 @@ export const strings = {
   'a06.requestPreview': '要求 (canonical):\n{requestBytes}',
   'a06.planHash': '計画 hash: {planHash}',
   'a06.send': 'この hash を確認して送信する',
+  'a06.sessionRoleLabel': '送信 session の role (任意・A09 で login 済みの role。空なら非認証)',
+  'a06.sessionApplied': '(session cookie 適用: {cookies})',
   'a06.sent': '送信しました ({outcome})。応答: {status} {contentType} ({bodyBytes} bytes)',
   'a06.notSent': '送信しませんでした: {reason}',
 

@@ -742,6 +742,84 @@ describe('Core API server (node:http)', () => {
       body: JSON.stringify({ targetUrl: 'http://elsewhere.example/', protocol: 'http/1.1' }),
     });
     assert.equal(outOfScope.status, 403);
+
+    // role 指定の送信 — session が必要なため専用 service で検証する (design/08)。
+    const executor = new (class implements LoginExecutorPort {
+      readonly engineVersion = 'it-login-1';
+      async execute(
+        input: LoginExecutionInput,
+      ): Promise<{ authenticated: boolean; finalUrl: string; cookies: readonly LoginSessionCookie[] }> {
+        assert.equal(input.secretValues['vault://admin-pass'], 'password123');
+        return { authenticated: true, finalUrl: 'http://fixture.target.test/', cookies: [{ name: 'PHPSESSID', value: 'it-session', domain: 'fixture.target.test', path: '/' }] };
+      }
+    })();
+    const roleFlow = createTestService({ loginExecutor: executor });
+    const roleServer = createCoreApiServer({ service: roleFlow.service, operator: TEST_OPERATOR });
+    let roleBase = '';
+    await new Promise<void>((resolve) => {
+      roleServer.listen(0, '127.0.0.1', () => {
+        const address = roleServer.address();
+        if (address !== null && typeof address !== 'string') {
+          roleBase = `http://127.0.0.1:${address.port}`;
+        }
+        resolve();
+      });
+    });
+    const rolePost = async (path: string, body: unknown): Promise<Response> =>
+      fetch(`${roleBase}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    try {
+      await rolePost('/api/case', {
+        name: 'repeater-role-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      });
+      await rolePost('/api/authorization', {
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['admin'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      });
+      await rolePost('/api/sessions/flows', {
+        role: 'admin',
+        flowVersion: 'f1',
+        steps: [
+          { kind: 'navigate', target: 'http://fixture.target.test/login.php' },
+          { kind: 'fill', target: '#u', secretReference: 'vault://admin-user' },
+          { kind: 'fill', target: '#p', secretReference: 'vault://admin-pass' },
+          { kind: 'click', target: 'input[type=submit]' },
+          { kind: 'assert', target: 'Welcome' },
+        ],
+      });
+      const login = await rolePost('/api/sessions/login', {
+        role: 'admin',
+        baseUrl: 'http://fixture.target.test',
+        expectedUrlPrefix: 'http://fixture.target.test/',
+        secretValues: { 'vault://admin-user': 'admin', 'vault://admin-pass': 'password123' },
+      });
+      assert.equal(login.status, 200);
+
+      const roleDraft = (await (await rolePost('/api/repeater/drafts', { targetUrl: 'http://fixture.target.test/page', protocol: 'http/1.1' })).json()) as { draft: { draftId: string; planHash: string } };
+      const roleSent = await rolePost('/api/repeater/send', { draftId: roleDraft.draft.draftId, confirmedPlanHash: roleDraft.draft.planHash, role: 'admin' });
+      assert.equal(roleSent.status, 200);
+      const roleSentBody = (await roleSent.json()) as { sent: boolean; sessionCookieNames?: readonly string[] };
+      assert.equal(roleSentBody.sent, true);
+      assert.deepEqual(roleSentBody.sessionCookieNames, ['PHPSESSID']);
+
+      // session の無い role は 400。
+      const ghost = await rolePost('/api/repeater/send', { draftId: roleDraft.draft.draftId, confirmedPlanHash: roleDraft.draft.planHash, role: 'ghost' });
+      assert.equal(ghost.status, 400);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        roleServer.close(() => {
+          resolve();
+        });
+        roleServer.closeAllConnections?.();
+        setTimeout(() => reject(new Error('role server close timeout')), 2000);
+      });
+    }
   });
 
   test('fuzzer は payload 登録と組合せ実行 (cluster 集約) を API 経路で扱う (design/f05)', async () => {

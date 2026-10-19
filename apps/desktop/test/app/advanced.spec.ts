@@ -274,6 +274,37 @@ test('A06: Repeater draft を編集し表示 hash で確認送信する', async 
   await page.getByRole('button', { name: 'この hash を確認して送信する' }).click();
   await expect(page.getByText(/送信しました \(responded\)/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/fixture response for/)).toBeVisible();
+
+  // role を指定した送信は session cookie を適用する (design/08・login は API で setup)。
+  await page.evaluate(async () => {
+    const base = (window as { scopepilotDesktop?: { apiBase: string } }).scopepilotDesktop?.apiBase ?? '';
+    const post = async (path: string, body: unknown): Promise<void> => {
+      const response = await fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!response.ok) {
+        throw new Error(`${path}: HTTP ${response.status}`);
+      }
+    };
+    await post('/api/sessions/flows', {
+      role: 'admin',
+      flowVersion: 'f1',
+      steps: [
+        { kind: 'navigate', target: 'http://fixture.target.test/login.php' },
+        { kind: 'fill', target: '#username', secretReference: 'vault://admin-user' },
+        { kind: 'fill', target: '#password', secretReference: 'vault://admin-pass' },
+        { kind: 'click', target: 'input[type=submit]' },
+        { kind: 'assert', target: 'Fixture Target Home' },
+      ],
+    });
+    await post('/api/sessions/login', {
+      role: 'admin',
+      baseUrl: 'http://fixture.target.test',
+      expectedUrlPrefix: 'http://fixture.target.test/',
+      secretValues: { 'vault://admin-user': 'fixture-user', 'vault://admin-pass': 'fixture-pass' },
+    });
+  });
+  await page.getByLabel('送信 session の role (任意・A09 で login 済みの role。空なら非認証)').fill('admin');
+  await page.getByRole('button', { name: 'この hash を確認して送信する' }).click();
+  await expect(page.getByText('(session cookie 適用: PHPSESSID)')).toBeVisible({ timeout: 30_000 });
 });
 
 test('A07: payload 集合を登録し fuzz を実行して cluster 集約を見る', async () => {

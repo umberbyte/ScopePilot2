@@ -431,7 +431,9 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return;
       }
       try {
-        const result = await service.sendRepeaterDraft(operator, stringField(body, 'draftId'), stringField(body, 'confirmedPlanHash'));
+        // role 指定時はその role の session cookie を適用する (design/08)。
+        const role = typeof body.role === 'string' ? stringField(body, 'role') : undefined;
+        const result = await service.sendRepeaterDraft(operator, stringField(body, 'draftId'), stringField(body, 'confirmedPlanHash'), role);
         return respondJson(response, 200, result);
       } catch (cause) {
         return respondDomainError(response, cause);

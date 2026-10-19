@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
+  applicableSessionCookies,
   applyEdit,
   DraftRegistry,
   recordSendAttempt,
@@ -22,6 +23,26 @@ function draft(registry: DraftRegistry, id = 'd1') {
     targetUrl: 'http://fixture.target.test/',
   });
 }
+
+describe('applicableSessionCookies (design/08: 別 Origin への認証送信は拒否)', () => {
+  test('対象 URL の host/path に一致する cookie だけを適用する', () => {
+    const cookies = [
+      { name: 'PHPSESSID', value: 'v1', domain: 'fixture.target.test', path: '/' },
+      { name: 'OTHER', value: 'v2', domain: 'elsewhere.example', path: '/' },
+      { name: 'PATHED', value: 'v3', domain: 'fixture.target.test', path: '/app/' },
+      { name: 'DOTED', value: 'v4', domain: '.fixture.target.test', path: '/' },
+    ];
+    assert.deepEqual(
+      applicableSessionCookies(cookies, 'http://fixture.target.test/app/page?q=1').map((cookie) => cookie.name),
+      ['PHPSESSID', 'PATHED', 'DOTED'],
+    );
+    // 親 domain への host 一致 (sub.fixture.target.test は fixture.target.test の cookie を適用)。
+    assert.deepEqual(
+      applicableSessionCookies(cookies, 'http://sub.fixture.target.test/other').map((cookie) => cookie.name),
+      ['PHPSESSID', 'DOTED'],
+    );
+  });
+});
 
 describe('RepeaterDraft', () => {
   test('[F04-UT-001] 21 tab 目の作成は拒否する', () => {

@@ -22,6 +22,7 @@ interface SendResult {
   readonly reason?: string;
   readonly attempt?: { attemptId: string; outcome: 'responded' | 'timeout' };
   readonly response?: { status: number; contentType: string; bodyBytes: number; bodyPreview?: string };
+  readonly sessionCookieNames?: readonly string[];
 }
 
 async function callJson<T>(apiBase: string, method: string, path: string, body?: unknown): Promise<T> {
@@ -47,6 +48,7 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
   const [drafts, setDrafts] = useState<readonly DraftView[]>([]);
   const [selected, setSelected] = useState<DraftView | null>(null);
   const [newTargetUrl, setNewTargetUrl] = useState('http://fixture.target.test/repeater');
+  const [sessionRole, setSessionRole] = useState('');
   const [headersText, setHeadersText] = useState('');
   const [bodyText, setBodyText] = useState('');
   const [sendResult, setSendResult] = useState<SendResult | null>(null);
@@ -116,9 +118,14 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
         if (selected === null) {
           return;
         }
-        setSendResult(await callJson<SendResult>(apiBase, 'POST', '/api/repeater/send', { draftId: selected.draftId, confirmedPlanHash }));
+        // role 指定時はその role の session cookie を適用する (design/08)。空なら非認証。
+        setSendResult(await callJson<SendResult>(apiBase, 'POST', '/api/repeater/send', {
+          draftId: selected.draftId,
+          confirmedPlanHash,
+          ...(sessionRole.trim() === '' ? {} : { role: sessionRole.trim() }),
+        }));
       }),
-    [apiBase, run, selected],
+    [apiBase, run, selected, sessionRole],
   );
 
   return (
@@ -163,6 +170,9 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
           </Button>
           <Text block style={{ whiteSpace: 'pre-wrap' }}>{t('a06.requestPreview', { requestBytes: selected.requestBytes })}</Text>
           <Text>{t('a06.planHash', { planHash: selected.planHash })}</Text>
+          <Field label={t('a06.sessionRoleLabel')}>
+            <Input value={sessionRole} onChange={(_, data) => setSessionRole(data.value)} />
+          </Field>
           <div className={styles.tabs}>
             <Button appearance="primary" disabled={busy} onClick={() => void send(selected.planHash)}>
               {t('a06.send')}
@@ -179,7 +189,10 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
             <div className={styles.section}>
               {sendResult.sent ? (
                 <>
-                  <Text role="status">{t('a06.sent', { outcome: sendResult.attempt?.outcome, status: sendResult.response?.status, contentType: sendResult.response?.contentType, bodyBytes: sendResult.response?.bodyBytes })}</Text>
+                  <Text role="status">
+                    {t('a06.sent', { outcome: sendResult.attempt?.outcome, status: sendResult.response?.status, contentType: sendResult.response?.contentType, bodyBytes: sendResult.response?.bodyBytes })}
+                    {sendResult.sessionCookieNames !== undefined ? ` ${t('a06.sessionApplied', { cookies: sendResult.sessionCookieNames.join(', ') || '—' })}` : ''}
+                  </Text>
                   {sendResult.response?.bodyPreview !== undefined && (
                     <Text block style={{ whiteSpace: 'pre-wrap' }}>
                       {sendResult.response.bodyPreview}

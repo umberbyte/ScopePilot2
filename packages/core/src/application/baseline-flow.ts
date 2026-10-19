@@ -78,6 +78,7 @@ import {
 } from '../domain/fuzzer.ts';
 import {
   DraftRegistry,
+  applicableSessionCookies,
   applyEdit,
   recordSendAttempt,
   renderInitialRequest,
@@ -712,16 +713,27 @@ export class BaselineFlowService {
    * draft の送信。UI が表示した plan hash と現在の hash が一致する場合だけ adapter へ渡す
    * (F04-UT-003)。応答は summary のみ返し、binary は text 化しない (F04-UT-006)。
    * timeout 相当は応答なし attempt として記録する (F04-UT-007)。
+   * role 指定時はその role の session cookie を適用する (design/08: F04 は Cookie 適用対象)。
+   * cookie は対象 URL の host/path に一致するものだけ (別 Origin への認証送信はしない)。
    */
   async sendRepeaterDraft(
     operator: OperatorProfile,
     draftId: string,
     confirmedPlanHash: string,
-  ): Promise<{ sent: boolean; reason?: string; attempt?: SendAttemptRecord; response?: ReturnType<typeof summarizeResponse> }> {
+    role?: string,
+  ): Promise<{ sent: boolean; reason?: string; attempt?: SendAttemptRecord; response?: ReturnType<typeof summarizeResponse>; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
     const draft = this.repeaterDrafts.get(draftId);
     if (draft === undefined) {
       throw domainError('ValidationFailed', `repeater draft ${draftId} does not exist`);
+    }
+    let appliedCookies: readonly LoginSessionCookie[] | undefined;
+    if (role !== undefined) {
+      const session = this.roleSessionCookies.get(role);
+      if (session === undefined) {
+        throw domainError('ValidationFailed', `no session for role '${role}'; run login first`);
+      }
+      appliedCookies = applicableSessionCookies([...session.cookies], draft.targetUrl);
     }
     const currentHash = hashStable('scopepilot2.repeater.request', { bytes: draft.requestBytes, revision: draft.revision, target: draft.targetUrl });
     const outcome = await sendCommand(draft, confirmedPlanHash, {
@@ -730,7 +742,7 @@ export class BaselineFlowService {
         this.repeaterSentCommands.push(command);
         this.recordObservedExchange({ url: draft.targetUrl, method: 'GET', status: 200, contentType: 'text/html' }, this.deps.clock.now().toISOString(), 'repeater');
       },
-    });
+    }, appliedCookies === undefined ? undefined : [...appliedCookies]);
     if (!outcome.sent) {
       return { sent: false, reason: 'confirmed plan hash does not match the current draft (revision が進んでいないか確認してください)' };
     }
@@ -741,6 +753,8 @@ export class BaselineFlowService {
       sent: true,
       attempt,
       response: summarizeResponse({ status: 200, headers: [['content-type', 'text/html']], body }),
+      // 適用した cookie は名前のみ応答に出す (値は出さない — F09-UT-006 と同一規則)。
+      ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
     };
   }
 
