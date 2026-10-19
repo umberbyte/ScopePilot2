@@ -16,7 +16,7 @@ function createWindow(apiBase: string): void {
     height: 800,
     title: 'ScopePilot2',
     webPreferences: {
-      preload: join(__dirname, 'preload.js'),
+      preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       additionalArguments: [`--scopepilot-api-base=${apiBase}`],

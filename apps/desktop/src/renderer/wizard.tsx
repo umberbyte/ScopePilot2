@@ -167,7 +167,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
         confirmation: scanConfirmation,
         adopted,
       });
-      await callApi(apiBase, 'POST', '/api/import/nuclei', { lines: [] });
+      await callApi(apiBase, 'POST', '/api/import/nuclei', { engineVersion: run.engineVersion, lines: [] });
       setFindings(run.findings);
       setRunSummary(`診断完了 (engine ${run.engineVersion}・overshoot 予約 ${run.overshootReservation} 件分): 所見 ${run.findings.length} 件`);
       setData((current) => ({ ...current, runFinished: true }));

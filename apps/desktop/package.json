@@ -2,25 +2,27 @@
   "name": "@scopepilot2/desktop",
   "private": true,
   "type": "module",
-  "main": "dist/main.js",
+  "main": "dist/main.cjs",
   "scripts": {
-    "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/main.js",
-    "build:preload": "esbuild src/preload/index.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.js",
+    "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/main.cjs",
+    "build:preload": "esbuild src/preload/index.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.cjs",
     "build:renderer": "esbuild src/renderer/index.tsx --bundle --format=iife --jsx=automatic --outfile=dist/renderer.js && esbuild src/renderer/index.html --loader:.html=copy --outfile=dist/index.html",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
     "start": "npm run build && electron .",
-    "test": "node --test \"test/unit/**/*.test.ts\""
+    "test": "node --test \"test/unit/**/*.test.ts\"",
+    "test:app": "npm run build && playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@scopepilot2/contracts": "*",
     "@scopepilot2/core": "*",
     "@scopepilot2/simulation": "*",
+    "@scopepilot2/ui": "*",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "electron": "^44.9.0",
     "esbuild": "^0.28.2",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "@scopepilot2/ui": "*"
+    "react-dom": "^19.3.1"
   }
 }
