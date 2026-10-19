@@ -11,6 +11,7 @@ import { advancedDefaultRoute, advancedNavItems, type AdvancedNavItem } from '@s
 import { revisionConflictDecision } from '@scopepilot2/ui';
 import type { AuthorizationRecord, CaseRecord, EngineCapabilitySnapshot, OperatorPermission, RunRecord } from '@scopepilot2/contracts';
 import { GuidelinesCatalogScreen } from './guidelines-catalog.tsx';
+import { t } from './resources.ts';
 import { SettingsScreen } from './settings-screen.tsx';
 import { DecoderComparerScreen } from './decoder-comparer-screen.tsx';
 import { ProxyInterceptScreen } from './proxy-intercept-screen.tsx';
@@ -84,7 +85,7 @@ function ScopeAuthorizationScreen({ apiBase }: { apiBase: string }): React.React
       setLimitsDraft(record.scope.limits);
     } catch {
       setCaseRecord(null);
-      setError('案件が未作成です。A01 で案件を作成してください。');
+      setError(t('a02.caseMissing'));
       return;
     }
     setError('');
@@ -118,8 +119,8 @@ function ScopeAuthorizationScreen({ apiBase }: { apiBase: string }): React.React
         limits: limitsDraft,
       });
       const invalidationNote =
-        outcome.invalidatedConfirmationIds.length > 0 ? `・確認 ${outcome.invalidatedConfirmationIds.length} 件を無効化` : '';
-      setSavedNote(`revision ${outcome.revision} で保存しました${invalidationNote}`);
+        outcome.invalidatedConfirmationIds.length > 0 ? t('a02.invalidated', { count: outcome.invalidatedConfirmationIds.length }) : '';
+      setSavedNote(t('a02.saved', { revision: outcome.revision, invalidation: invalidationNote }));
       await load();
     } catch (cause) {
       const code = (cause as { code?: string }).code;
@@ -135,7 +136,7 @@ function ScopeAuthorizationScreen({ apiBase }: { apiBase: string }): React.React
           latest !== null && caseRecord !== null
             ? revisionConflictDecision({ caseId: caseRecord.caseId, revision: caseRecord.revision }, { caseId: latest.caseId, revision: latest.revision })
             : undefined;
-        setConflict(decision?.message ?? `案件は別の操作で更新されています (${String(cause)})。再読込してください。`);
+        setConflict(decision?.message ?? t('a02.conflictFallback', { cause: String(cause) }));
       } else {
         setError(String(cause));
       }
@@ -148,37 +149,37 @@ function ScopeAuthorizationScreen({ apiBase }: { apiBase: string }): React.React
     return (
       <div className={styles.section}>
         <Text weight="semibold">Scope & Authorization</Text>
-        {error !== '' ? <MessageBar intent="error">{error}</MessageBar> : <Text>取得中…</Text>}
+        {error !== '' ? <MessageBar intent="error">{error}</MessageBar> : <Text>{t('common.loading')}</Text>}
       </div>
     );
   }
 
   return (
     <div className={styles.section}>
-      <Text weight="semibold">{`Scope (現在 revision ${caseRecord.revision})`}</Text>
-      <Field label="許可 Origin (1行1件)">
+      <Text weight="semibold">{t('a02.scopeTitle', { revision: caseRecord.revision })}</Text>
+      <Field label={t('a02.allowedLabel')}>
         <Textarea value={allowedDraft} onChange={(_, data) => setAllowedDraft(data.value)} rows={3} />
       </Field>
-      <Field label="禁止 Origin (1行1件)">
+      <Field label={t('a02.deniedLabel')}>
         <Textarea value={deniedDraft} onChange={(_, data) => setDeniedDraft(data.value)} rows={3} />
       </Field>
       <div className={styles.section}>
-        <Text>上限</Text>
-        <Field label="最大リクエスト数">
+        <Text>{t('a02.limitsTitle')}</Text>
+        <Field label={t('a02.maxRequestsLabel')}>
           <Input
             type="number"
             value={String(limitsDraft.maxRequests)}
             onChange={(_, data) => setLimitsDraft((current) => ({ ...current, maxRequests: Number(data.value) }))}
           />
         </Field>
-        <Field label="最大ページ数">
+        <Field label={t('a02.maxPagesLabel')}>
           <Input
             type="number"
             value={String(limitsDraft.maxPages)}
             onChange={(_, data) => setLimitsDraft((current) => ({ ...current, maxPages: Number(data.value) }))}
           />
         </Field>
-        <Field label="最大実行分">
+        <Field label={t('a02.maxDurationLabel')}>
           <Input
             type="number"
             value={String(limitsDraft.maxDurationMinutes)}
@@ -197,23 +198,23 @@ function ScopeAuthorizationScreen({ apiBase }: { apiBase: string }): React.React
           </MessageBar>
         )}
         <Button appearance="primary" disabled={busy} onClick={() => void save()}>
-          scope を保存する
+          {t('a02.save')}
         </Button>
         <Button disabled={busy} onClick={() => { setConflict(''); setSavedNote(''); void load(); }}>
-          再読込
+          {t('a02.reload')}
         </Button>
       </div>
       <Text weight="semibold">Authorization</Text>
       {authorization !== null ? (
         <>
-          <Text>{`認可: 付与済み (${authorization.validFrom} 〜 ${authorization.validUntil})`}</Text>
-          <Text className={styles.muted}>{`許可操作: ${authorization.allowedOperationClasses.join(', ')}`}</Text>
-          <Text className={styles.muted}>{`対象 role: ${authorization.targetRoles.join(', ')}`}</Text>
+          <Text>{t('a02.authzGranted', { validFrom: authorization.validFrom, validUntil: authorization.validUntil })}</Text>
+          <Text className={styles.muted}>{t('a02.authzOperations', { operations: authorization.allowedOperationClasses.join(', ') })}</Text>
+          <Text className={styles.muted}>{t('a02.authzRoles', { roles: authorization.targetRoles.join(', ') })}</Text>
         </>
       ) : authzMissing ? (
-        <Text>認可: 未付与 (A01 の案件作成で付与、または POST /api/authorization で付与)</Text>
+        <Text>{t('a02.authzMissing')}</Text>
       ) : (
-        <Text>取得中…</Text>
+        <Text>{t('common.loading')}</Text>
       )}
     </div>
   );
@@ -281,28 +282,28 @@ function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactE
   }, [apiBase]);
 
   const statusLabel = (status: string): string =>
-    ({ candidate: '候補 (未確認)', confirmed: '確定済み', rejected: '棄却済み', merged: '統合済み' })[status] ?? status;
+    ({ candidate: t('a11.status.candidate'), confirmed: t('a11.status.confirmed'), rejected: t('a11.status.rejected'), merged: t('a11.status.merged') })[status] ?? status;
 
   return (
     <div className={styles.section}>
-      <Text weight="semibold">{`所見 (${findings.length} 件)`}</Text>
+      <Text weight="semibold">{t('a11.findingsTitle', { count: findings.length })}</Text>
       {error !== '' && (
         <MessageBar intent="error">
           {`Error: ${error}`}
         </MessageBar>
       )}
       {findings.length === 0 ? (
-        loaded && <Text className={styles.muted}>所見はまだありません。診断の実行 (S06 / run/scan) 後に表示されます。</Text>
+        loaded && <Text className={styles.muted}>{t('a11.empty')}</Text>
       ) : (
-        <Table size="small" aria-label="所見一覧">
+        <Table size="small" aria-label={t('a11.table.aria')}>
           <TableHeader>
             <TableRow>
               <TableHeaderCell>severity</TableHeaderCell>
               <TableHeaderCell>title</TableHeaderCell>
               <TableHeaderCell>URL</TableHeaderCell>
-              <TableHeaderCell>観測</TableHeaderCell>
-              <TableHeaderCell>状態</TableHeaderCell>
-              <TableHeaderCell>操作</TableHeaderCell>
+              <TableHeaderCell>{t('a11.col.observations')}</TableHeaderCell>
+              <TableHeaderCell>{t('common.col.state')}</TableHeaderCell>
+              <TableHeaderCell>{t('common.col.actions')}</TableHeaderCell>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -313,9 +314,9 @@ function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactE
                 <TableCell>
                   {finding.url}
                   {finding.method === undefined ? '' : ` (${finding.method})`}
-                  {finding.source.unverified ? ' [実影響未確認]' : ''}
+                  {finding.source.unverified ? t('a11.unverified') : ''}
                 </TableCell>
-                <TableCell>{`${finding.occurrences} 回`}</TableCell>
+                <TableCell>{t('a11.occurrences', { count: finding.occurrences })}</TableCell>
                 <TableCell>{statusLabel(finding.status)}</TableCell>
                 <TableCell>
                   <Button
@@ -323,14 +324,14 @@ function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactE
                     disabled={busy || finding.status === 'confirmed' || finding.status === 'merged'}
                     onClick={() => void changeStatus(finding.findingId, 'confirmed')}
                   >
-                    確定
+                    {t('a11.confirm')}
                   </Button>
                   <Button
                     size="small"
                     disabled={busy || finding.status === 'rejected' || finding.status === 'merged'}
                     onClick={() => void changeStatus(finding.findingId, 'rejected')}
                   >
-                    棄却
+                    {t('a11.reject')}
                   </Button>
                 </TableCell>
               </TableRow>
@@ -340,7 +341,7 @@ function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactE
       )}
       <div className={styles.section}>
         <Button appearance="primary" disabled={busy} onClick={() => void generateReport()}>
-          報告書を生成する
+          {t('a11.generateReport')}
         </Button>
         {reportContent !== '' && <Text block>{reportContent}</Text>}
       </div>
@@ -374,13 +375,13 @@ function LimitsFields({
 }): React.ReactElement {
   return (
     <>
-      <Field label="最大リクエスト数 (空=既定)">
+      <Field label={t('a08.maxRequestsOptionalLabel')}>
         <Input type="number" value={values.maxRequests} onChange={(_, data) => onChange({ ...values, maxRequests: data.value })} />
       </Field>
-      <Field label="最大ページ数 (空=既定)">
+      <Field label={t('a08.maxPagesOptionalLabel')}>
         <Input type="number" value={values.maxPages} onChange={(_, data) => onChange({ ...values, maxPages: data.value })} />
       </Field>
-      <Field label="最大実行分 (空=既定)">
+      <Field label={t('a08.maxDurationOptionalLabel')}>
         <Input type="number" value={values.maxDurationMinutes} onChange={(_, data) => onChange({ ...values, maxDurationMinutes: data.value })} />
       </Field>
     </>
@@ -400,8 +401,8 @@ function limitsPayload(values: { maxRequests: string; maxPages: string; maxDurat
 
 function planSummaryLines(steps: readonly PlanStepView[], planHash: string): string {
   return steps
-    .map((step) => `${step.kind}: 対象 ${step.targetSnapshot.length} 件・上限 ${step.limits.maxRequests} req / ${step.limits.maxPages} page / ${step.limits.maxDurationMinutes} 分`)
-    .join('\n') + `\n計画 hash: ${planHash.slice(0, 16)}…`;
+    .map((step) => t('a08.planLine', { kind: step.kind, targets: step.targetSnapshot.length, maxRequests: step.limits.maxRequests, maxPages: step.limits.maxPages, maxDurationMinutes: step.limits.maxDurationMinutes }))
+    .join('\n') + t('a08.planHash', { hash: planHash.slice(0, 16) });
 }
 
 /** A08 Scan plans。探索・診断計画の構築 (上限編集) → 確認 → 実行を 1 画面で行う。 */
@@ -467,7 +468,7 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
         maxDepth: 5,
       });
       setCandidates(result.candidates);
-      setExploreResult(`探索完了: 観測 ${result.observations.length} 件・候補 ${result.candidates.length} 件・scope 外拒否 ${result.deniedUrls.length} 件`);
+      setExploreResult(t('a08.exploreDone', { observations: result.observations.length, candidates: result.candidates.length, denied: result.deniedUrls.length }));
     }), [apiBase, exploreConfirmation, explorePlan, run]);
 
   const buildScan = useCallback(() =>
@@ -501,57 +502,57 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
         confirmation: scanConfirmation,
         adopted: candidates,
       });
-      setScanResult(`診断完了 (engine ${result.engineVersion}): 所見 ${result.findings.length} 件 — A11 で確認できます`);
+      setScanResult(t('a08.scanDone', { engineVersion: result.engineVersion, findings: result.findings.length }));
     }), [apiBase, candidates, run, scanConfirmation, scanPlan]);
 
   return (
     <div className={styles.section}>
-      <Text weight="semibold">探索計画 (crawl)</Text>
+      <Text weight="semibold">{t('a08.exploreTitle')}</Text>
       {error !== '' && (
         <MessageBar intent="error">
           {`Error: ${error}`}
         </MessageBar>
       )}
-      <Field label="開始 URL (1行1件)">
+      <Field label={t('a08.seedsLabel')}>
         <Textarea value={seeds} onChange={(_, data) => setSeeds(data.value)} rows={2} />
       </Field>
       <LimitsFields values={exploreLimits} onChange={setExploreLimits} />
       <div className={styles.section}>
         <Button appearance="primary" disabled={busy} onClick={() => void buildExplore()}>
-          探索計画を構築する
+          {t('a08.buildExplore')}
         </Button>
         <Button disabled={busy || explorePlan === null} onClick={() => void confirmExplore()}>
-          探索計画を確認する
+          {t('a08.confirmExplore')}
         </Button>
         <Button disabled={busy || exploreConfirmation === null} onClick={() => void executeExplore()}>
-          探索を実行する
+          {t('a08.runExplore')}
         </Button>
       </div>
-      {explorePlan !== null && <Text block style={{ whiteSpace: 'pre-wrap' }}>{`計画:\n${planSummaryLines(explorePlan.steps, explorePlan.planHash)}`}</Text>}
-      {exploreConfirmation !== null && <Text>{`確認 ID: ${exploreConfirmation.confirmationId}`}</Text>}
+      {explorePlan !== null && <Text block style={{ whiteSpace: 'pre-wrap' }}>{t('a08.plan', { summary: planSummaryLines(explorePlan.steps, explorePlan.planHash) })}</Text>}
+      {exploreConfirmation !== null && <Text>{t('a08.confirmationId', { confirmationId: exploreConfirmation.confirmationId })}</Text>}
       {exploreResult !== '' && <Text>{exploreResult}</Text>}
 
-      <Text weight="semibold">診断計画 (active scan)</Text>
-      <Field label="対象 URL (1行1件・探索で観測済みの URL)">
+      <Text weight="semibold">{t('a08.scanTitle')}</Text>
+      <Field label={t('a08.targetsLabel')}>
         <Textarea value={targets} onChange={(_, data) => setTargets(data.value)} rows={3} />
       </Field>
       <Button disabled={busy || candidates.length === 0} onClick={() => setTargets(candidates.map((candidate) => candidate.url).join('\n'))}>
-        探索結果の候補をすべて対象に設定
+        {t('a08.adoptAll')}
       </Button>
       <LimitsFields values={scanLimits} onChange={setScanLimits} />
       <div className={styles.section}>
         <Button appearance="primary" disabled={busy} onClick={() => void buildScan()}>
-          診断計画を構築する
+          {t('a08.buildScan')}
         </Button>
         <Button disabled={busy || scanPlan === null} onClick={() => void confirmScan()}>
-          診断計画を確認する
+          {t('a08.confirmScan')}
         </Button>
         <Button disabled={busy || scanConfirmation === null || candidates.length === 0} onClick={() => void executeScan()}>
-          診断を実行する
+          {t('a08.runScan')}
         </Button>
       </div>
-      {scanPlan !== null && <Text block style={{ whiteSpace: 'pre-wrap' }}>{`計画:\n${planSummaryLines(scanPlan.steps, scanPlan.planHash)}`}</Text>}
-      {scanConfirmation !== null && <Text>{`確認 ID: ${scanConfirmation.confirmationId}`}</Text>}
+      {scanPlan !== null && <Text block style={{ whiteSpace: 'pre-wrap' }}>{t('a08.plan', { summary: planSummaryLines(scanPlan.steps, scanPlan.planHash) })}</Text>}
+      {scanConfirmation !== null && <Text>{t('a08.confirmationId', { confirmationId: scanConfirmation.confirmationId })}</Text>}
       {scanResult !== '' && <Text>{scanResult}</Text>}
     </div>
   );
@@ -595,29 +596,29 @@ function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   }, [apiBase]);
 
   const originLabel = (originType: ObservationView['originType']): string =>
-    originType === 'crawl' ? 'クロール' : '文書ヒント (未確認)';
+    originType === 'crawl' ? t('a04.origin.crawl') : t('a04.origin.documentHint');
 
   return (
     <div className={styles.section}>
-      <Text weight="semibold">{`観測済み page (${observations.length} 件)`}</Text>
+      <Text weight="semibold">{t('a04.pagesTitle', { count: observations.length })}</Text>
       {error !== '' && (
         <MessageBar intent="error">
           {`Error: ${error}`}
         </MessageBar>
       )}
       {observations.length === 0 ? (
-        loaded && <Text className={styles.muted}>観測はまだありません。A08 (または S03) で探索を実行すると表示されます。</Text>
+        loaded && <Text className={styles.muted}>{t('a04.empty')}</Text>
       ) : (
-        <Table size="small" aria-label="観測済み page 一覧">
+        <Table size="small" aria-label={t('a04.table.aria')}>
           <TableHeader>
             <TableRow>
               <TableHeaderCell>URL</TableHeaderCell>
               <TableHeaderCell>status</TableHeaderCell>
-              <TableHeaderCell>種別</TableHeaderCell>
+              <TableHeaderCell>{t('a04.col.contentType')}</TableHeaderCell>
               <TableHeaderCell>title</TableHeaderCell>
-              <TableHeaderCell>深さ</TableHeaderCell>
-              <TableHeaderCell>発見元</TableHeaderCell>
-              <TableHeaderCell>由来</TableHeaderCell>
+              <TableHeaderCell>{t('a04.col.depth')}</TableHeaderCell>
+              <TableHeaderCell>{t('a04.col.discoveredFrom')}</TableHeaderCell>
+              <TableHeaderCell>{t('a01.col.source')}</TableHeaderCell>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -628,48 +629,48 @@ function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
                 <TableCell>{observation.contentType}</TableCell>
                 <TableCell>{observation.title ?? ''}</TableCell>
                 <TableCell>{String(observation.depth)}</TableCell>
-                <TableCell>{observation.discoveredFrom ?? 'seed'}</TableCell>
+                <TableCell>{observation.discoveredFrom ?? t('a04.seed')}</TableCell>
                 <TableCell>{originLabel(observation.originType)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
-      <Text weight="semibold">{`scope 拒否 (${deniedUrls.length} 件)`}</Text>
+      <Text weight="semibold">{t('a04.deniedTitle', { count: deniedUrls.length })}</Text>
       {deniedUrls.length === 0 ? (
-        <Text className={styles.muted}>拒否された URL はありません。</Text>
+        <Text className={styles.muted}>{t('a04.deniedEmpty')}</Text>
       ) : (
         deniedUrls.map((denied) => (
           <Text key={denied.url} block>
-            {`${denied.url} — ${denied.reason}`}
+            {t('a04.deniedLine', { url: denied.url, reason: denied.reason })}
           </Text>
         ))
       )}
-      <Text weight="semibold">{`HTTP history (通信 ${traffic?.total ?? 0} 件)`}</Text>
+      <Text weight="semibold">{t('a04.trafficTitle', { count: traffic?.total ?? 0 })}</Text>
       {traffic === null ? (
-        <Text className={styles.muted}>取得中…</Text>
+        <Text className={styles.muted}>{t('common.loading')}</Text>
       ) : traffic.mode === 'summary' ? (
-        <Text className={styles.muted}>{`総数 ${traffic.total} 件は表示上限を超えるため、一覧ではなく endpoint 集約のみ表示します。`}</Text>
+        <Text className={styles.muted}>{t('a04.trafficSummary', { total: traffic.total })}</Text>
       ) : (traffic.entries ?? []).length === 0 ? (
-        <Text className={styles.muted}>通信記録はまだありません。</Text>
+        <Text className={styles.muted}>{t('a04.trafficEmpty')}</Text>
       ) : (
         <div className={styles.section}>
           {(traffic.entries ?? []).slice(0, 20).map((entry) => (
             <Text key={entry.exchangeId} block>
-              {`${entry.method} ${entry.url} → ${String(entry.status)} (${entry.contentType.split(';')[0]}・${entry.source})`}
+              {t('a04.trafficLine', { method: entry.method, url: entry.url, status: String(entry.status), contentType: entry.contentType.split(';')[0], source: entry.source })}
             </Text>
           ))}
-          {traffic.total > 20 ? <Text className={styles.muted}>{`…他 ${traffic.total - 20} 件 (上位 20 件のみ表示)`}</Text> : null}
+          {traffic.total > 20 ? <Text className={styles.muted}>{t('a04.trafficMore', { count: traffic.total - 20 })}</Text> : null}
         </div>
       )}
-      <Text weight="semibold">{`endpoint 集約 (${endpoints.length} 件・query は同一視)`}</Text>
+      <Text weight="semibold">{t('a04.endpointsTitle', { count: endpoints.length })}</Text>
       {endpoints.length === 0 ? (
-        <Text className={styles.muted}>集約される endpoint はまだありません。</Text>
+        <Text className={styles.muted}>{t('a04.endpointsEmpty')}</Text>
       ) : (
         <div className={styles.section}>
           {endpoints.slice(0, 15).map((endpoint) => (
             <Text key={endpoint.key} block>
-              {`${endpoint.method} ${endpoint.path} → ${String(endpoint.status)} (${endpoint.observedUrls} URL)`}
+              {t('a04.endpointLine', { method: endpoint.method, path: endpoint.path, status: String(endpoint.status), urls: endpoint.observedUrls })}
             </Text>
           ))}
         </div>
@@ -752,7 +753,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
   const activeItem = items.find((item) => item.route === activeRoute);
   return (
     <div className={styles.root}>
-      <nav className={styles.nav} aria-label="Advanced 画面ナビ">
+      <nav className={styles.nav} aria-label={t('nav.aria')}>
         {items.map((item) => (
           <button
             key={item.screenId}
@@ -776,32 +777,32 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {activeRoute === 'advanced.dashboard' && (
           <>
             <div className={styles.section}>
-              <Text weight="semibold">案件</Text>
+              <Text weight="semibold">{t('a01.caseTitle')}</Text>
               {caseRecord !== null ? (
                 <>
-                  <Text>{`案件「${caseRecord.name}」 (revision ${caseRecord.revision})`}</Text>
-                  <Text className={styles.muted}>{`対象 Origin: ${caseRecord.scope.allowedOrigins.join(', ')}`}</Text>
-                  <Text className={styles.muted}>{`上限: ${caseRecord.scope.limits.maxRequests} req / ${caseRecord.scope.limits.maxPages} page / ${caseRecord.scope.limits.maxDurationMinutes} 分`}</Text>
+                  <Text>{t('a01.caseRecord', { name: caseRecord.name, revision: caseRecord.revision })}</Text>
+                  <Text className={styles.muted}>{t('a01.allowedOrigins', { origins: caseRecord.scope.allowedOrigins.join(', ') })}</Text>
+                  <Text className={styles.muted}>{t('a01.limits', { maxRequests: caseRecord.scope.limits.maxRequests, maxPages: caseRecord.scope.limits.maxPages, maxDurationMinutes: caseRecord.scope.limits.maxDurationMinutes })}</Text>
                 </>
               ) : caseMissing ? (
                 <>
-                  <Text>案件が未作成です。</Text>
+                  <Text>{t('a01.caseMissing')}</Text>
                   <Button disabled={busy} onClick={() => void createCase()}>
-                    案件を作成する
+                    {t('a01.createCase')}
                   </Button>
                 </>
               ) : (
-                <Text>取得中…</Text>
+                <Text>{t('common.loading')}</Text>
               )}
             </div>
             <div className={styles.section}>
-              <Text weight="semibold">外部 engine 能力 (保証等級)</Text>
-              <Table size="small" aria-label="engine 能力表">
+              <Text weight="semibold">{t('a01.capabilitiesTitle')}</Text>
+              <Table size="small" aria-label={t('a01.capabilitiesTable.aria')}>
                 <TableHeader>
                   <TableRow>
                     <TableHeaderCell>engine</TableHeaderCell>
-                    <TableHeaderCell>版</TableHeaderCell>
-                    <TableHeaderCell>由来</TableHeaderCell>
+                    <TableHeaderCell>{t('common.col.version')}</TableHeaderCell>
+                    <TableHeaderCell>{t('a01.col.source')}</TableHeaderCell>
                     {CONTROL_ASPECTS.map((aspect) => (
                       <TableHeaderCell key={aspect}>{aspect}</TableHeaderCell>
                     ))}
@@ -813,7 +814,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
                       <TableCell>{cap.engineKind}</TableCell>
                       <TableCell>{cap.engineVersion}</TableCell>
                       <TableCell>
-                        {cap.source === 'fixture' ? 'fixture (実測ではない)' : 'measured'}
+                        {cap.source === 'fixture' ? t('a01.sourceFixture') : 'measured'}
                       </TableCell>
                       {CONTROL_ASPECTS.map((aspect) => (
                         <TableCell key={aspect}>{cap.guaranteeLevels[aspect]}</TableCell>
@@ -824,9 +825,9 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
               </Table>
             </div>
             <div className={styles.section}>
-              <Text weight="semibold">前回中断された run (design/22 §6)</Text>
+              <Text weight="semibold">{t('a01.interruptedTitle')}</Text>
               {interrupted.length === 0 ? (
-                <Text className={styles.muted}>ありません。実行中のまま残った run は検出されませんでした。</Text>
+                <Text className={styles.muted}>{t('a01.interruptedNone')}</Text>
               ) : (
                 interrupted.map((run) => (
                   <Badge key={run.runId} appearance="ghost">{`${run.runId}: ${run.state} (${run.stopReason ?? 'unknown'})`}</Badge>
@@ -837,13 +838,13 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         )}
         {activeRoute === 'advanced.jobs' && (
           <div className={styles.section}>
-            <Text weight="semibold">監査 event ({events.length} 件)</Text>
+            <Text weight="semibold">{t('audit.title', { count: events.length })}</Text>
             {events.length === 0 ? (
-              <Text className={styles.muted}>監査 event はまだありません。</Text>
+              <Text className={styles.muted}>{t('audit.empty')}</Text>
             ) : (
               events.map((event) => (
                 <Text key={event.eventId} block>
-                  {`#${event.eventId} ${event.type} ${event.at}`}
+                  {t('audit.line', { eventId: event.eventId, type: event.type, at: event.at })}
                 </Text>
               ))
             )}
@@ -861,7 +862,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {activeRoute === 'decoder' && <DecoderComparerScreen apiBase={apiBase} />}
         {activeRoute === 'settings' && <SettingsScreen apiBase={apiBase} />}
         {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'advanced.sessions' && (
-          <Text className={styles.muted}>この画面は未実装です (後続増分で提供します)。</Text>
+          <Text className={styles.muted}>{t('common.unimplemented')}</Text>
         )}
       </div>
     </div>
