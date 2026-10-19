@@ -193,6 +193,30 @@ test('A13: engine 能力の詳細 (overshoot・測定時刻・fixture hash) と�
   await expect(page.getByText(/AI provider は未設定です/)).toBeVisible();
 });
 
+test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができる', async () => {
+  await page.getByRole('button', { name: /A10 Decoder \/ Comparer/ }).click();
+
+  // base64 → url の chain 復号。
+  await page.getByLabel('入力 (text)').fill('SGVsbG8lMjAlMjZQaWxvdCE=');
+  await page.getByRole('button', { name: 'base64 を追加' }).click();
+  await page.getByRole('button', { name: 'url を追加' }).click();
+  await expect(page.getByText('chain: base64 → url')).toBeVisible();
+  await page.getByRole('button', { name: '復号する' }).click();
+  // base64 → url chain の結果は 'Hello &Pilot!' (base64 が %26 まで戻し、url が残りを戻す)。
+  await expect(page.getByText(/Hello &Pilot!/)).toBeVisible();
+
+  // テキスト比較: 1 行差分と provenance hash。
+  await page.getByLabel('左').fill('same\nfirst');
+  await page.getByLabel('右').fill('same\nsecond');
+  await page.getByRole('button', { name: '比較する' }).click();
+  await expect(page.getByText(/差分 1 行/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('cell', { name: 'first' })).toBeVisible();
+  await expect(page.getByText(/provenance: /)).toBeVisible();
+
+  // Sequencer は後続増分である旨の明示。
+  await expect(page.getByText(/乱数性解析は sample 収集機能と共に後続増分/)).toBeVisible();
+});
+
 test('未実装画面はプレースホルダで明示される (A05)', async () => {
   await page.getByRole('button', { name: /A05 Proxy \/ Intercept/ }).click();
   await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toBeVisible();

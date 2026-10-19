@@ -10,6 +10,7 @@ import type { Server } from 'node:http';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { DomainError, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
 import type { BaselineFlowService } from './baseline-flow.ts';
+import { CodecRegistry, compareText, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const HTTP_STATUS_BY_CODE: Record<DomainErrorCode, number> = {
@@ -259,6 +260,62 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         }
         const finding = service.updateFindingStatus(operator, { findingId, next: status });
         return respondJson(response, 200, { finding });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/tools/decode') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        // decoder は状態を持たない工具。権限は route と同じ case.read (design/02 §3)。
+        if (!operator.permissions.includes('case.read')) {
+          return respondError(response, 403, 'PermissionDenied', 'decoder requires case.read', false);
+        }
+        const inputText = stringField(body, 'inputText');
+        const codecs = stringArrayField(body, 'codecs');
+        if (codecs.length === 0) {
+          return respondError(response, 400, 'ValidationFailed', 'codecs must not be empty', false);
+        }
+        const registry = new CodecRegistry();
+        for (const name of codecs) {
+          if (!registry.has(name)) {
+            return respondError(response, 400, 'ValidationFailed', `unknown codec: ${name}`, false);
+          }
+        }
+        const output = transformPipeline(registry, Buffer.from(inputText, 'utf8'), codecs);
+        let outputText: string | undefined;
+        try {
+          outputText = new TextDecoder('utf-8', { fatal: true }).decode(output);
+        } catch {
+          // 有効な UTF-8 でない場合は base64 のみ返す (壊れた文字列を出さない)。
+        }
+        return respondJson(response, 200, {
+          ...(outputText === undefined ? {} : { outputText }),
+          outputBase64: output.toString('base64'),
+          outputBytes: output.length,
+        });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/tools/compare-text') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        if (!operator.permissions.includes('case.read')) {
+          return respondError(response, 403, 'PermissionDenied', 'comparer requires case.read', false);
+        }
+        const left = stringField(body, 'left');
+        const right = stringField(body, 'right');
+        const options: CompareOptions = body.normalizeNewlines === true ? { normalizeNewlines: true } : {};
+        const diff = compareText(left, right, options);
+        const provenance = provenanceOf(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'), options);
+        return respondJson(response, 200, { ...diff, provenance });
       } catch (cause) {
         return respondDomainError(response, cause);
       }

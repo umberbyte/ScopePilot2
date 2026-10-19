@@ -555,6 +555,47 @@ describe('Core API server (node:http)', () => {
 `));
   });
 
+  test('POST /api/tools/decode と /api/tools/compare-text は標準 codec と行差分を返す', async () => {
+    const decode = await fetch(`${baseUrl}/api/tools/decode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputText: Buffer.from('Hello, ScopePilot!', 'utf8').toString('base64'), codecs: ['base64'] }),
+    });
+    assert.equal(decode.status, 200);
+    const decoded = (await decode.json()) as { outputText: string; outputBytes: number };
+    assert.equal(decoded.outputText, 'Hello, ScopePilot!');
+
+    // codec chain (base64 → url) と未知 codec 拒否。
+    const chained = await fetch(`${baseUrl}/api/tools/decode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputText: Buffer.from(encodeURIComponent('a b&c'), 'utf8').toString('base64'), codecs: ['base64', 'url'] }),
+    });
+    assert.equal((await chained.json() as { outputText: string }).outputText, 'a b&c');
+    const unknown = await fetch(`${baseUrl}/api/tools/decode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputText: 'x', codecs: ['rot13'] }),
+    });
+    assert.equal(unknown.status, 400);
+
+    // 比較: 1 行差分と provenance hash。
+    const compare = await fetch(`${baseUrl}/api/tools/compare-text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ left: 'same\nfirst-diff', right: 'same\nsecond-diff' }),
+    });
+    assert.equal(compare.status, 200);
+    const diff = (await compare.json()) as {
+      equal: boolean;
+      differingLines: readonly { line: number; left: string; right: string }[];
+      provenance: { leftHash: string; rightHash: string };
+    };
+    assert.equal(diff.equal, false);
+    assert.deepEqual(diff.differingLines, [{ line: 2, left: 'first-diff', right: 'second-diff' }]);
+    assert.notEqual(diff.provenance.leftHash, diff.provenance.rightHash);
+  });
+
   test('GET /api/observations は site map 用の観測一覧と scope 拒否を返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',

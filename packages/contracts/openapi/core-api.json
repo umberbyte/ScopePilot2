@@ -477,6 +477,60 @@
           }
         }
       }
+    },
+    "/api/tools/decode": {
+      "post": {
+        "operationId": "decodeWithCodecs",
+        "summary": "codec chain による復号 (base64/url/hex/html-entity/gzip/deflate-raw。任意 code 実行なし)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecodeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/DecodeResult"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/tools/compare-text": {
+      "post": {
+        "operationId": "compareTexts",
+        "summary": "テキスト比較 (行差分 + 元 hash の provenance)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompareTextRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CompareTextResult"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2245,6 +2299,53 @@
           }
         },
         "additionalProperties": false
+      },
+      "DecodeRequest": {
+        "type": "object",
+        "required": [
+          "inputText",
+          "codecs"
+        ],
+        "properties": {
+          "inputText": {
+            "type": "string"
+          },
+          "codecs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "enum": [
+                "base64",
+                "url",
+                "hex",
+                "html-entity",
+                "gzip",
+                "deflate-raw"
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "CompareTextRequest": {
+        "type": "object",
+        "required": [
+          "left",
+          "right"
+        ],
+        "properties": {
+          "left": {
+            "type": "string"
+          },
+          "right": {
+            "type": "string"
+          },
+          "normalizeNewlines": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -2467,6 +2568,111 @@
                 }
               },
               "additionalProperties": false
+            }
+          }
+        }
+      },
+      "DecodeResult": {
+        "description": "decode result (UTF-8 として妥当な場合のみ outputText を含む)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "outputBase64",
+                "outputBytes"
+              ],
+              "properties": {
+                "outputText": {
+                  "type": "string"
+                },
+                "outputBase64": {
+                  "type": "string"
+                },
+                "outputBytes": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "CompareTextResult": {
+        "description": "text diff with provenance",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "equal",
+                "leftLineCount",
+                "rightLineCount",
+                "differingLines",
+                "provenance"
+              ],
+              "properties": {
+                "equal": {
+                  "type": "boolean"
+                },
+                "leftLineCount": {
+                  "type": "integer"
+                },
+                "rightLineCount": {
+                  "type": "integer"
+                },
+                "differingLines": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "line",
+                      "left",
+                      "right"
+                    ],
+                    "properties": {
+                      "line": {
+                        "type": "integer"
+                      },
+                      "left": {
+                        "type": "string"
+                      },
+                      "right": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "provenance": {
+                  "type": "object",
+                  "required": [
+                    "leftHash",
+                    "rightHash",
+                    "options"
+                  ],
+                  "properties": {
+                    "leftHash": {
+                      "type": "string"
+                    },
+                    "rightHash": {
+                      "type": "string"
+                    },
+                    "options": {
+                      "type": "object",
+                      "properties": {
+                        "normalizeNewlines": {
+                          "type": "boolean"
+                        },
+                        "ignoreHeaderOrder": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
             }
           }
         }
