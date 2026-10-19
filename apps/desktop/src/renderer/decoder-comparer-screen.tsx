@@ -1,7 +1,7 @@
 /**
- * A10 Decoder / Comparer / Sequencer。`docs/detailed-design/f06-decoder-comparer.md`。
+ * A10 Decoder / Comparer / Sequencer。`docs/detailed-design/f06-decoder-comparer.md`・f07。
  * 標準 codec の chain 復号とテキスト行差分 (+ provenance hash) を API 経由で提供する。
- * Sequencer (token 収集・乱数解析) は sample 収集機能と共に後続増分。
+
  */
 import React, { useCallback, useState } from 'react';
 import { MessageBar, Button, Checkbox, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
@@ -51,6 +51,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [right, setRight] = useState('');
   const [normalizeNewlines, setNormalizeNewlines] = useState(true);
   const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
+  const [sequencerTarget, setSequencerTarget] = useState('http://fixture.target.test/session-token');
+  const [sequencerSamples, setSequencerSamples] = useState('100');
+  const [sequencerResult, setSequencerResult] = useState<{ verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -77,6 +80,20 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       setBusy(false);
     }
   }, [apiBase, left, normalizeNewlines, right]);
+
+  const runSequencer = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    setSequencerResult(null);
+    try {
+      const samples = Number(sequencerSamples);
+      setSequencerResult(await callJson<{ verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number }>(apiBase, '/api/tools/sequencer/runs', { targetUrl: sequencerTarget, samples }));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, sequencerSamples, sequencerTarget]);
 
   return (
     <div className={styles.section}>
@@ -151,7 +168,27 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         </div>
       )}
       <Text weight="semibold">{t('a10.sequencerTitle')}</Text>
-      <Text className={styles.muted}>{t('a10.sequencerNote')}</Text>
+      <Text className={styles.muted}>{t('a10.sequencerIntro')}</Text>
+      <Field label={t('common.targetUrlInScope')}>
+        <Input value={sequencerTarget} onChange={(_, data) => setSequencerTarget(data.value)} />
+      </Field>
+      <Field label={t('a10.sequencerSamplesLabel')}>
+        <Input value={sequencerSamples} onChange={(_, data) => setSequencerSamples(data.value)} />
+      </Field>
+      <Button appearance="primary" disabled={busy} onClick={() => void runSequencer()}>
+        {t('a10.sequencerRun')}
+      </Button>
+      {sequencerResult !== null && (
+        <div className={styles.section}>
+          <Text role="status">{t('a10.sequencerResult', { verdict: sequencerResult.verdict, samples: sequencerResult.sampleCount, duplicates: sequencerResult.duplicates, missing: sequencerResult.missing })}</Text>
+          {sequencerResult.shannonEntropyBitsPerByte !== undefined && (
+            <Text className={styles.muted}>{t('a10.sequencerEntropy', { entropy: sequencerResult.shannonEntropyBitsPerByte, distinct: sequencerResult.distinctByteValues })}</Text>
+          )}
+          {sequencerResult.minimum !== undefined && (
+            <Text className={styles.muted}>{t('a10.sequencerInsufficient', { minimum: sequencerResult.minimum })}</Text>
+          )}
+        </div>
+      )}
     </div>
   );
 }

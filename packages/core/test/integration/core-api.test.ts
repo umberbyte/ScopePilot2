@@ -1114,6 +1114,31 @@ describe('Core API server (node:http)', () => {
     }
   });
 
+  test('tools/sequencer は token 統計を返し、token 原文を出さない (design/f07)', async () => {
+    const run = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 40 }),
+    });
+    assert.equal(run.status, 200);
+    const result = (await run.json()) as { verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number };
+    assert.equal(result.verdict, 'assessed');
+    assert.equal(result.sampleCount, 40);
+    assert.equal(JSON.stringify(result).includes('token=sample-'), false, 'token 原文は応答に出ない');
+
+    const boundary = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/x', samples: 10 }),
+    });
+    assert.equal(boundary.status, 400);
+
+    const list = (await (await fetch(`${baseUrl}/api/tools/sequencer/runs`)).json()) as { sessions: readonly { sessionId: string }[] };
+    assert.ok(list.sessions.length >= 1);
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /SequencerSessionCompleted/);
+  });
+
   test('documents/hints は hint を登録し、探索計画と観測の由来へ統合する (AGENTS.md)', async () => {
     const post = async (path: string, body: unknown): Promise<Response> =>
       fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

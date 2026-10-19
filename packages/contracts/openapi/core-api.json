@@ -1613,6 +1613,195 @@
         }
       }
     },
+    "/api/tools/sequencer/runs": {
+      "get": {
+        "operationId": "listSequencerSessions",
+        "summary": "Sequencer session の一覧 (統計のみ・token 原文は保持しない)",
+        "responses": {
+          "200": {
+            "description": "sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "sessions"
+                  ],
+                  "properties": {
+                    "sessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "sessionId",
+                          "targetUrl",
+                          "verdict",
+                          "sampleCount",
+                          "duplicates",
+                          "missing",
+                          "executedAt"
+                        ],
+                        "properties": {
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "targetUrl": {
+                            "type": "string"
+                          },
+                          "verdict": {
+                            "type": "string",
+                            "enum": [
+                              "assessed",
+                              "insufficient"
+                            ],
+                            "description": "insufficient は断定せず sample 不足を示す (F07-UT-005)"
+                          },
+                          "sampleCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "duplicates": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "missing": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "shannonEntropyBitsPerByte": {
+                            "type": "number",
+                            "description": "assessed 時のみ。暗号学的安全性は断定しない"
+                          },
+                          "distinctByteValues": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "assessed 時のみ"
+                          },
+                          "minimum": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "insufficient 時のみ (必要な最小 sample 数)"
+                          },
+                          "executedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "runSequencerSession",
+        "summary": "token sample を収集して乱数性の統計を返す (design/f07)。token 原文は応答に出さない",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetUrl",
+                  "samples"
+                ],
+                "properties": {
+                  "targetUrl": {
+                    "type": "string"
+                  },
+                  "samples": {
+                    "type": "integer",
+                    "minimum": 30,
+                    "maximum": 10000,
+                    "description": "最小 30・最大 10000 (F07-UT-001)"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "session result (統計のみ)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "targetUrl": {
+                      "type": "string"
+                    },
+                    "verdict": {
+                      "type": "string",
+                      "enum": [
+                        "assessed",
+                        "insufficient"
+                      ],
+                      "description": "insufficient は断定せず sample 不足を示す (F07-UT-005)"
+                    },
+                    "sampleCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "duplicates": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "missing": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "shannonEntropyBitsPerByte": {
+                      "type": "number",
+                      "description": "assessed 時のみ。暗号学的安全性は断定しない"
+                    },
+                    "distinctByteValues": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "assessed 時のみ"
+                    },
+                    "minimum": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "insufficient 時のみ (必要な最小 sample 数)"
+                    },
+                    "executedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "sessionId",
+                    "targetUrl",
+                    "verdict",
+                    "sampleCount",
+                    "duplicates",
+                    "missing"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/documents/auth-hints": {
       "get": {
         "operationId": "listDocumentAuthHints",
@@ -3610,6 +3799,9 @@
             "$ref": "#/components/schemas/DocumentAuthHintsRegisteredEvent"
           },
           {
+            "$ref": "#/components/schemas/SequencerSessionCompletedEvent"
+          },
+          {
             "$ref": "#/components/schemas/ReportGeneratedEvent"
           }
         ]
@@ -4102,6 +4294,53 @@
           "entryCount": {
             "type": "integer",
             "minimum": 1
+          }
+        }
+      },
+      "SequencerSessionCompletedEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "sessionId",
+          "targetUrl",
+          "verdict",
+          "sampleCount",
+          "duplicates",
+          "missing"
+        ],
+        "properties": {
+          "type": {
+            "const": "SequencerSessionCompleted"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "targetUrl": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "assessed",
+              "insufficient"
+            ]
+          },
+          "sampleCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duplicates": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "missing": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },

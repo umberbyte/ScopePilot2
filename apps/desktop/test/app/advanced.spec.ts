@@ -265,8 +265,16 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await expect(page.getByRole('cell', { name: 'first' })).toBeVisible();
   await expect(page.getByText(/provenance: /)).toBeVisible();
 
-  // Sequencer は後続増分である旨の明示。
-  await expect(page.getByText(/乱数性解析は sample 収集機能と共に後続増分/)).toBeVisible();
+  // Sequencer: sample を収集して統計が返る (token 原文は出ない)。
+  await page.getByLabel('sample 数 (30〜10000)').fill('40');
+  await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
+  await expect(page.getByText(/結果: assessed \(sample 40・重複 0・欠落 0\)/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/entropy [\d.]+ bits\/byte・出現 byte 種 \d+/)).toBeVisible();
+
+  // 固定 token の対象は重複が増える。
+  await page.getByLabel('対象 URL (scope 内)').fill('http://fixture.target.test/fixed-token');
+  await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
+  await expect(page.getByText(/結果: assessed \(sample 40・重複 39・欠落 0\)/)).toBeVisible({ timeout: 30_000 });
 });
 
 test('A05: break queue の受付・転送・破棄と対象外 URL の拒否を扱う', async () => {

@@ -114,7 +114,13 @@ export const strings = {
   'a10.col.line': '行',
   'a10.provenance': 'provenance: 左 {leftHash}… / 右 {rightHash}…',
   'a10.sequencerTitle': 'Sequencer',
-  'a10.sequencerNote': 'token 収集と乱数性解析は sample 収集機能と共に後続増分で提供します (design/f07)。',
+  'a10.sequencerIntro':
+    '対象 URL から token sample を収集して乱数性の統計を返します (design/f07)。統計は観測に対するもので、暗号学的安全性は断定しません。token 原文は保持しません。fixture は URL に fixed を含めると毎回同一 token (低 entropy の実演)・no-token を含めると欠落混入になります。',
+  'a10.sequencerSamplesLabel': 'sample 数 (30〜10000)',
+  'a10.sequencerRun': 'sample を収集して解析する',
+  'a10.sequencerResult': '結果: {verdict} (sample {samples}・重複 {duplicates}・欠落 {missing})',
+  'a10.sequencerEntropy': 'entropy {entropy} bits/byte・出現 byte 種 {distinct}',
+  'a10.sequencerInsufficient': 'sample 不足のため断定しません (最小 {minimum} 件が必要)。',
 
   'a05.intro':
     '実 proxy listener (通信傍受・転送本体) は実 engine 接続と共に後続増分です。ここでは break queue への受付と判断 (forward / drop) を扱います。deadline 経過・queue 上限は既定で drop し、暗黙 forward はしません。',

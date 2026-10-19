@@ -91,6 +91,7 @@ import {
   type SendAttemptRecord,
 } from '../domain/repeater.ts';
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
+import { assess, createSamplePlan, extractToken, reportProjection, SampleCollector } from '../domain/sequencer.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
 import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, LoginSessionCookie } from '../ports/engines.ts';
@@ -204,6 +205,9 @@ export class BaselineFlowService {
   private readonly payloadSetNames: string[] = [];
   private readonly payloadRegistrations = new Map<string, PayloadSetRegistration>();
   private readonly fuzzRuns: readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] = [];
+
+  /** Sequencer session の台帳 (design/f07)。token 原文は保存しない (統計のみ)。 */
+  private readonly sequencerSessions: readonly { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; executedAt: string }[] = [];
 
   /** Repeater の draft 台帳 (design/f04)。tab 上限は domain (20)。 */
   private readonly repeaterDrafts = new DraftRegistry();
@@ -706,6 +710,69 @@ export class BaselineFlowService {
 
   listFuzzRuns(): readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] {
     return [...this.fuzzRuns];
+  }
+
+  /**
+   * Sequencer session の実行 (design/f07)。sample 数は domain 検証 (30..10000)。
+   * fixture adapter は対象 URL から決定的な token 応答を作る (URL に fixed が
+   * 含まれる場合は毎回同一 token = 低 entropy・重複の実演、no-token は欠落混入)。
+   * token 原文は応答・監査・台帳のいずれにも出さない (F07-UT-006)。
+   */
+  runSequencerSession(
+    operator: OperatorProfile,
+    input: { readonly targetUrl: string; readonly samples: number },
+  ): { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number } {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
+    const decision = ScopePolicy.decide(caseRecord.scope, canonical);
+    if (!decision.allowed) {
+      throw domainError('OutOfScope', `sequencer target is out of scope: ${decision.reason}`);
+    }
+    const plan = createSamplePlan(input.samples);
+    const collector = new SampleCollector();
+    const pattern = /token=([A-Za-z0-9_-]+)/;
+    for (let index = 0; index < plan.target; index += 1) {
+      let body: string;
+      if (canonical.includes('no-token') && index % 5 === 4) {
+        body = 'no token in this response';
+      } else if (canonical.includes('fixed')) {
+        body = 'token=fixed-token-value';
+      } else {
+        body = `token=sample-${index.toString(36)}-${(index * 7 + 3).toString(36)}`;
+      }
+      collector.record(extractToken({ body }, pattern));
+    }
+    const collection = collector.snapshot();
+    const projection = reportProjection(collection);
+    const assessment = assess(collection.tokens);
+    const sessionId = this.deps.ids.next('seq');
+    const verdict = assessment.verdict;
+    const record = {
+      sessionId,
+      targetUrl: canonical,
+      verdict,
+      ...projection,
+      ...(verdict === 'assessed' ? { shannonEntropyBitsPerByte: assessment.entropy.shannonEntropyBitsPerByte, distinctByteValues: assessment.entropy.distinctByteValues } : { minimum: assessment.minimum }),
+      executedAt: this.deps.clock.now().toISOString(),
+    };
+    (this.sequencerSessions as typeof record[]).push(record);
+    this.record({
+      type: 'SequencerSessionCompleted',
+      at: record.executedAt,
+      sessionId,
+      targetUrl: canonical,
+      verdict,
+      sampleCount: projection.sampleCount,
+      duplicates: projection.duplicates,
+      missing: projection.missing,
+    });
+    const { executedAt: _executedAt, ...result } = record;
+    return result;
+  }
+
+  listSequencerSessions(): readonly { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; executedAt: string }[] {
+    return [...this.sequencerSessions];
   }
 
   /** draft の表示形 (UI 確認用に plan hash を添える)。 */
