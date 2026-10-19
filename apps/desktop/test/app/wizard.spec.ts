@@ -77,3 +77,31 @@ test('S07: 報告書を生成して限界開示を含む', async () => {
   await expect(page.getByText(/診断報告書/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/送信前に拒否できない/)).toBeVisible();
 });
+
+test('戻るで前の step に戻り、達成済み要件は保持される (state machine)', async () => {
+  const back = page.getByRole('button', { name: /戻る/ });
+  // S07 → S06 → S05 → S04 まで戻る。
+  await back.click();
+  await expect(page.getByText('S06 実行状況').nth(1)).toBeVisible();
+  await back.click();
+  await expect(page.getByText('S05 実行計画の最終確認').nth(1)).toBeVisible();
+  await back.click();
+  await expect(page.getByText('S04 探索結果から対象選定').nth(1)).toBeVisible();
+  // 採用済みのため次へは有効のまま (要件の再達成は求めない)。
+  await expect(page.getByRole('button', { name: /次へ/ })).toBeEnabled();
+  // そのまま S07 まで進み直せる。
+  await page.getByRole('button', { name: /次へ/ }).click();
+  await page.getByRole('button', { name: /次へ/ }).click();
+  await page.getByRole('button', { name: /次へ/ }).click();
+  await expect(page.getByText('S07 結果レビュー・報告').nth(1)).toBeVisible();
+  // 生成済みの報告書は step を行き来しても保持される (button は再表示されない)。
+  await expect(page.getByText(/診断報告書/)).toBeVisible({ timeout: 30_000 });
+});
+
+test('モード切替を挟んでも wizard の状態は保持される (mount 維持)', async () => {
+  await page.getByRole('button', { name: 'アドバンスド' }).click();
+  await expect(page.getByRole('navigation', { name: 'Advanced 画面ナビ' })).toBeVisible();
+  await page.getByRole('button', { name: 'シンプル' }).click();
+  // S07 の内容がそのまま残る (wizard は隠すだけで unmount しない)。
+  await expect(page.getByText(/診断報告書/)).toBeVisible({ timeout: 30_000 });
+});
