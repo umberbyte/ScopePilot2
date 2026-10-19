@@ -39,6 +39,57 @@ export const strings = {
   'wizard.nav.back': '戻る',
   'wizard.nav.next': '次へ',
   'wizard.nav.nextBlocked': '(要件未達)',
+
+  'common.targetUrlInScope': '対象 URL (scope 内)',
+  'common.error': 'Error: {message}',
+
+  'a13.title': '外部 engine (能力・版・開示)',
+  'a13.guaranteeLegend':
+    '保証等級 — Enforced: ScopePilot が送信前に保証 / Delegated: 外部 engine への委譲 (入力制限・事後検知・停止で担保、送信前拒否は保証しない) / Unsupported: 当該機能を公開しない',
+  'a13.table.aria': 'engine 能力詳細',
+  'a13.col.version': '版',
+  'a13.col.source': '由来',
+  'a13.col.overshoot': 'overshoot 上限比',
+  'a13.col.measuredAt': '測定時刻',
+  'a13.col.fixtureHash': 'fixture hash',
+  'a13.sourceFixture': 'fixture (実測ではない)',
+  'a13.certificates.title': '証明書',
+  'a13.certificates.note': '診断用 CA 証明書の発行と信頼設定は実 engine 接続 (HTTPS 解析) と共に後続増分で提供します (design/24)。',
+  'a13.ai.title': 'AI 支援',
+  'a13.ai.note':
+    'AI provider は未設定です。提案 (CaseSetup・RequestDraft・FindingDraft 等) は drawer 経由で出典・model・生成時刻・差分付きで提示し、明示採用まで状態を変更しません (design/02 §5)。',
+
+  'a06.intro':
+    'draft は tab として最大 20 件。編集のたびに revision と計画 hash が進み、画面に表示した hash と一致するときだけ送信します (編集後の古い hash では送信されません)。応答は summary のみ (binary は text 化しません)。',
+  'a06.create': '新規 draft を作る',
+  'a06.headersLabel': 'headers (1行1件・Name: Value)',
+  'a06.bodyLabel': 'body',
+  'a06.apply': '編集を適用する',
+  'a06.requestPreview': '要求 (canonical):\n{requestBytes}',
+  'a06.planHash': '計画 hash: {planHash}',
+  'a06.send': 'この hash を確認して送信する',
+  'a06.sent': '送信しました ({outcome})。応答: {status} {contentType} ({bodyBytes} bytes)',
+  'a06.notSent': '送信しませんでした: {reason}',
+
+  'a07.intro':
+    '組合せ総数が上限 (案件上限と 200 の小さい方) を超えると送信前に拒否されます。応答は (status・長さ・hash) ごとに cluster 集約し、全体の一覧は表示しません。rate は 2 req/s 既定 (仮想時計で進めます)。',
+  'a07.payloadTitle': 'payload 集合 (供給元・版・license が必須)',
+  'a07.field.name': '名前',
+  'a07.field.source': '供給元 (source)',
+  'a07.field.version': '版',
+  'a07.field.license': 'license',
+  'a07.field.values': '値 (1行1件)',
+  'a07.register': 'payload 集合を登録する',
+  'a07.registered': '登録済み: {sets}',
+  'a07.setSummary': '{name} ({source} {version}・{license}・{count} 件)',
+  'a07.runTitle': 'fuzz 実行',
+  'a07.positionsLabel': 'positions (1行1件・name: 値, 値, …)',
+  'a07.run': 'fuzz を実行する',
+  'a07.result': '{runId}: 組合せ {total} 件中 {sent} 件送信 → {clusters} cluster',
+  'a07.table.aria': '応答 cluster',
+  'a07.col.key': 'cluster (status|bytes|hash)',
+  'a07.col.count': '応答数',
+  'a07.col.representative': '代表組合せ',
 } as const;
 
 export type StringKey = keyof typeof strings;

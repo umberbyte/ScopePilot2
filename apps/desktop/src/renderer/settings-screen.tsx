@@ -7,6 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import { MessageBar, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, tokens } from '@fluentui/react-components';
 import type { EngineCapabilitySnapshot } from '@scopepilot2/contracts';
+import { t } from './resources.ts';
 
 const CONTROL_ASPECTS = ['preSendScopeEnforcement', 'stopControl', 'budgetLease', 'rateLimit'] as const;
 
@@ -41,27 +42,25 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
 
   return (
     <div className={styles.section}>
-      <Text weight="semibold">外部 engine (能力・版・開示)</Text>
+      <Text weight="semibold">{t('a13.title')}</Text>
       {error !== '' && (
         <MessageBar intent="error">
           {`Error: ${error}`}
         </MessageBar>
       )}
-      <Text className={styles.muted}>
-        保証等級 — Enforced: ScopePilot が送信前に保証 / Delegated: 外部 engine への委譲 (入力制限・事後検知・停止で担保、送信前拒否は保証しない) / Unsupported: 当該機能を公開しない
-      </Text>
-      <Table size="small" aria-label="engine 能力詳細">
+      <Text className={styles.muted}>{t('a13.guaranteeLegend')}</Text>
+      <Table size="small" aria-label={t('a13.table.aria')}>
         <TableHeader>
           <TableRow>
             <TableHeaderCell>engine</TableHeaderCell>
-            <TableHeaderCell>版</TableHeaderCell>
-            <TableHeaderCell>由来</TableHeaderCell>
+            <TableHeaderCell>{t('a13.col.version')}</TableHeaderCell>
+            <TableHeaderCell>{t('a13.col.source')}</TableHeaderCell>
             {CONTROL_ASPECTS.map((aspect) => (
               <TableHeaderCell key={aspect}>{aspect}</TableHeaderCell>
             ))}
-            <TableHeaderCell>overshoot 上限比</TableHeaderCell>
-            <TableHeaderCell>測定時刻</TableHeaderCell>
-            <TableHeaderCell>fixture hash</TableHeaderCell>
+            <TableHeaderCell>{t('a13.col.overshoot')}</TableHeaderCell>
+            <TableHeaderCell>{t('a13.col.measuredAt')}</TableHeaderCell>
+            <TableHeaderCell>{t('a13.col.fixtureHash')}</TableHeaderCell>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -69,7 +68,7 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
             <TableRow key={`${capability.engineKind}-${capability.engineVersion}`}>
               <TableCell>{capability.engineKind}</TableCell>
               <TableCell>{capability.engineVersion}</TableCell>
-              <TableCell>{capability.source === 'fixture' ? 'fixture (実測ではない)' : 'measured'}</TableCell>
+              <TableCell>{capability.source === 'fixture' ? t('a13.sourceFixture') : 'measured'}</TableCell>
               {CONTROL_ASPECTS.map((aspect) => (
                 <TableCell key={aspect}>{capability.guaranteeLevels[aspect]}</TableCell>
               ))}
@@ -80,12 +79,10 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
           ))}
         </TableBody>
       </Table>
-      <Text weight="semibold">証明書</Text>
-      <Text className={styles.muted}>診断用 CA 証明書の発行と信頼設定は実 engine 接続 (HTTPS 解析) と共に後続増分で提供します (design/24)。</Text>
-      <Text weight="semibold">AI 支援</Text>
-      <Text className={styles.muted}>
-        AI provider は未設定です。提案 (CaseSetup・RequestDraft・FindingDraft 等) は drawer 経由で出典・model・生成時刻・差分付きで提示し、明示採用まで状態を変更しません (design/02 §5)。
-      </Text>
+      <Text weight="semibold">{t('a13.certificates.title')}</Text>
+      <Text className={styles.muted}>{t('a13.certificates.note')}</Text>
+      <Text weight="semibold">{t('a13.ai.title')}</Text>
+      <Text className={styles.muted}>{t('a13.ai.note')}</Text>
     </div>
   );
 }

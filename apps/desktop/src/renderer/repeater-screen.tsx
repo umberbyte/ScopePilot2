@@ -6,6 +6,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Button, Field, Input, makeStyles, Text, Textarea, tokens } from '@fluentui/react-components';
+import { t } from './resources.ts';
 
 interface DraftView {
   readonly draftId: string;
@@ -127,14 +128,12 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
           {`Error: ${error}`}
         </MessageBar>
       )}
-      <Text className={styles.muted}>
-        draft は tab として最大 20 件。編集のたびに revision と計画 hash が進み、画面に表示した hash と一致するときだけ送信します (編集後の古い hash では送信されません)。応答は summary のみ (binary は text 化しません)。
-      </Text>
-      <Field label="対象 URL (scope 内)">
+      <Text className={styles.muted}>{t('a06.intro')}</Text>
+      <Field label={t('common.targetUrlInScope')}>
         <Input value={newTargetUrl} onChange={(_, data) => setNewTargetUrl(data.value)} />
       </Field>
       <Button appearance="primary" disabled={busy || drafts.length >= 20} onClick={() => void createDraft()}>
-        新規 draft を作る
+        {t('a06.create')}
       </Button>
       {drafts.length > 0 && (
         <div className={styles.tabs}>
@@ -153,20 +152,20 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
       {selected !== null && (
         <div className={styles.section}>
           <Text weight="semibold">{`${selected.draftId} — ${selected.targetUrl} (${selected.protocol}) revision ${selected.revision}`}</Text>
-          <Field label="headers (1行1件・Name: Value)">
+          <Field label={t('a06.headersLabel')}>
             <Textarea value={headersText} onChange={(_, data) => setHeadersText(data.value)} rows={3} />
           </Field>
-          <Field label="body">
+          <Field label={t('a06.bodyLabel')}>
             <Textarea value={bodyText} onChange={(_, data) => setBodyText(data.value)} rows={3} />
           </Field>
           <Button disabled={busy} onClick={() => void applyEdit()}>
-            編集を適用する
+            {t('a06.apply')}
           </Button>
-          <Text block style={{ whiteSpace: 'pre-wrap' }}>{`要求 (canonical):\n${selected.requestBytes}`}</Text>
-          <Text>{`計画 hash: ${selected.planHash}`}</Text>
+          <Text block style={{ whiteSpace: 'pre-wrap' }}>{t('a06.requestPreview', { requestBytes: selected.requestBytes })}</Text>
+          <Text>{t('a06.planHash', { planHash: selected.planHash })}</Text>
           <div className={styles.tabs}>
             <Button appearance="primary" disabled={busy} onClick={() => void send(selected.planHash)}>
-              この hash を確認して送信する
+              {t('a06.send')}
             </Button>
             {drafts.find((draft) => draft.draftId === selected.draftId)?.planHash !== undefined &&
               selected.revision > 1 &&
@@ -180,7 +179,7 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
             <div className={styles.section}>
               {sendResult.sent ? (
                 <>
-                  <Text role="status">{`送信しました (${sendResult.attempt?.outcome})。応答: ${sendResult.response?.status} ${sendResult.response?.contentType} (${sendResult.response?.bodyBytes} bytes)`}</Text>
+                  <Text role="status">{t('a06.sent', { outcome: sendResult.attempt?.outcome, status: sendResult.response?.status, contentType: sendResult.response?.contentType, bodyBytes: sendResult.response?.bodyBytes })}</Text>
                   {sendResult.response?.bodyPreview !== undefined && (
                     <Text block style={{ whiteSpace: 'pre-wrap' }}>
                       {sendResult.response.bodyPreview}
@@ -188,7 +187,7 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
                   )}
                 </>
               ) : (
-                <MessageBar intent="error">{`送信しませんでした: ${sendResult.reason ?? ''}`}</MessageBar>
+                <MessageBar intent="error">{t('a06.notSent', { reason: sendResult.reason ?? '' })}</MessageBar>
               )}
             </div>
           )}

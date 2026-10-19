@@ -6,6 +6,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { t } from './resources.ts';
 
 interface PayloadSetView {
   readonly name: string;
@@ -118,51 +119,49 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
           {`Error: ${error}`}
         </MessageBar>
       )}
-      <Text className={styles.muted}>
-        組合せ総数が上限 (案件上限と 200 の小さい方) を超えると送信前に拒否されます。応答は (status・長さ・hash) ごとに cluster 集約し、全体の一覧は表示しません。rate は 2 req/s 既定 (仮想時計で進めます)。
-      </Text>
-      <Text weight="semibold">payload 集合 (供給元・版・license が必須)</Text>
-      <Field label="名前">
+      <Text className={styles.muted}>{t('a07.intro')}</Text>
+      <Text weight="semibold">{t('a07.payloadTitle')}</Text>
+      <Field label={t('a07.field.name')}>
         <Input value={payloadName} onChange={(_, data) => setSetName(data.value)} />
       </Field>
-      <Field label="供給元 (source)">
+      <Field label={t('a07.field.source')}>
         <Input value={payloadSource} onChange={(_, data) => setSetSource(data.value)} />
       </Field>
-      <Field label="版">
+      <Field label={t('a07.field.version')}>
         <Input value={payloadVersion} onChange={(_, data) => setSetVersion(data.value)} />
       </Field>
-      <Field label="license">
-        <Input value={setLicense} onChange={(_, data) => setLicense(data.value)} />
+      <Field label={t('a07.field.license')}>
+        <Input value={license} onChange={(_, data) => setLicense(data.value)} />
       </Field>
-      <Field label="値 (1行1件)">
+      <Field label={t('a07.field.values')}>
         <Textarea value={payloadValues} onChange={(_, data) => setSetValues(data.value)} rows={3} />
       </Field>
       <Button appearance="primary" disabled={busy || payloadName.trim() === '' || payloadSource.trim() === '' || payloadVersion.trim() === '' || license.trim() === '' || payloadValues.trim() === ''} onClick={() => void registerSet()}>
-        payload 集合を登録する
+        {t('a07.register')}
       </Button>
       {sets.length > 0 && (
-        <Text className={styles.muted}>{`登録済み: ${sets.map((set) => `${set.name} (${set.source} ${set.version}・${set.license}・${set.values.length} 件)`).join(' / ')}`}</Text>
+        <Text className={styles.muted}>{t('a07.registered', { sets: sets.map((set) => t('a07.setSummary', { name: set.name, source: set.source, version: set.version, license: set.license, count: set.values.length })).join(' / ') })}</Text>
       )}
 
-      <Text weight="semibold">fuzz 実行</Text>
-      <Field label="対象 URL (scope 内)">
+      <Text weight="semibold">{t('a07.runTitle')}</Text>
+      <Field label={t('common.targetUrlInScope')}>
         <Input value={targetUrl} onChange={(_, data) => setTargetUrl(data.value)} />
       </Field>
-      <Field label="positions (1行1件・name: 値, 値, …)">
+      <Field label={t('a07.positionsLabel')}>
         <Textarea value={positionsText} onChange={(_, data) => setPositionsText(data.value)} rows={3} />
       </Field>
       <Button appearance="primary" disabled={busy || positionsText.trim() === ''} onClick={() => void runFuzz()}>
-        fuzz を実行する
+        {t('a07.run')}
       </Button>
       {result !== null && (
         <div className={styles.section}>
-          <Text role="status">{`${result.runId}: 組合せ ${result.total} 件中 ${result.sent} 件送信 → ${result.clusters.length} cluster`}</Text>
-          <Table size="small" aria-label="応答 cluster">
+          <Text role="status">{t('a07.result', { runId: result.runId, total: result.total, sent: result.sent, clusters: result.clusters.length })}</Text>
+          <Table size="small" aria-label={t('a07.table.aria')}>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>cluster (status|bytes|hash)</TableHeaderCell>
-                <TableHeaderCell>応答数</TableHeaderCell>
-                <TableHeaderCell>代表組合せ</TableHeaderCell>
+                <TableHeaderCell>{t('a07.col.key')}</TableHeaderCell>
+                <TableHeaderCell>{t('a07.col.count')}</TableHeaderCell>
+                <TableHeaderCell>{t('a07.col.representative')}</TableHeaderCell>
               </TableRow>
             </TableHeader>
             <TableBody>
