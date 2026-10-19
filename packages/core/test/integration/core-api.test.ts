@@ -555,6 +555,64 @@ describe('Core API server (node:http)', () => {
 `));
   });
 
+  test('GET /api/observations は site map 用の観測一覧と scope 拒否を返す', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'observations-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+    await fetch(`${baseUrl}/api/authorization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['unauthenticated'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      }),
+    });
+    // この suite の FakeExplorer は同一 origin 内の /child/ だけを link するため
+    // 探索中の scope 拒否は発生しない。拒否記録の表示は simulation fixture
+    // (home が http://elsewhere.example/out-of-scope へ link) を使う app test で検証する。
+    const planResponse = await fetch(`${baseUrl}/api/plan/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seeds: ['http://fixture.target.test/'] }),
+    });
+    const { plan } = (await planResponse.json()) as { plan: unknown };
+    const confirmationResponse = await fetch(`${baseUrl}/api/plan/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan }),
+    });
+    const confirmation = (await confirmationResponse.json()) as { confirmationId: string };
+    const exploreRun = await fetch(`${baseUrl}/api/run/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan, confirmation, maxDepth: 1 }),
+    });
+    assert.equal(exploreRun.status, 200, `run/explore failed: ${await exploreRun.text()}`);
+
+    const response = await fetch(`${baseUrl}/api/observations`);
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      observations: readonly { url: string; status: number; depth: number; originType: string }[];
+      deniedUrls: readonly { url: string; reason: string }[];
+    };
+    assert.ok(body.observations.length > 0);
+    assert.ok(body.observations.every((observation) => observation.url.startsWith('http://fixture.target.test')));
+    assert.ok(Array.isArray(body.deniedUrls));
+    const urls = body.observations.map((observation) => observation.url);
+    assert.equal(new Set(urls).size, urls.length, '観測 URL は正規化済みで一意');
+  });
+
   test('POST /api/plan/explore の任意 limits は案件上限へクランプされる', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',

@@ -149,6 +149,19 @@ test('A08: 上限を狭めた探索計画を構築・確認・実行し、診断
   await expect(page.getByText(/診断完了 \(engine/)).toBeVisible({ timeout: 30_000 });
 });
 
+test('A04: site map に観測一覧と scope 拒否が表示される', async () => {
+  await page.getByRole('button', { name: /A04 Browser \/ Site map/ }).click();
+  // A08 の探索で観測済み (fixture home とその配下)。
+  await expect(page.getByText(/観測済み page \(\d+ 件\)/)).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'http://fixture.target.test/' }).first()).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'クロール' }).first()).toBeVisible();
+  // fixture home は scope 外 origin (http://elsewhere.example/out-of-scope) へ link する
+  // ため、探索中に拒否記録が残る。
+  // 複数回の探索で同一拒否が重複記録されうるため first を使う。
+  await expect(page.getByText(/elsewhere\.example\/out-of-scope/).first()).toBeVisible();
+  await expect(page.getByText('HTTP history (通信一覧・仮想化表示) は後続増分で提供します。')).toBeVisible();
+});
+
 test('未実装画面はプレースホルダで明示される (A03)', async () => {
   await page.getByRole('button', { name: /A03 Guidelines & Check Catalog/ }).click();
   await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toBeVisible();

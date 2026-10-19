@@ -242,6 +242,10 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
     if (route === 'GET /api/findings') {
       return respondJson(response, 200, { findings: service.listFindings() });
     }
+    if (route === 'GET /api/observations') {
+      // site map の素材 (design/02 A04)。観測 URL と scope 拒否を開示する。
+      return respondJson(response, 200, { observations: service.listObservations(), deniedUrls: service.listDeniedUrls() });
+    }
     if (route === 'POST /api/findings/status') {
       const body = await readJsonBody(request, response);
       if (body === undefined) {

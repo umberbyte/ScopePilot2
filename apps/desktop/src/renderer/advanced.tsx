@@ -552,6 +552,93 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   );
 }
 
+interface ObservationView {
+  readonly url: string;
+  readonly status: number;
+  readonly contentType: string;
+  readonly title?: string;
+  readonly discoveredFrom: string | null;
+  readonly depth: number;
+  readonly originType: 'crawl' | 'document-hint';
+}
+
+/** A04 Browser / Site map / HTTP history。観測済み page の一覧と scope 拒否の開示。 */
+function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
+  const styles = useStyles();
+  const [observations, setObservations] = useState<readonly ObservationView[]>([]);
+  const [deniedUrls, setDeniedUrls] = useState<readonly { url: string; reason: string }[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const body = await callJson<{ observations: readonly ObservationView[]; deniedUrls: readonly { url: string; reason: string }[] }>(apiBase, 'GET', '/api/observations');
+        setObservations(body.observations);
+        setDeniedUrls(body.deniedUrls);
+        setLoaded(true);
+      } catch (cause) {
+        setError(String(cause));
+      }
+    })();
+  }, [apiBase]);
+
+  const originLabel = (originType: ObservationView['originType']): string =>
+    originType === 'crawl' ? 'クロール' : '文書ヒント (未確認)';
+
+  return (
+    <div className={styles.section}>
+      <Text weight="semibold">{`観測済み page (${observations.length} 件)`}</Text>
+      {error !== '' && (
+        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+          {`Error: ${error}`}
+        </Text>
+      )}
+      {observations.length === 0 ? (
+        loaded && <Text className={styles.muted}>観測はまだありません。A08 (または S03) で探索を実行すると表示されます。</Text>
+      ) : (
+        <Table size="small" aria-label="観測済み page 一覧">
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>URL</TableHeaderCell>
+              <TableHeaderCell>status</TableHeaderCell>
+              <TableHeaderCell>種別</TableHeaderCell>
+              <TableHeaderCell>title</TableHeaderCell>
+              <TableHeaderCell>深さ</TableHeaderCell>
+              <TableHeaderCell>発見元</TableHeaderCell>
+              <TableHeaderCell>由来</TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {observations.map((observation) => (
+              <TableRow key={observation.url}>
+                <TableCell>{observation.url}</TableCell>
+                <TableCell>{String(observation.status)}</TableCell>
+                <TableCell>{observation.contentType}</TableCell>
+                <TableCell>{observation.title ?? ''}</TableCell>
+                <TableCell>{String(observation.depth)}</TableCell>
+                <TableCell>{observation.discoveredFrom ?? 'seed'}</TableCell>
+                <TableCell>{originLabel(observation.originType)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+      <Text weight="semibold">{`scope 拒否 (${deniedUrls.length} 件)`}</Text>
+      {deniedUrls.length === 0 ? (
+        <Text className={styles.muted}>拒否された URL はありません。</Text>
+      ) : (
+        deniedUrls.map((denied) => (
+          <Text key={denied.url} block>
+            {`${denied.url} — ${denied.reason}`}
+          </Text>
+        ))
+      )}
+      <Text className={styles.muted}>HTTP history (通信一覧・仮想化表示) は後続増分で提供します。</Text>
+    </div>
+  );
+}
+
 export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElement {
   const styles = useStyles();
   const [items] = useState<readonly AdvancedNavItem[]>(() => advancedNavItems(OPERATOR_PERMISSIONS));
@@ -726,7 +813,8 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {activeRoute === 'advanced.scope' && <ScopeAuthorizationScreen apiBase={apiBase} />}
         {activeRoute === 'findings' && <FindingsOrganizerScreen apiBase={apiBase} />}
         {activeRoute === 'scan-plans' && <ScanPlansScreen apiBase={apiBase} />}
-        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && (
+        {activeRoute === 'browser.site-map' && <SiteMapScreen apiBase={apiBase} />}
+        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && (
           <Text className={styles.muted}>この画面は未実装です (後続増分で提供します)。</Text>
         )}
       </div>

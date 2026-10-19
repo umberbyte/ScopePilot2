@@ -130,6 +130,10 @@ export class BaselineFlowService {
   private authorization: AuthorizationRecord | null = null;
   private readonly eventsLog: BaselineFlowEvent[] = [];
   private readonly importer = new FindingImporter();
+  /** site map 用の観測台帳 (URL 単位・再観測は上書き、初回観測順を維持)。 */
+  private readonly observationsByUrl = new Map<string, PageObservation>();
+  /** scope により拒否された URL の記録 (design/02 A04 の開示用)。 */
+  private readonly deniedUrlLog: readonly { url: string; reason: string }[] = [];
   private exploredUrlCount = 0;
   private scannedUrlCount = 0;
   private delegatedSteps: {
@@ -151,6 +155,16 @@ export class BaselineFlowService {
   /** 現在の全所見 (作成順)。UI/CLI の organizer 表示用。 */
   listFindings(): readonly Finding[] {
     return this.importer.list();
+  }
+
+  /** site map (観測済み page の一覧・初回観測順)。 */
+  listObservations(): readonly PageObservation[] {
+    return [...this.observationsByUrl.values()];
+  }
+
+  /** 探索で scope 拒否された URL (開示用)。 */
+  listDeniedUrls(): readonly { url: string; reason: string }[] {
+    return [...this.deniedUrlLog];
   }
 
   /** 所見の確認状態変更 (6.3)。変更は監査 event に確認者付きで記録する。 */
@@ -501,6 +515,12 @@ export class BaselineFlowService {
     }
 
     this.exploredUrlCount = observations.length;
+    for (const observation of observations) {
+      this.observationsByUrl.set(observation.url, observation);
+    }
+    for (const denied of deniedUrls) {
+      (this.deniedUrlLog as { url: string; reason: string }[]).push(denied);
+    }
     // 上限停止は Completed ではなく Stopped として区別する (design/22 §2)。
     let runState: RunState;
     if (stopReason === 'completed') {

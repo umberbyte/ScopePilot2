@@ -466,6 +466,17 @@
           }
         }
       }
+    },
+    "/api/observations": {
+      "get": {
+        "operationId": "listObservations",
+        "summary": "site map 用の観測一覧と scope 拒否 URL",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Observations"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2411,6 +2422,48 @@
               "properties": {
                 "finding": {
                   "$ref": "#/components/schemas/Finding"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "Observations": {
+        "description": "observed pages and denied urls",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "observations",
+                "deniedUrls"
+              ],
+              "properties": {
+                "observations": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PageObservation"
+                  }
+                },
+                "deniedUrls": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "url",
+                      "reason"
+                    ],
+                    "properties": {
+                      "url": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
                 }
               },
               "additionalProperties": false
