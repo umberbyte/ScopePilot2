@@ -802,6 +802,62 @@ describe('Core API server (node:http)', () => {
     assert.match(eventsText, /FuzzRunCompleted/);
   });
 
+  test('sessions は login flow 登録・refresh・cookie jar 割当を扱う (design/f09)', async () => {
+    // secret 値の持ち込みは 400。fill は secret 参照必須 (NeedsInput)。
+    const inline = await fetch(`${baseUrl}/api/sessions/flows`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'admin', flowVersion: 'f1', steps: [{ kind: 'fill', target: '#u', secretReference: 'vault://a', secretValue: 'x' }] }),
+    });
+    assert.equal(inline.status, 400);
+    const missingSecret = await fetch(`${baseUrl}/api/sessions/flows`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'admin', flowVersion: 'f1', steps: [{ kind: 'fill', target: '#u' }] }),
+    });
+    assert.equal(missingSecret.status, 409, 'NeedsInput は 409');
+
+    const registered = await fetch(`${baseUrl}/api/sessions/flows`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        role: 'admin',
+        flowVersion: 'f1',
+        steps: [
+          { kind: 'navigate', target: 'http://fixture.target.test/login.php' },
+          { kind: 'fill', target: '#username', secretReference: 'vault://admin-user' },
+          { kind: 'click', target: 'input[type=submit]' },
+        ],
+      }),
+    });
+    assert.equal(registered.status, 201);
+    const flow = (await registered.json()) as { flow: { stepCount: number; secretReferences: readonly { secretReference: string }[] } };
+    assert.equal(flow.flow.stepCount, 3);
+    assert.equal(flow.flow.secretReferences[0]?.secretReference, 'vault://admin-user');
+    assert.equal(JSON.stringify(flow).includes('secretValue'), false, '応答に secret 値を含まない');
+
+    const refreshed = await fetch(`${baseUrl}/api/sessions/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'admin' }),
+    });
+    const refreshBody = (await refreshed.json()) as { outcome: string; sessionRevision: number };
+    assert.equal(refreshBody.outcome, 'refreshed');
+    assert.equal(refreshBody.sessionRevision, 1);
+
+    const cookies = await fetch(`${baseUrl}/api/sessions/cookies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'admin', cookieNames: ['PHPSESSID'] }),
+    });
+    assert.equal(cookies.status, 200);
+
+    const list = (await (await fetch(`${baseUrl}/api/sessions`)).json()) as { sessions: readonly { role: string; sessionRevision: number; cookieNames: readonly string[] }[] };
+    const admin = list.sessions.find((session) => session.role === 'admin');
+    assert.equal(admin?.sessionRevision, 1);
+    assert.deepEqual(admin?.cookieNames, ['PHPSESSID']);
+  });
+
   test('GET /api/observations は site map 用の観測一覧と scope 拒否を返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',

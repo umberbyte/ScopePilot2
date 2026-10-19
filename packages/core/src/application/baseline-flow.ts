@@ -48,6 +48,13 @@ import {
 import { FindingImporter } from '../domain/finding-importer.ts';
 import { BreakQueue, decideIntercept, type BreakItem, type BreakQueueEvent, type InterceptDecision } from '../domain/proxy-intercept.ts';
 import {
+  RoleSessionRegistry,
+  SessionCoordinator,
+  validateLoginFlow,
+  vaultEvidenceProjection,
+  type LoginFlowStep,
+} from '../domain/authentication-session.ts';
+import {
   PayloadCatalog,
   clusterResponses,
   combinationAt,
@@ -154,6 +161,17 @@ export class BaselineFlowService {
   /** proxy の break queue (design/f02)。deadline 経過は既定で drop (暗黙 forward しない)。 */
   private readonly breakQueue = new BreakQueue(100);
 
+  /** 認証・session 管理 (design/f09)。secret 値は参照のみ保持し、値は受け付けない。 */
+  private readonly loginFlows = new Map<string, { flowVersion: string; steps: readonly LoginFlowStep[]; secretReferences: readonly string[] }>();
+  private readonly roleRegistry = new RoleSessionRegistry();
+  private readonly sessionRevisions = new Map<string, number>();
+  private readonly sessionCoordinator = new SessionCoordinator({
+    refresh: async (role: string) => {
+      // fixture adapter: 新 session を発行する (token 値は返り値で使うだけで保存しない)。
+      return `session-${role}-${this.deps.ids.next('token')}`;
+    },
+  });
+
   /** Fuzzer の payload catalog (design/f05)。供給元・版・license 登録を必須とする。 */
   private readonly payloadCatalog = new PayloadCatalog();
   private readonly payloadSetNames: string[] = [];
@@ -246,6 +264,67 @@ export class BaselineFlowService {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     return decideIntercept(this.breakQueue, itemId, edited, caseRecord.scope);
+  }
+
+  /** login flow の登録 (design/f09)。step 構成は domain 検証 (上限 10・allowlist・fill は secret 参照必須)。 */
+  registerLoginFlow(
+    operator: OperatorProfile,
+    input: { readonly role: string; readonly flowVersion: string; readonly steps: readonly LoginFlowStep[] },
+  ): { role: string; stepCount: number; secretReferences: readonly { flowVersion: string; secretReference: string }[] } {
+    this.requirePermission(operator, 'run.manage');
+    if (input.role.trim() === '') {
+      throw domainError('ValidationFailed', 'role must not be empty');
+    }
+    if (input.steps.some((step) => (step as { secretValue?: unknown }).secretValue !== undefined)) {
+      // secret 値の持ち込みは最初から拒否 (F09-UT-006: 参照のみ)。
+      throw domainError('ValidationFailed', 'inline secret values are not accepted; use secretReference');
+    }
+    const { stepCount } = validateLoginFlow(input.steps);
+    const secretReferences = input.steps
+      .filter((step) => step.secretReference !== undefined)
+      .map((step) => vaultEvidenceProjection({ flowVersion: input.flowVersion, secretReference: step.secretReference ?? '' }));
+    this.loginFlows.set(input.role, { flowVersion: input.flowVersion, steps: input.steps, secretReferences: secretReferences.map((entry) => entry.secretReference) });
+    return { role: input.role, stepCount, secretReferences };
+  }
+
+  /** role ごとの session 状態 (cookie 名の一覧のみ。値は保持しない)。 */
+  listSessions(): readonly { role: string; flowVersion: string; stepCount: number; cookieNames: readonly string[]; sessionRevision: number }[] {
+    return [...this.loginFlows.keys()].map((role) => {
+      const flow = this.loginFlows.get(role);
+      if (flow === undefined) {
+        throw domainError('ValidationFailed', `login flow for ${role} is not registered`);
+      }
+      const jar = this.roleRegistry.jarOf(role);
+      return {
+        role,
+        flowVersion: flow.flowVersion,
+        stepCount: flow.steps.length,
+        cookieNames: jar?.cookieNames ?? [],
+        sessionRevision: this.sessionRevisions.get(role) ?? 0,
+      };
+    });
+  }
+
+  /** session の refresh (single-flight・lockout 回避は domain)。 */
+  async refreshSession(operator: OperatorProfile, role: string): Promise<{ outcome: 'refreshed' | 'stopped-lockout-guard'; sessionRevision: number }> {
+    this.requirePermission(operator, 'run.manage');
+    if (!this.loginFlows.has(role)) {
+      throw domainError('ValidationFailed', `login flow for ${role} is not registered`);
+    }
+    const result = await this.sessionCoordinator.refresh(role);
+    if (result.outcome === 'refreshed') {
+      this.sessionRevisions.set(role, result.sessionRevision);
+    }
+    return result;
+  }
+
+  /** role への cookie jar 割当。他 role との共有 (同名 cookie) は警告として返す (F09-UT-005)。 */
+  assignRoleCookies(operator: OperatorProfile, role: string, cookieNames: readonly string[]): { role: string; shared: boolean } {
+    this.requirePermission(operator, 'run.manage');
+    if (!this.loginFlows.has(role)) {
+      throw domainError('ValidationFailed', `login flow for ${role} is not registered`);
+    }
+    return this.roleRegistry.assignJar(role, cookieNames);
   }
 
   /** payload 集合の登録 (F05-UT-006: 供給元・版・license は必須)。 */

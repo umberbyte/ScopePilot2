@@ -469,6 +469,71 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/sessions') {
+      return respondJson(response, 200, { sessions: service.listSessions() });
+    }
+    if (route === 'POST /api/sessions/flows') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const stepsValue = body.steps;
+        if (!Array.isArray(stepsValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field steps must be an array', false);
+        }
+        const steps = stepsValue.map((step, index) => {
+          if (typeof step !== 'object' || step === null) {
+            throw new DomainError('ValidationFailed', `steps[${index}] must be an object`);
+          }
+          const record = step as Record<string, unknown>;
+          if (record.secretValue !== undefined) {
+            throw new DomainError('ValidationFailed', `steps[${index}]: inline secret values are not accepted; use secretReference`);
+          }
+          const kind = stringField(record, 'kind');
+          const built: { kind: string; target?: string; secretReference?: string } = { kind };
+          if (record.target !== undefined) {
+            built.target = stringField(record, 'target');
+          }
+          if (record.secretReference !== undefined) {
+            built.secretReference = stringField(record, 'secretReference');
+          }
+          return built;
+        });
+        const result = service.registerLoginFlow(operator, {
+          role: stringField(body, 'role'),
+          flowVersion: stringField(body, 'flowVersion'),
+          steps,
+        });
+        return respondJson(response, 201, { flow: result });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/sessions/refresh') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = await service.refreshSession(operator, stringField(body, 'role'));
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/sessions/cookies') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.assignRoleCookies(operator, stringField(body, 'role'), stringArrayField(body, 'cookieNames'));
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/runs/interrupted') {
       if (runRepository === undefined) {
         return respondError(response, 501, 'Unsupported', 'run persistence is not configured for this server', false);

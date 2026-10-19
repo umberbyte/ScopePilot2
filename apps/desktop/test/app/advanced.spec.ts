@@ -285,7 +285,24 @@ test('A07: payload 集合を登録し fuzz を実行して cluster 集約を見�
   await expect(page.getByRole('cell', { name: 'admin | 1' })).toBeVisible();
 });
 
-test('未実装画面はプレースホルダで明示される (A09)', async () => {
+test('A09: login flow を登録し session refresh と cookie jar 割当を行う', async () => {
   await page.getByRole('button', { name: /A09 Sessions/ }).click();
-  await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toBeVisible();
+
+  // 既定入力のまま flow を登録する (secret は参照のみ)。
+  await page.getByRole('button', { name: 'flow を登録する' }).click();
+  await expect(page.getByText(/admin の flow を登録しました \(3 step/)).toBeVisible({ timeout: 30_000 });
+
+  // cookie jar を割り当て、session を refresh すると revision が進む。
+  await page.getByRole('button', { name: 'cookie jar を割り当てる' }).click();
+  await expect(page.getByText(/admin に cookie jar を割り当てました/)).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'refresh' }).click();
+  await expect(page.getByText(/session を更新しました \(revision 1\)/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('cell', { name: 'PHPSESSID' })).toBeVisible();
+
+  // 業務ロジック検証は後続増分である旨の明示。
+  await expect(page.getByText(/design\/f17/)).toBeVisible();
+});
+
+test('未実装プレースホルダはもう残っていない (全 Advanced 画面が実装済み)', async () => {
+  await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toHaveCount(0);
 });

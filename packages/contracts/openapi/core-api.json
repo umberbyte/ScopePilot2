@@ -1096,6 +1096,283 @@
           }
         }
       }
+    },
+    "/api/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "summary": "role ごとの session 状態 (cookie 名の一覧のみ。値は保持しない)",
+        "responses": {
+          "200": {
+            "description": "sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "sessions"
+                  ],
+                  "properties": {
+                    "sessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "role",
+                          "flowVersion",
+                          "stepCount",
+                          "cookieNames",
+                          "sessionRevision"
+                        ],
+                        "properties": {
+                          "role": {
+                            "type": "string"
+                          },
+                          "flowVersion": {
+                            "type": "string"
+                          },
+                          "stepCount": {
+                            "type": "integer"
+                          },
+                          "cookieNames": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "sessionRevision": {
+                            "type": "integer"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/flows": {
+      "post": {
+        "operationId": "registerLoginFlow",
+        "summary": "login flow の登録 (step 上限 10・allowlist・fill は secret 参照必須。secret 値は拒否)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role",
+                  "flowVersion",
+                  "steps"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  },
+                  "flowVersion": {
+                    "type": "string"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/LoginFlowStep"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "registered flow",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "flow"
+                  ],
+                  "properties": {
+                    "flow": {
+                      "type": "object",
+                      "required": [
+                        "role",
+                        "stepCount",
+                        "secretReferences"
+                      ],
+                      "properties": {
+                        "role": {
+                          "type": "string"
+                        },
+                        "stepCount": {
+                          "type": "integer"
+                        },
+                        "secretReferences": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "flowVersion",
+                              "secretReference"
+                            ],
+                            "properties": {
+                              "flowVersion": {
+                                "type": "string"
+                              },
+                              "secretReference": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/sessions/refresh": {
+      "post": {
+        "operationId": "refreshSession",
+        "summary": "session の refresh (single-flight・retry 2 回目は lockout 回避で停止)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "refresh result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "outcome",
+                    "sessionRevision"
+                  ],
+                  "properties": {
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "refreshed",
+                        "stopped-lockout-guard"
+                      ]
+                    },
+                    "sessionRevision": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/sessions/cookies": {
+      "post": {
+        "operationId": "assignRoleCookies",
+        "summary": "role への cookie jar 割当 (他 role との同名 cookie 共有は警告)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role",
+                  "cookieNames"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  },
+                  "cookieNames": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "assignment result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "role",
+                    "shared"
+                  ],
+                  "properties": {
+                    "role": {
+                      "type": "string"
+                    },
+                    "shared": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3125,6 +3402,32 @@
             "items": {
               "type": "string"
             }
+          }
+        },
+        "additionalProperties": false
+      },
+      "LoginFlowStep": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "navigate",
+              "fill",
+              "click",
+              "wait",
+              "extract",
+              "assert"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "secretReference": {
+            "type": "string"
           }
         },
         "additionalProperties": false
