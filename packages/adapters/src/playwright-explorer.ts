@@ -26,33 +26,58 @@ export interface StubPage {
 
 export type BrowserLauncher = () => Promise<StubBrowserContext>;
 
+/** browser context へ事前設定する cookie (playwright addCookies 形式の部分)。 */
+export interface BrowserCookie {
+  readonly name: string;
+  readonly value: string;
+  readonly domain: string;
+  readonly path: string;
+  readonly secure?: boolean;
+  readonly httpOnly?: boolean;
+}
+
 /** 既定 launcher: playwright を動的 import して chromium を起動する。 */
-const defaultLauncher: BrowserLauncher = async () => {
-  const playwright = await import('playwright');
-  const browser = await playwright.chromium.launch();
-  return {
-    newPage: async () => {
-      const context = await browser.newContext();
-      const page = await context.newPage();
-      return {
-        goto: async (url: string) => await page.goto(url, { waitUntil: 'domcontentloaded' }),
-        title: async () => await page.title(),
-        $$eval: async (selector: string, fn: (elements: readonly unknown[]) => readonly string[]) =>
-          await page.$$eval(selector, fn as never),
-        close: async () => {
-          await page.close();
-        },
-      } satisfies StubPage;
-    },
-    close: async () => {
-      await browser.close();
-    },
+const createDefaultLauncher = (cookies?: readonly BrowserCookie[]): BrowserLauncher => {
+  return async () => {
+    const playwright = await import('playwright');
+    const browser = await playwright.chromium.launch();
+    return {
+      newPage: async () => {
+        const context = await browser.newContext();
+        if (cookies !== undefined && cookies.length > 0) {
+          // 認証済み session (design/f09) を探索に使う: cookie は context 単位で注入する。
+          await context.addCookies(cookies.map((cookie) => ({
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+            ...(cookie.secure === undefined ? {} : { secure: cookie.secure }),
+            ...(cookie.httpOnly === undefined ? {} : { httpOnly: cookie.httpOnly }),
+          })));
+        }
+        const page = await context.newPage();
+        return {
+          goto: async (url: string) => await page.goto(url, { waitUntil: 'domcontentloaded' }),
+          title: async () => await page.title(),
+          $$eval: async (selector: string, fn: (elements: readonly unknown[]) => readonly string[]) =>
+            await page.$$eval(selector, fn as never),
+          close: async () => {
+            await page.close();
+          },
+        } satisfies StubPage;
+      },
+      close: async () => {
+        await browser.close();
+      },
+    };
   };
 };
 
 export interface PlaywrightExplorerOptions {
   readonly scope: { readonly allowedOrigins: readonly string[]; readonly deniedOrigins: readonly string[] };
   readonly launcher?: BrowserLauncher;
+  /** 認証済み session の cookie。既定 launcher でのみ使う (差替え launcher は自前で扱う)。 */
+  readonly cookies?: readonly BrowserCookie[];
 }
 
 export class PlaywrightExplorerAdapter implements ExplorationPort {
@@ -64,7 +89,7 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
 
   constructor(options: PlaywrightExplorerOptions) {
     this.scope = options.scope;
-    this.launcher = options.launcher ?? defaultLauncher;
+    this.launcher = options.launcher ?? createDefaultLauncher(options.cookies);
   }
 
   private ensureContext(): Promise<StubBrowserContext> {
