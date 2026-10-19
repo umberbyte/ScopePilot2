@@ -1053,6 +1053,10 @@
                   "maxRequests": {
                     "type": "integer",
                     "minimum": 1
+                  },
+                  "role": {
+                    "type": "string",
+                    "description": "runLogin 済み role。指定時はその role の session cookie を対象 URL の host/path に一致するものだけ適用する (design/08)"
                   }
                 },
                 "additionalProperties": false
@@ -1091,6 +1095,13 @@
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/FuzzCluster"
+                      }
+                    },
+                    "sessionCookieNames": {
+                      "type": "array",
+                      "description": "適用した session cookie の名前一覧 (role 指定時のみ。値は返さない)",
+                      "items": {
+                        "type": "string"
                       }
                     }
                   },

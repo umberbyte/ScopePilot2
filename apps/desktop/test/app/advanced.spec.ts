@@ -326,6 +326,11 @@ test('A07: payload 集合を登録し fuzz を実行して cluster 集約を見�
   // fixture 応答は先頭 position の値だけで決まるため、各 cluster に 2 member 集約される。
   await expect(page.getByRole('cell', { name: '2' }).first()).toBeVisible();
   await expect(page.getByRole('cell', { name: 'admin | 1' })).toBeVisible();
+
+  // role を指定すると session cookie が適用される (design/08・A06 test の login を利用)。
+  await page.getByLabel('送信 session の role (任意・A09 で login 済みの role。空なら非認証)').fill('admin');
+  await page.getByRole('button', { name: 'fuzz を実行する' }).click();
+  await expect(page.getByText('(session cookie 適用: PHPSESSID)')).toBeVisible({ timeout: 30_000 });
 });
 
 test('A09: login flow を登録し session refresh と cookie jar 割当を行う', async () => {

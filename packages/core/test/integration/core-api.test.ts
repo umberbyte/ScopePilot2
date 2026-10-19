@@ -882,6 +882,21 @@ describe('Core API server (node:http)', () => {
     });
     assert.equal(overLimit.status, 400);
 
+    // role 指定は service まで伝播する — session の無い role は 400 (適用の本体は UT で検証)。
+    const ghostRole = await fetch(`${baseUrl}/api/fuzzer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetUrl: 'http://fixture.target.test/fuzz',
+        positions: [{ name: 'a', values: ['1'] }],
+        role: 'ghost',
+      }),
+    });
+    assert.equal(ghostRole.status, 400);
+    const ghostBody = (await ghostRole.json()) as { code: string; message: string };
+    assert.equal(ghostBody.code, 'ValidationFailed');
+    assert.match(ghostBody.message, /no session for role/);
+
     // 実行は監査 event に残る。
     const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
     assert.match(eventsText, /FuzzRunCompleted/);

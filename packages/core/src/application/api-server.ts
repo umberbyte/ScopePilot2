@@ -485,6 +485,8 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           targetUrl: stringField(body, 'targetUrl'),
           positions,
           ...(body.maxRequests === undefined ? {} : { maxRequests: numberField(body, 'maxRequests') }),
+          // role 指定時はその role の session cookie を適用する (design/08)。
+          ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
         });
         return respondJson(response, 200, result);
       } catch (cause) {

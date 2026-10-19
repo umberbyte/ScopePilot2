@@ -590,11 +590,12 @@ export class BaselineFlowService {
    * fuzz session の実行 (design/f05)。組合せ総数が上限 (既定は案件上限と 200 の小さい方) を
    * 超えたら送信前に拒否する (F05-UT-001)。fixture adapter は組合せから決定的な応答を作り、
    * rate は仮想時計で進める (実時間を待たない)。応答は cluster 集約して返す (F05-UT-008)。
+   * role 指定時はその role の session cookie を適用する (design/08: F05 は Cookie 適用対象)。
    */
   async runFuzzSession(
     operator: OperatorProfile,
-    input: { readonly targetUrl: string; readonly positions: readonly FuzzPosition[]; readonly maxRequests?: number },
-  ): Promise<{ runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[] }> {
+    input: { readonly targetUrl: string; readonly positions: readonly FuzzPosition[]; readonly maxRequests?: number; readonly role?: string },
+  ): Promise<{ runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -605,6 +606,15 @@ export class BaselineFlowService {
     if (input.positions.length === 0) {
       throw domainError('ValidationFailed', 'fuzz needs at least one position');
     }
+    // role session の適用 cookie (対象 URL の host/path 一致のみ。別 Origin へは送らない)。
+    let appliedCookies: readonly LoginSessionCookie[] | undefined;
+    if (input.role !== undefined) {
+      const session = this.roleSessionCookies.get(input.role);
+      if (session === undefined) {
+        throw domainError('ValidationFailed', `no session for role '${input.role}'; run login first`);
+      }
+      appliedCookies = applicableSessionCookies([...session.cookies], canonical);
+    }
     const cap = input.maxRequests ?? Math.min(200, caseRecord.scope.limits.maxRequests);
     const { total } = planCombinations(input.positions, cap);
     let virtualNowMs = 0;
@@ -613,6 +623,7 @@ export class BaselineFlowService {
       {
         send: async (_index, combination) => {
           // fixture adapter: 応答は先頭 position の値だけで決まる (cluster 集約の実演)。
+          // 実 adapter は appliedCookies を各要求へ付けて送信する。
           const body = `resp:${combination[0] ?? ''}`;
           outcomes.push({ status: 200, contentLength: body.length, bodyHash: hashStable('scopepilot2.fuzz.body', body) });
         },
@@ -635,7 +646,15 @@ export class BaselineFlowService {
     const record = { runId, targetUrl: canonical, total, sent: result.sent, clusters, executedAt: this.deps.clock.now().toISOString() };
     (this.fuzzRuns as { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[]).push(record);
     this.record({ type: 'FuzzRunCompleted', at: record.executedAt, runId, targetUrl: canonical, total, sent: result.sent });
-    return { runId, targetUrl: canonical, total, sent: result.sent, clusters };
+    return {
+      runId,
+      targetUrl: canonical,
+      total,
+      sent: result.sent,
+      clusters,
+      // 適用した cookie は名前のみ (値は出さない — Repeater と同一規則)。
+      ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
+    };
   }
 
   listFuzzRuns(): readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] {

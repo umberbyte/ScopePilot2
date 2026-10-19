@@ -23,6 +23,7 @@ interface FuzzRunResult {
   readonly total: number;
   readonly sent: number;
   readonly clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[];
+  readonly sessionCookieNames?: readonly string[];
 }
 
 async function callJson<T>(apiBase: string, method: string, path: string, body?: unknown): Promise<T> {
@@ -51,6 +52,7 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
   const [license, setLicense] = useState('');
   const [payloadValues, setSetValues] = useState('');
   const [targetUrl, setTargetUrl] = useState('http://fixture.target.test/fuzz');
+  const [sessionRole, setSessionRole] = useState('');
   const [positionsText, setPositionsText] = useState('user: admin, guest\nid: 1, 2');
   const [result, setResult] = useState<FuzzRunResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -104,13 +106,18 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
           const valuesText = separator === -1 ? '' : line.slice(separator + 1);
           return { name, values: valuesText.split(',').map((value) => value.trim()).filter((value) => value !== '') };
         });
-      setResult(await callJson<FuzzRunResult>(apiBase, 'POST', '/api/fuzzer/runs', { targetUrl, positions }));
+      setResult(await callJson<FuzzRunResult>(apiBase, 'POST', '/api/fuzzer/runs', {
+        targetUrl,
+        positions,
+        // role 指定時はその role の session cookie を適用する (design/08)。空なら非認証。
+        ...(sessionRole.trim() === '' ? {} : { role: sessionRole.trim() }),
+      }));
     } catch (cause) {
       setError(String(cause));
     } finally {
       setBusy(false);
     }
-  }, [apiBase, positionsText, targetUrl]);
+  }, [apiBase, positionsText, sessionRole, targetUrl]);
 
   return (
     <div className={styles.section}>
@@ -147,6 +154,9 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
       <Field label={t('common.targetUrlInScope')}>
         <Input value={targetUrl} onChange={(_, data) => setTargetUrl(data.value)} />
       </Field>
+      <Field label={t('a07.sessionRoleLabel')}>
+        <Input value={sessionRole} onChange={(_, data) => setSessionRole(data.value)} />
+      </Field>
       <Field label={t('a07.positionsLabel')}>
         <Textarea value={positionsText} onChange={(_, data) => setPositionsText(data.value)} rows={3} />
       </Field>
@@ -155,7 +165,10 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
       </Button>
       {result !== null && (
         <div className={styles.section}>
-          <Text role="status">{t('a07.result', { runId: result.runId, total: result.total, sent: result.sent, clusters: result.clusters.length })}</Text>
+          <Text role="status">
+            {t('a07.result', { runId: result.runId, total: result.total, sent: result.sent, clusters: result.clusters.length })}
+            {result.sessionCookieNames !== undefined ? ` ${t('a07.sessionApplied', { cookies: result.sessionCookieNames.join(', ') || '—' })}` : ''}
+          </Text>
           <Table size="small" aria-label={t('a07.table.aria')}>
             <TableHeader>
               <TableRow>

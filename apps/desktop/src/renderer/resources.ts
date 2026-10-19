@@ -85,6 +85,8 @@ export const strings = {
   'a07.registered': '登録済み: {sets}',
   'a07.setSummary': '{name} ({source} {version}・{license}・{count} 件)',
   'a07.runTitle': 'fuzz 実行',
+  'a07.sessionRoleLabel': '送信 session の role (任意・A09 で login 済みの role。空なら非認証)',
+  'a07.sessionApplied': '(session cookie 適用: {cookies})',
   'a07.positionsLabel': 'positions (1行1件・name: 値, 値, …)',
   'a07.run': 'fuzz を実行する',
   'a07.result': '{runId}: 組合せ {total} 件中 {sent} 件送信 → {clusters} cluster',
