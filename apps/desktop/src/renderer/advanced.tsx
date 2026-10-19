@@ -414,6 +414,9 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const [hintUrls, setHintUrls] = useState('');
   const [hints, setHints] = useState<readonly { documentLabel: string; urls: readonly string[] }[]>([]);
   const [hintNotice, setHintNotice] = useState('');
+  const [priorityIncludes, setPriorityIncludes] = useState('');
+  const [priorityCategory, setPriorityCategory] = useState('pii');
+  const [priorityRules, setPriorityRules] = useState<readonly { urlIncludes: string; category: string }[]>([]);
   const [authHintRole, setAuthHintRole] = useState('');
   const [authHintMethod, setAuthHintMethod] = useState('Form');
   const [authHintLocation, setAuthHintLocation] = useState('');
@@ -458,10 +461,6 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
     }
   }, [apiBase]);
 
-  useEffect(() => {
-    void loadHints();
-  }, [loadHints]);
-
   const registerHints = useCallback(
     () =>
       run(async () => {
@@ -474,6 +473,33 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
         await loadHints();
       }),
     [apiBase, hintLabel, hintUrls, loadHints, run],
+  );
+
+  const loadPriorityRules = useCallback(async () => {
+    try {
+      const body = await callJson<{ rules: readonly { urlIncludes: string; category: string }[] }>(apiBase, 'GET', '/api/documents/priority-hints');
+      setPriorityRules(body.rules);
+    } catch (cause) {
+      setError(String(cause));
+    }
+  }, [apiBase]);
+
+  useEffect(() => {
+    void loadHints();
+    void loadPriorityRules();
+  }, [loadHints, loadPriorityRules]);
+
+  const registerPriorityHints = useCallback(
+    () =>
+      run(async () => {
+        const result = await callJson<{ documentLabel: string; ruleCount: number }>(apiBase, 'POST', '/api/documents/priority-hints', {
+          documentLabel: hintLabel,
+          rules: [{ urlIncludes: priorityIncludes, category: priorityCategory === 'payment' ? 'payment' : 'pii' }],
+        });
+        setHintNotice(t('a08.priorityRegistered', { label: result.documentLabel, count: result.ruleCount }));
+        await loadPriorityRules();
+      }),
+    [apiBase, hintLabel, loadPriorityRules, priorityCategory, priorityIncludes, run],
   );
 
   const registerAuthHints = useCallback(
@@ -610,6 +636,19 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
       <Button disabled={busy} onClick={() => void registerAuthHints()}>
         {t('a08.authHintRegister')}
       </Button>
+      <Text className={styles.muted}>{t('a08.priorityIntro')}</Text>
+      <Field label={t('a08.priorityIncludesLabel')}>
+        <Input value={priorityIncludes} onChange={(_, data) => setPriorityIncludes(data.value)} />
+      </Field>
+      <Field label={t('a08.priorityCategoryLabel')}>
+        <Input value={priorityCategory} onChange={(_, data) => setPriorityCategory(data.value)} />
+      </Field>
+      <Button disabled={busy} onClick={() => void registerPriorityHints()}>
+        {t('a08.priorityRegister')}
+      </Button>
+      {priorityRules.length > 0 && (
+        <Text className={styles.muted}>{t('a08.priorityList', { rules: priorityRules.map((rule) => `${rule.urlIncludes} (${rule.category})`).join('・') })}</Text>
+      )}
       <Text weight="semibold">{t('a08.exploreTitle')}</Text>
       {error !== '' && (
         <MessageBar intent="error">

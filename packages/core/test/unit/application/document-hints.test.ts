@@ -86,6 +86,34 @@ describe('document hints (入力ドキュメントの活用)', () => {
     );
   });
 
+  test('優先付け規則は探索の処理順に反映される (pii・payment が高優先)', async () => {
+    const { service, operator } = await bootstrapFlow();
+    // login.php (pii 規則に一致) を setup.php より後に登録しても先に観測される。
+    service.registerDocumentPriorityHints(operator, {
+      documentLabel: '操作手順書 v2',
+      rules: [{ urlIncludes: '/login.php', category: 'pii' }],
+    });
+    assert.deepEqual(service.listDocumentPriorityRules(), [{ urlIncludes: '/login.php', category: 'pii' }]);
+
+    const { plan } = service.buildExplorationPlan(operator, ['http://fixture.target.test/setup.php', 'http://fixture.target.test/login.php']);
+    service.authorizePlan(plan);
+    const confirmation = service.confirmPlan(plan, operator);
+    await service.runExploration(operator, plan, confirmation, { maxDepth: 1 });
+    const urls = service.listObservations().map((observation) => observation.url);
+    assert.equal(urls[0], 'http://fixture.target.test/login.php', '高優先の URL が最初に観測される');
+    assert.ok(JSON.stringify(service.events()).includes('DocumentPriorityHintsRegistered'));
+
+    // allowlist 外の区分・空条件は拒否。
+    assert.throws(
+      () => service.registerDocumentPriorityHints(operator, { documentLabel: 'd', rules: [{ urlIncludes: '/x', category: 'other' as never }] }),
+      /category not allowed/,
+    );
+    assert.throws(
+      () => service.registerDocumentPriorityHints(operator, { documentLabel: 'd', rules: [{ urlIncludes: '  ', category: 'pii' }] }),
+      /urlIncludes must not be empty/,
+    );
+  });
+
   test('空 label・空 URL 一覧は検証 error。権限なしは拒否', async () => {
     const { service, operator } = await bootstrapFlow();
     assert.throws(

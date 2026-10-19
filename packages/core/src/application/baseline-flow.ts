@@ -32,7 +32,9 @@ import {
   type ActiveScanRequest,
   type DocumentAuthHint,
   type DocumentAuthHintEntry,
+  type DocumentPriorityRule,
   DocumentAuthMethods,
+  DocumentPriorityCategories,
 } from '@scopepilot2/contracts';
 import { ScopePolicy } from '../domain/scope-policy.ts';
 import { mergeDocumentHintSeeds } from '../domain/exploration.ts';
@@ -251,6 +253,8 @@ export class BaselineFlowService {
   private readonly documentHintDocuments: { documentLabel: string; urls: readonly string[] }[] = [];
   /** 入力文書由来の認証情報 hint (AGENTS.md・design/08)。所在のみで秘密値は持たない。 */
   private readonly documentAuthHintDocuments: DocumentAuthHintEntry[] = [];
+  /** 入力文書由来の優先付け規則 (AGENTS.md: pii・payment を高優先)。探索の処理順に効く。 */
+  private readonly documentPriorityRules: readonly DocumentPriorityRule[] = [];
   /** 計画ごとの hint 由来開始点 (canonical)。観測の由来 (document-hint) 判定に使う。 */
   private readonly explorationHintSeeds = new Map<string, ReadonlySet<string>>();
   /** runLogin で得た role session (cookie 値は service 内部のみ。API・監査へ出さない)。 */
@@ -363,6 +367,50 @@ export class BaselineFlowService {
   /** 登録済みの認証情報 hint (文書 label・所在のみ。値は保持しない)。 */
   listDocumentAuthHints(): readonly DocumentAuthHintEntry[] {
     return [...this.documentAuthHintDocuments];
+  }
+
+  /**
+   * 入力文書由来の優先付け規則の登録 (AGENTS.md: クローリング結果の優先付け)。
+   * 個人情報に類するもの (pii)・決済に関わるもの (payment) を高優先として探索の
+   * 処理順に反映する。規則は URL の部分一致。
+   */
+  registerDocumentPriorityHints(
+    operator: OperatorProfile,
+    input: { readonly documentLabel: string; readonly rules: readonly DocumentPriorityRule[] },
+  ): { documentLabel: string; ruleCount: number } {
+    this.requirePermission(operator, 'case.manage');
+    if (input.documentLabel.trim() === '') {
+      throw domainError('ValidationFailed', 'documentLabel must not be empty');
+    }
+    if (input.rules.length === 0) {
+      throw domainError('ValidationFailed', 'priority hints need at least one rule');
+    }
+    for (const [index, rule] of input.rules.entries()) {
+      if (rule.urlIncludes.trim() === '') {
+        throw domainError('ValidationFailed', `rules[${index}]: urlIncludes must not be empty`);
+      }
+      if (!DocumentPriorityCategories.includes(rule.category)) {
+        throw domainError('ValidationFailed', `rules[${index}]: category not allowed: ${String(rule.category)}`);
+      }
+    }
+    (this.documentPriorityRules as DocumentPriorityRule[]).push(...input.rules);
+    this.record({
+      type: 'DocumentPriorityHintsRegistered',
+      at: this.deps.clock.now().toISOString(),
+      documentLabel: input.documentLabel,
+      ruleCount: input.rules.length,
+    });
+    return { documentLabel: input.documentLabel, ruleCount: input.rules.length };
+  }
+
+  /** 登録済みの優先付け規則の一覧。 */
+  listDocumentPriorityRules(): readonly DocumentPriorityRule[] {
+    return [...this.documentPriorityRules];
+  }
+
+  /** URL が優先付け規則に一致するか (探索の処理順用)。 */
+  private isPrioritizedUrl(canonical: string): boolean {
+    return this.documentPriorityRules.some((rule) => canonical.includes(rule.urlIncludes));
   }
 
   /** 観測通信の記録 (traffic log と endpoint 集約の両方に入れる)。 */
@@ -1598,18 +1646,25 @@ export class BaselineFlowService {
     const visited = new Set<string>();
     // hint 由来の開始点は観測の由来を document-hint として残す (F08・AGENTS.md: 未確認表示)。
     const hintSeeds = this.explorationHintSeeds.get(plan.planId);
-    const frontier: { url: string; depth: number; discoveredFrom: string | null; origin: 'crawl' | 'document-hint' }[] = step.targetSnapshot.map((url) => ({
+    const frontier: { url: string; depth: number; discoveredFrom: string | null; origin: 'crawl' | 'document-hint'; priority: 'high' | 'normal' }[] = step.targetSnapshot.map((url) => ({
       url,
       depth: 0,
       discoveredFrom: null,
       origin: hintSeeds?.has(url) === true ? 'document-hint' : 'crawl',
+      // 文書由来の優先付け規則 (pii・payment) に一致する URL は先に処理する。
+      priority: this.isPrioritizedUrl(url) ? 'high' : 'normal',
     }));
 
     let stopReason: StopReason = 'completed';
     let requests = 0;
 
     while (frontier.length > 0) {
-      const entry = frontier.shift();
+      // 優先付け (AGENTS.md): 高優先 (pii・payment) の entry が残っていれば先に処理する。
+      let nextIndex = frontier.findIndex((candidate) => candidate.priority === 'high');
+      if (nextIndex === -1) {
+        nextIndex = 0;
+      }
+      const entry = frontier.splice(nextIndex, 1)[0];
       if (entry === undefined) {
         break;
       }
@@ -1649,7 +1704,7 @@ export class BaselineFlowService {
         for (const link of observation.links) {
           const linkCanonical = ScopePolicy.canonicalUrl(link);
           if (!visited.has(linkCanonical)) {
-            frontier.push({ url: linkCanonical, depth: entry.depth + 1, discoveredFrom: canonical, origin: 'crawl' });
+            frontier.push({ url: linkCanonical, depth: entry.depth + 1, discoveredFrom: canonical, origin: 'crawl', priority: this.isPrioritizedUrl(linkCanonical) ? 'high' : 'normal' });
           }
         }
       }

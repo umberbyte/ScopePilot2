@@ -21,3 +21,20 @@ export interface DocumentAuthHintEntry {
   readonly documentLabel: string;
   readonly entries: readonly DocumentAuthHint[];
 }
+
+/** 優先付けの区分 (AGENTS.md: 個人情報に類するもの・決済に関わるものを高優先)。 */
+export const DocumentPriorityCategories = ['pii', 'payment'] as const;
+
+export type DocumentPriorityCategory = (typeof DocumentPriorityCategories)[number];
+
+/** 文書に記載されていた優先付け規則 (URL 部分一致・区分付き)。 */
+export interface DocumentPriorityRule {
+  readonly urlIncludes: string;
+  readonly category: DocumentPriorityCategory;
+}
+
+/** 登録済みの優先付け hint (文書 label 付き)。 */
+export interface DocumentPriorityHintEntry {
+  readonly documentLabel: string;
+  readonly rules: readonly DocumentPriorityRule[];
+}

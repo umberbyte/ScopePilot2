@@ -486,6 +486,39 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/documents/priority-hints') {
+      return respondJson(response, 200, { rules: service.listDocumentPriorityRules() });
+    }
+    if (route === 'POST /api/documents/priority-hints') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const rulesValue = body.rules;
+        if (!Array.isArray(rulesValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field rules must be an array', false);
+        }
+        const rules = rulesValue.map((rule: unknown, index: number) => {
+          if (typeof rule !== 'object' || rule === null) {
+            throw new DomainError('ValidationFailed', `rules[${index}] must be an object`);
+          }
+          const record = rule as Record<string, unknown>;
+          const category = stringField(record, 'category');
+          if (category !== 'pii' && category !== 'payment') {
+            throw new DomainError('ValidationFailed', `rules[${index}]: category must be pii or payment`);
+          }
+          return { urlIncludes: stringField(record, 'urlIncludes'), category: category as 'pii' | 'payment' };
+        });
+        const result = service.registerDocumentPriorityHints(operator, {
+          documentLabel: stringField(body, 'documentLabel'),
+          rules,
+        });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/documents/auth-hints') {
       return respondJson(response, 200, { hints: service.listDocumentAuthHints() });
     }

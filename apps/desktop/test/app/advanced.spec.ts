@@ -142,6 +142,12 @@ test('A08: 上限を狭めた探索計画を構築・確認・実行し、診断
   await page.getByRole('button', { name: '認証情報の所在を登録する' }).click();
   await expect(page.getByText('操作手順書 (app test) の認証情報 hint を 1 件登録しました (A09 に未確認付きで表示されます)')).toBeVisible({ timeout: 30_000 });
 
+  // 優先付け (pii・payment) を登録すると一致 URL を探索で先に処理する (AGENTS.md)。
+  await page.getByLabel('URL 部分一致条件').fill('/login.php');
+  await page.getByLabel('区分 (pii/payment)').fill('pii');
+  await page.getByRole('button', { name: '優先付けを登録する' }).click();
+  await expect(page.getByText('操作手順書 (app test) の優先付けを 1 件登録しました (以後の探索で先に処理されます)')).toBeVisible({ timeout: 30_000 });
+
   // 上限 (ページ数) を 50 に狭めて計画を構築すると、計画表示に 50 が反映される。
   // 上限欄は探索・診断の両 section にあるため、先頭 (探索側) を指定する。
   await page.getByLabel('最大ページ数 (空=既定)').first().fill('50');

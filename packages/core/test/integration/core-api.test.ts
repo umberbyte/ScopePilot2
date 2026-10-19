@@ -1367,6 +1367,28 @@ describe('Core API server (node:http)', () => {
     assert.match(eventsText, /DocumentHintsRegistered/);
   });
 
+  test('documents/priority-hints は探索の処理順に優先を反映する (AGENTS.md)', async () => {
+    const post = async (path: string, body: unknown): Promise<Response> =>
+      fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    const badCategory = await post('/api/documents/priority-hints', { documentLabel: 'x', rules: [{ urlIncludes: '/a', category: 'other' }] });
+    assert.equal(badCategory.status, 400);
+
+    const registered = await post('/api/documents/priority-hints', {
+      documentLabel: 'IT 手順書',
+      rules: [{ urlIncludes: '/login.php', category: 'pii' }],
+    });
+    assert.equal(registered.status, 201);
+    const registration = (await registered.json()) as { documentLabel: string; ruleCount: number };
+    assert.deepEqual(registration, { documentLabel: 'IT 手順書', ruleCount: 1 });
+
+    const list = (await (await fetch(`${baseUrl}/api/documents/priority-hints`)).json()) as { rules: readonly { urlIncludes: string; category: string }[] };
+    assert.deepEqual(list.rules, [{ urlIncludes: '/login.php', category: 'pii' }]);
+
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /DocumentPriorityHintsRegistered/);
+  });
+
   test('documents/auth-hints は認証情報の所在を登録・一覧する (AGENTS.md・design/08)', async () => {
     const post = async (path: string, body: unknown): Promise<Response> =>
       fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

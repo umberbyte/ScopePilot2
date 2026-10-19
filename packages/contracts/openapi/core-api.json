@@ -3024,6 +3024,136 @@
         }
       }
     },
+    "/api/documents/priority-hints": {
+      "get": {
+        "operationId": "listDocumentPriorityRules",
+        "summary": "登録済みの優先付け規則の一覧",
+        "responses": {
+          "200": {
+            "description": "rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "rules"
+                  ],
+                  "properties": {
+                    "rules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "urlIncludes",
+                          "category"
+                        ],
+                        "properties": {
+                          "urlIncludes": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string",
+                            "enum": [
+                              "pii",
+                              "payment"
+                            ],
+                            "description": "個人情報に類するもの (pii)・決済に関わるもの (payment) は探索で高優先 (AGENTS.md)"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "registerDocumentPriorityHints",
+        "summary": "文書に記載された優先付け規則を登録する (AGENTS.md クローリング結果の優先付け)。一致する URL は探索で先に処理される",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "documentLabel",
+                  "rules"
+                ],
+                "properties": {
+                  "documentLabel": {
+                    "type": "string"
+                  },
+                  "rules": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "urlIncludes",
+                        "category"
+                      ],
+                      "properties": {
+                        "urlIncludes": {
+                          "type": "string",
+                          "description": "URL 部分一致条件"
+                        },
+                        "category": {
+                          "type": "string",
+                          "enum": [
+                            "pii",
+                            "payment"
+                          ],
+                          "description": "個人情報に類するもの (pii)・決済に関わるもの (payment) は探索で高優先 (AGENTS.md)"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "登録結果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "documentLabel",
+                    "ruleCount"
+                  ],
+                  "properties": {
+                    "documentLabel": {
+                      "type": "string"
+                    },
+                    "ruleCount": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/business-logic/checks": {
       "get": {
         "operationId": "listBusinessLogicChecks",
@@ -4877,6 +5007,9 @@
             "$ref": "#/components/schemas/DocumentAuthHintsRegisteredEvent"
           },
           {
+            "$ref": "#/components/schemas/DocumentPriorityHintsRegisteredEvent"
+          },
+          {
             "$ref": "#/components/schemas/SequencerSessionCompletedEvent"
           },
           {
@@ -5391,6 +5524,31 @@
             "type": "string"
           },
           "entryCount": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "DocumentPriorityHintsRegisteredEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "documentLabel",
+          "ruleCount"
+        ],
+        "properties": {
+          "type": {
+            "const": "DocumentPriorityHintsRegistered"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "documentLabel": {
+            "type": "string"
+          },
+          "ruleCount": {
             "type": "integer",
             "minimum": 1
           }

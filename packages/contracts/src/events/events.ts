@@ -21,6 +21,7 @@ export type BaselineFlowEvent =
   | { readonly type: 'LoginCompleted'; readonly at: string; readonly role: string; readonly authenticated: boolean; readonly secretReferences: readonly string[] }
   | { readonly type: 'DocumentHintsRegistered'; readonly at: string; readonly documentLabel: string; readonly urlCount: number; readonly acceptedUrlCount: number }
   | { readonly type: 'DocumentAuthHintsRegistered'; readonly at: string; readonly documentLabel: string; readonly entryCount: number }
+  | { readonly type: 'DocumentPriorityHintsRegistered'; readonly at: string; readonly documentLabel: string; readonly ruleCount: number }
   | { readonly type: 'SequencerSessionCompleted'; readonly at: string; readonly sessionId: string; readonly targetUrl: string; readonly verdict: 'assessed' | 'insufficient'; readonly sampleCount: number; readonly duplicates: number; readonly missing: number }
   | { readonly type: 'ApiSpecImported'; readonly at: string; readonly documentLabel: string; readonly endpointCount: number; readonly excludedServerCount: number }
   | { readonly type: 'OastAttemptStarted'; readonly at: string; readonly attemptId: string; readonly targetUrl: string; readonly protocol: 'http' | 'dns' | 'smtp' | 'icmp' }

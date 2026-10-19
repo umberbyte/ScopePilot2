@@ -356,6 +356,13 @@ export const strings = {
   'a08.authHintLocationLabel': '文書内の所在 (例: p.13 管理者ログイン)',
   'a08.authHintRegister': '認証情報の所在を登録する',
   'a08.authHintRegistered': '{label} の認証情報 hint を {count} 件登録しました (A09 に未確認付きで表示されます)',
+  'a08.priorityIntro':
+    '文書に記載された優先付け (個人情報に類する pii・決済に関わる payment) を登録すると、一致する URL を探索で先に処理します (AGENTS.md)。',
+  'a08.priorityIncludesLabel': 'URL 部分一致条件',
+  'a08.priorityCategoryLabel': '区分 (pii/payment)',
+  'a08.priorityRegister': '優先付けを登録する',
+  'a08.priorityRegistered': '{label} の優先付けを {count} 件登録しました (以後の探索で先に処理されます)',
+  'a08.priorityList': '登録済みの優先付け: {rules}',
   'a08.exploreTitle': '探索計画 (crawl)',
   'a08.seedsLabel': '開始 URL (1行1件)',
   'a08.exploreRoleLabel': '探索 session の role (任意・A09 で login 済みの role。空なら非認証)',

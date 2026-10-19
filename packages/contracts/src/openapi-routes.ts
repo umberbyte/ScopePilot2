@@ -58,6 +58,8 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'POST', path: '/api/extensions', operationId: 'installExtension' },
   { method: 'GET', path: '/api/documents/auth-hints', operationId: 'listDocumentAuthHints' },
   { method: 'POST', path: '/api/documents/auth-hints', operationId: 'registerDocumentAuthHints' },
+  { method: 'GET', path: '/api/documents/priority-hints', operationId: 'listDocumentPriorityRules' },
+  { method: 'POST', path: '/api/documents/priority-hints', operationId: 'registerDocumentPriorityHints' },
   { method: 'GET', path: '/api/business-logic/checks', operationId: 'listBusinessLogicChecks' },
   { method: 'POST', path: '/api/business-logic/checks', operationId: 'runBusinessLogicCheck' },
   { method: 'GET', path: '/api/traffic', operationId: 'listTraffic' },

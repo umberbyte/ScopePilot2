@@ -53,6 +53,7 @@ const EXPECTED_EVENT_TYPES = [
   'LoginCompleted',
   'DocumentHintsRegistered',
   'DocumentAuthHintsRegistered',
+  'DocumentPriorityHintsRegistered',
   'SequencerSessionCompleted',
   'ApiSpecImported',
   'OastAttemptStarted',
