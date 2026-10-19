@@ -59,6 +59,7 @@ const EXPECTED_EVENT_TYPES = [
   'OastCallbacksRecorded',
   'WsFramesImported',
   'WsMessagesSent',
+  'TransportNegotiated',
   'ReportGenerated',
 ];
 

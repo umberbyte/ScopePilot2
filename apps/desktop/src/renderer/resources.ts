@@ -146,6 +146,18 @@ export const strings = {
   'a10.ws.col.direction': '方向',
   'a10.ws.col.text': 'text',
   'a10.ws.col.rawHash': 'raw hash',
+  'a10.transportTitle': 'HTTP/2 transport',
+  'a10.transportIntro':
+    'transport の選択と HTTP/2 header 検証 (design/f15)。HTTP/3 は Unsupported。fallback を許可しない場合、peer が h2 を offer しなければ失敗します (暗黙の H1 downgrade はしない)。',
+  'a10.transportTargetLabel': '対象 URL (transport)',
+  'a10.transportFallbackLabel': 'HTTP/1.1 fallback を許可する',
+  'a10.transportNegotiate': 'transport を選択する',
+  'a10.transportResult': 'protocol {protocol} ({downgraded})・ALPN {alpn}・runtime {runtime}',
+  'a10.transportDowngraded': 'downgrade あり',
+  'a10.transportNoDowngrade': 'downgrade なし',
+  'a10.transportHeadersLabel': 'header (1行1件・Name: Value)',
+  'a10.transportValidate': 'header を検証する',
+  'a10.transportHeadersOk': '検証 OK (pseudo header: {ordered}・authority: {authority})',
 
   'a05.intro':
     '実 proxy listener (通信傍受・転送本体) は実 engine 接続と共に後続増分です。ここでは break queue への受付と判断 (forward / drop) を扱います。deadline 経過・queue 上限は既定で drop し、暗黙 forward はしません。',

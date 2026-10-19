@@ -1114,6 +1114,33 @@ describe('Core API server (node:http)', () => {
     }
   });
 
+  test('tools/transport は選択と header 検証を扱う (design/f15)', async () => {
+    const post = async (path: string, body: unknown): Promise<Response> =>
+      fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    const negotiated = await post('/api/tools/transport/negotiate', { targetUrl: 'http://fixture.target.test/api', allowFallback: false });
+    assert.equal(negotiated.status, 200);
+    const result = (await negotiated.json()) as { protocol: string; downgraded: boolean; alpn: string };
+    assert.deepEqual(result, { protocol: 'h2', downgraded: false, alpn: 'h2', runtime: 'fixture-transport' });
+
+    const noFallback = await post('/api/tools/transport/negotiate', { targetUrl: 'http://fixture.target.test/h1-only', allowFallback: false });
+    assert.equal(noFallback.status, 503);
+
+    const validated = await post('/api/tools/transport/validate-headers', {
+      headers: [[':method', 'GET'], [':scheme', 'http'], [':authority', 'fixture.target.test'], [':path', '/'], ['x-a', '1']],
+      scheme: 'http',
+    });
+    assert.equal(validated.status, 200);
+    const validation = (await validated.json()) as { ordered: readonly string[]; authority: string };
+    assert.deepEqual(validation.ordered, [':method', ':scheme', ':authority', ':path']);
+
+    const badHeaders = await post('/api/tools/transport/validate-headers', { headers: [['x-a', '1'], [':method', 'GET']], scheme: 'http' });
+    assert.equal(badHeaders.status, 400);
+
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /TransportNegotiated/);
+  });
+
   test('websocket は frame 取込・送信・一覧を扱う (design/f14)', async () => {
     const post = async (path: string, body: unknown): Promise<Response> =>
       fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

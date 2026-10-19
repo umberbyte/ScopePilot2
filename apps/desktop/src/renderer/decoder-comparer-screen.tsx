@@ -62,6 +62,11 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [wsSendText, setWsSendText] = useState('');
   const [wsNotice, setWsNotice] = useState('');
   const [wsFrames, setWsFrames] = useState<readonly { frameId: string; direction: string; text: string; rawHash: string }[]>([]);
+  const [transportTarget, setTransportTarget] = useState('http://fixture.target.test/api');
+  const [transportAllowFallback, setTransportAllowFallback] = useState(true);
+  const [transportResult, setTransportResult] = useState<{ protocol: string; downgraded: boolean; alpn: string; runtime: string } | null>(null);
+  const [headerText, setHeaderText] = useState(':method: GET\n:scheme: http\n:authority: fixture.target.test\n:path: /');
+  const [headerResult, setHeaderResult] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -102,6 +107,45 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       setBusy(false);
     }
   }, [apiBase, sequencerSamples, sequencerTarget]);
+
+  const negotiate = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    setTransportResult(null);
+    try {
+      setTransportResult(await callJson<{ protocol: string; downgraded: boolean; alpn: string; runtime: string }>(apiBase, '/api/tools/transport/negotiate', {
+        targetUrl: transportTarget,
+        allowFallback: transportAllowFallback,
+      }));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, transportAllowFallback, transportTarget]);
+
+  const validateHeaders = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    setHeaderResult('');
+    try {
+      const headers = headerText
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line !== '')
+        .map((line): readonly [string, string] => {
+          // pseudo header は先頭 ':' から始まるため区切りは 2 文字目以降で探す。
+          const separator = line.indexOf(':', 1);
+          return separator === -1 ? [line, ''] : [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
+        });
+      const result = await callJson<{ ordered: readonly string[]; authority: string }>(apiBase, '/api/tools/transport/validate-headers', { headers, scheme: 'http' });
+      setHeaderResult(t('a10.transportHeadersOk', { ordered: result.ordered.join(', ') || '—', authority: result.authority }));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, headerText]);
 
   const loadWsFrames = useCallback(async () => {
     try {
@@ -311,6 +355,25 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         {t('a10.wsSend')}
       </Button>
       {wsNotice !== '' && <Text role="status">{wsNotice}</Text>}
+      <Text weight="semibold">{t('a10.transportTitle')}</Text>
+      <Text className={styles.muted}>{t('a10.transportIntro')}</Text>
+      <Field label={t('a10.transportTargetLabel')}>
+        <Input value={transportTarget} onChange={(_, data) => setTransportTarget(data.value)} />
+      </Field>
+      <Checkbox label={t('a10.transportFallbackLabel')} checked={transportAllowFallback} onChange={(_, data) => setTransportAllowFallback(data.checked === true)} />
+      <Button appearance="primary" disabled={busy} onClick={() => void negotiate()}>
+        {t('a10.transportNegotiate')}
+      </Button>
+      {transportResult !== null && (
+        <Text role="status">{t('a10.transportResult', { protocol: transportResult.protocol, downgraded: transportResult.downgraded ? t('a10.transportDowngraded') : t('a10.transportNoDowngrade'), alpn: transportResult.alpn, runtime: transportResult.runtime })}</Text>
+      )}
+      <Field label={t('a10.transportHeadersLabel')}>
+        <Textarea value={headerText} onChange={(_, data) => setHeaderText(data.value)} rows={4} />
+      </Field>
+      <Button disabled={busy} onClick={() => void validateHeaders()}>
+        {t('a10.transportValidate')}
+      </Button>
+      {headerResult !== '' && <Text role="status">{headerResult}</Text>}
       {wsFrames.length > 0 && (
         <Table size="small" aria-label={t('a10.wsTable.aria')}>
           <TableHeader>

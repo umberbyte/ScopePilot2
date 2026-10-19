@@ -372,6 +372,45 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'POST /api/tools/transport/negotiate') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const requested = typeof body.requested === 'string' ? stringField(body, 'requested') : undefined;
+        if (requested !== undefined && requested !== 'h2' && requested !== 'http/1.1' && requested !== 'h3') {
+          return respondError(response, 400, 'ValidationFailed', 'field requested must be one of h2/http-1.1/h3', false);
+        }
+        const result = service.negotiateTransportFor(operator, {
+          targetUrl: stringField(body, 'targetUrl'),
+          allowFallback: body.allowFallback === true,
+          ...(requested === undefined ? {} : { requested: requested as 'h2' | 'http/1.1' }),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/tools/transport/validate-headers') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const headersValue = body.headers;
+        if (!Array.isArray(headersValue) || headersValue.some((entry) => !Array.isArray(entry) || entry.length !== 2 || entry.some((value) => typeof value !== 'string'))) {
+          return respondError(response, 400, 'ValidationFailed', 'field headers must be an array of [name, value] string pairs', false);
+        }
+        const result = service.validateTransportHeaders(operator, {
+          headers: headersValue as readonly (readonly [string, string])[],
+          scheme: stringField(body, 'scheme'),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/documents/hints') {
       return respondJson(response, 200, { hints: service.listDocumentHints() });
     }

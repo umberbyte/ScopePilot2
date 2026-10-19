@@ -95,6 +95,7 @@ import { assess, createSamplePlan, extractToken, reportProjection, SampleCollect
 import { parseOpenApiDocument } from '../domain/api-scanning.ts';
 import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, TokenIssuer, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
 import { buildWsSendPlan, importFrames, sendWithPolicy, wsEvidence, type WsFrame } from '../domain/websocket.ts';
+import { checkAuthorityScope, negotiateTransport, transportCapability, transportEvidence, validateHeaderValues, validatePseudoHeaders } from '../domain/advanced-transport.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
 import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, LoginSessionCookie } from '../ports/engines.ts';
@@ -1010,6 +1011,56 @@ export class BaselineFlowService {
       ...(result.rejected === null ? {} : { rejected: result.rejected }),
     });
     return { planHash: plan.planHash, sent: result.sent, rejected: result.rejected };
+  }
+
+  /**
+   * transport の選択 (design/f15)。HTTP/3 は能力表で Unsupported。peer が h2 を
+   * offer しない場合、fallback 未許可なら CapabilityUnavailable (F15-UT-004)。
+   * fixture peer は URL に h1-only を含む場合のみ h2 を offer しない。
+   * negotiation 結果は ALPN/runtime を保持する (F15-UT-007)。
+   */
+  negotiateTransportFor(operator: OperatorProfile, input: { readonly targetUrl: string; readonly allowFallback: boolean; readonly requested?: 'h2' | 'http/1.1' }): { protocol: 'h2' | 'http/1.1'; downgraded: boolean; alpn: string; runtime: string } {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
+    const decision = ScopePolicy.decide(caseRecord.scope, canonical);
+    if (!decision.allowed) {
+      throw domainError('OutOfScope', `transport target is out of scope: ${decision.reason}`);
+    }
+    if (input.requested !== undefined && transportCapability(input.requested) === 'Unsupported') {
+      throw domainError('CapabilityUnavailable', `transport ${input.requested} is Unsupported`);
+    }
+    const offered = canonical.includes('h1-only') ? ['http/1.1'] : ['h2'];
+    const negotiated = negotiateTransport({ offered, allowFallback: input.allowFallback });
+    const evidence = transportEvidence({ alpn: negotiated.protocol, runtime: 'fixture-transport' });
+    this.record({
+      type: 'TransportNegotiated',
+      at: this.deps.clock.now().toISOString(),
+      targetUrl: canonical,
+      protocol: negotiated.protocol,
+      downgraded: negotiated.downgraded,
+    });
+    return { protocol: negotiated.protocol, downgraded: negotiated.downgraded, ...evidence };
+  }
+
+  /**
+   * HTTP/2 header 検証 (design/f15)。pseudo header の重複・順序 (F15-UT-001)・
+   * CRLF 注入になり得る値 (F15-UT-003)・:authority の scope (F15-UT-002) を検証する。
+   */
+  validateTransportHeaders(
+    operator: OperatorProfile,
+    input: { readonly headers: readonly (readonly [string, string])[]; readonly scheme: string },
+  ): { ordered: readonly string[]; authority: string } {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const { ordered } = validatePseudoHeaders(input.headers);
+    validateHeaderValues(input.headers);
+    const scopeDecision = checkAuthorityScope(input.headers, input.scheme, caseRecord.scope);
+    if (!scopeDecision.allowed) {
+      throw domainError('OutOfScope', `:authority is out of scope: ${scopeDecision.reason}`);
+    }
+    const authority = input.headers.find(([name]) => name === ':authority')?.[1] ?? '';
+    return { ordered, authority };
   }
 
   listApiSpecImports(): readonly { documentLabel: string; endpointCount: number; importedAt: string }[] {

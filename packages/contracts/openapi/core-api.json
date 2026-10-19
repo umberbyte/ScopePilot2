@@ -2420,6 +2420,173 @@
         }
       }
     },
+    "/api/tools/transport/negotiate": {
+      "post": {
+        "operationId": "negotiateTransportFor",
+        "summary": "transport を選択する (design/f15)。HTTP/3 は Unsupported・fallback 未許可での H1 downgrade は CapabilityUnavailable",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetUrl",
+                  "allowFallback"
+                ],
+                "properties": {
+                  "targetUrl": {
+                    "type": "string"
+                  },
+                  "allowFallback": {
+                    "type": "boolean",
+                    "description": "false の場合、peer が h2 を offer しなければ失敗する (F15-UT-004)"
+                  },
+                  "requested": {
+                    "type": "string",
+                    "enum": [
+                      "h2",
+                      "http/1.1",
+                      "h3"
+                    ],
+                    "description": "h3 は能力表で Unsupported (F15-UT-006)"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "negotiation 結果 (ALPN・runtime 付き)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "protocol",
+                    "downgraded",
+                    "alpn",
+                    "runtime"
+                  ],
+                  "properties": {
+                    "protocol": {
+                      "type": "string",
+                      "enum": [
+                        "h2",
+                        "http/1.1"
+                      ]
+                    },
+                    "downgraded": {
+                      "type": "boolean"
+                    },
+                    "alpn": {
+                      "type": "string",
+                      "description": "negotiation 結果の ALPN (F15-UT-007)"
+                    },
+                    "runtime": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/tools/transport/validate-headers": {
+      "post": {
+        "operationId": "validateTransportHeaders",
+        "summary": "HTTP/2 header を検証する (design/f15)。pseudo header 規則・CRLF 注入拒否・:authority の scope",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "headers",
+                  "scheme"
+                ],
+                "properties": {
+                  "headers": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  },
+                  "scheme": {
+                    "type": "string",
+                    "enum": [
+                      "http",
+                      "https"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "検証結果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ordered",
+                    "authority"
+                  ],
+                  "properties": {
+                    "ordered": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "検出された pseudo header (正順)"
+                    },
+                    "authority": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/documents/auth-hints": {
       "get": {
         "operationId": "listDocumentAuthHints",
@@ -4435,6 +4602,9 @@
             "$ref": "#/components/schemas/WsMessagesSentEvent"
           },
           {
+            "$ref": "#/components/schemas/TransportNegotiatedEvent"
+          },
+          {
             "$ref": "#/components/schemas/ReportGeneratedEvent"
           }
         ]
@@ -5138,6 +5308,38 @@
               "rate"
             ],
             "description": "上限で拒否した場合のみ"
+          }
+        }
+      },
+      "TransportNegotiatedEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "targetUrl",
+          "protocol",
+          "downgraded"
+        ],
+        "properties": {
+          "type": {
+            "const": "TransportNegotiated"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "targetUrl": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "h2",
+              "http/1.1"
+            ]
+          },
+          "downgraded": {
+            "type": "boolean"
           }
         }
       },

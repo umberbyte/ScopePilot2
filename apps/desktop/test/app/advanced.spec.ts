@@ -301,6 +301,12 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await page.getByRole('button', { name: 'message を送信する' }).click();
   await expect(page.getByText('送信しました (1 件・plan hash 付き)')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('cell', { name: 'ping' })).toBeVisible();
+
+  // HTTP/2 transport: 選択と header 検証 (design/f15)。
+  await page.getByRole('button', { name: 'transport を選択する' }).click();
+  await expect(page.getByText('protocol h2 (downgrade なし)・ALPN h2・runtime fixture-transport')).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'header を検証する' }).click();
+  await expect(page.getByText(/検証 OK \(pseudo header: :method, :scheme, :authority, :path・authority: fixture\.target\.test\)/)).toBeVisible({ timeout: 30_000 });
 });
 
 test('A05: break queue の受付・転送・破棄と対象外 URL の拒否を扱う', async () => {
