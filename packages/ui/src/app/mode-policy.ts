@@ -15,6 +15,11 @@ export type UiRoute =
   | 'wizard.final-confirm'
   | 'wizard.run'
   | 'wizard.report'
+  | 'advanced.dashboard'
+  | 'advanced.scope'
+  | 'advanced.guidelines'
+  | 'advanced.sessions'
+  | 'advanced.jobs'
   | 'browser.site-map'
   | 'proxy.intercept'
   | 'repeater'
@@ -42,6 +47,11 @@ const ROUTE_PERMISSIONS: Readonly<Record<UiRoute, OperatorPermission>> = {
   'wizard.final-confirm': 'run.manage',
   'wizard.run': 'run.manage',
   'wizard.report': 'report.export',
+  'advanced.dashboard': 'case.read',
+  'advanced.scope': 'case.manage',
+  'advanced.guidelines': 'case.read',
+  'advanced.sessions': 'run.manage',
+  'advanced.jobs': 'case.read',
   'browser.site-map': 'case.read',
   'proxy.intercept': 'run.manage',
   repeater: 'run.manage',

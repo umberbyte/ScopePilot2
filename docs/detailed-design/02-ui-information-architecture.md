@@ -90,5 +90,8 @@ AI は `CaseSetup`, `GuidelineExplain`, `DocumentExtract`, `CrawlSuggest`, `Cand
 | UI-UT-009 | `packages/ui/test/unit/wizard/wizard-state.test.ts` | 未完了 step の進行 | 拒否し理由を返す |
 | UI-UT-010 | 同上 | step→route 写像 | 全 step が Simple 許可 route に一意に写る |
 | UI-UT-011 | 同上 | 戻り遷移 | S01 以外は常に許可、S07 は常に完了扱い |
+| UI-UT-012 | `packages/ui/test/unit/app/advanced-nav.test.ts` | Advanced ナビ構成 | A01〜A13 の順で全 route が Advanced 専用 |
+| UI-UT-013 | 同上 | 権限不足の operator | 権限外画面をナビから隠す |
+| UI-UT-014 | 同上 | 既定着地 | 権限内の最初の画面 (通常 A01) を返す |
 
 実 DOM、keyboard、仮想化、Electron bridge は Playwright component/app test で検証し、presenter の単体テストだけで画面品質を保証したことにしない。

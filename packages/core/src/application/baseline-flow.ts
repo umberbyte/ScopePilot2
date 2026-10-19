@@ -61,6 +61,8 @@ export interface BaselineFlowDeps {
   readonly runtimeBundleHash: string;
   /** run 記録の永続化 (任意)。開始時 (Running) と終了時の両方へ保存する。 */
   readonly runSink?: import('../ports/infra.ts').RunSinkPort;
+  /** 案件記録の永続化 (任意)。作成・scope 更新時に保存する (runs FK の参照先)。 */
+  readonly caseSink?: { save(record: CaseRecord): void };
 }
 
 export interface CreateCaseInput {
@@ -181,6 +183,7 @@ export class BaselineFlowService {
       scope: { allowedOrigins: [...new Set(allowed)], deniedOrigins: [...new Set(denied)], limits: input.limits },
       createdAt: this.deps.clock.now().toISOString(),
     });
+    this.deps.caseSink?.save(this.aggregate.record);
     this.record({ type: 'CaseCreated', at: this.deps.clock.now().toISOString(), caseId: this.aggregate.record.caseId, revision: 1 });
     return this.aggregate.record;
   }
@@ -224,6 +227,7 @@ export class BaselineFlowService {
         reason: 'case scope narrowed',
       });
     }
+    this.deps.caseSink?.save(outcome.record);
     return outcome;
   }
 

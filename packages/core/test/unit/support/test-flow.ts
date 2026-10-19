@@ -142,6 +142,7 @@ export interface TestFlow {
 export function createTestService(
   options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion'> & {
     runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
+    caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
   } = {},
 ): TestFlow {
   const explorer = new FakeExplorer();
@@ -155,6 +156,7 @@ export function createTestService(
     capabilities: testCapabilities(options.zapCapabilityVersion),
     runtimeBundleHash: 'test-runtime-bundle',
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
+    ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });
   const operator: OperatorProfile = {
     ...TEST_OPERATOR,

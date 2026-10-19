@@ -17,6 +17,7 @@
     "@scopepilot2/contracts": "*",
     "@scopepilot2/core": "*",
     "@scopepilot2/simulation": "*",
+    "@scopepilot2/storage": "*",
     "@scopepilot2/ui": "*",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

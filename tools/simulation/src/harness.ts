@@ -41,7 +41,13 @@ export interface SimulationHarness {
   readonly runtimeBundleHash: string;
 }
 
-export function createHarness(): SimulationHarness {
+/** 案件・run 記録の保存先 (design/20 §2・design/22 §6)。指定しない場合は保存しない。 */
+export interface HarnessOptions {
+  readonly runSink?: { save(record: import('@scopepilot2/contracts').RunRecord): void };
+  readonly caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
+}
+
+export function createHarness(options: HarnessOptions = {}): SimulationHarness {
   const explorer = new FixtureExplorer();
   const scanEngine = new FixtureZapEngine();
   const capabilities = fixtureCapabilitySnapshots();
@@ -53,6 +59,8 @@ export function createHarness(): SimulationHarness {
     scanEngine,
     capabilities,
     runtimeBundleHash: FIXTURE_RUNTIME_BUNDLE_HASH,
+    ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
+    ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });
   return { service, explorer, scanEngine, capabilities, runtimeBundleHash: FIXTURE_RUNTIME_BUNDLE_HASH };
 }

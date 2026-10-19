@@ -1,4 +1,5 @@
 export * from './app/mode-policy.ts';
+export * from './app/advanced-nav.ts';
 export * from './app/revision-conflict.ts';
 export * from './app/shell.tsx';
 export * from './presenters/execution-summary.ts';
