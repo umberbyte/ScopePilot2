@@ -10,6 +10,8 @@ import { OutputFormatter, type OutputWriters } from './output-formatter.ts';
 import { runSimulate } from './simulate.ts';
 import { runCapabilities } from './capabilities.ts';
 import { runEvents } from './events.ts';
+import { runCaseStatus } from './case-status.ts';
+import { runFuzz } from './fuzz.ts';
 
 export async function main(argv: readonly string[], writers?: OutputWriters): Promise<number> {
   const boundWriters: OutputWriters = writers ?? {
@@ -32,6 +34,19 @@ export async function main(argv: readonly string[], writers?: OutputWriters): Pr
     throw error;
   }
 
+  if (parsed.command === 'case-status') {
+    return await runCaseStatus({ apiUrl: parsed.apiUrl ?? '' }, boundWriters);
+  }
+  if (parsed.command === 'fuzz') {
+    return await runFuzz(
+      {
+        target: parsed.fuzzTarget ?? '',
+        positions: parsed.fuzzPositions ?? [],
+        ...(parsed.apiUrl === undefined ? {} : { apiUrl: parsed.apiUrl }),
+      },
+      boundWriters,
+    );
+  }
   if (parsed.command === 'capabilities') {
     return await runCapabilities(
       parsed.apiUrl === undefined ? {} : { apiUrl: parsed.apiUrl },
