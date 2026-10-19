@@ -5,7 +5,7 @@
  * この画面の受付 (intake) は fixture・検証用の供給点である。
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { MessageBar, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 
 interface BreakItemView {
   readonly itemId: string;
@@ -123,9 +123,9 @@ export function ProxyInterceptScreen({ apiBase }: { apiBase: string }): React.Re
         実 proxy listener (通信傍受・転送本体) は実 engine 接続と共に後続増分です。ここでは break queue への受付と判断 (forward / drop) を扱います。deadline 経過・queue 上限は既定で drop し、暗黙 forward はしません。
       </Text>
       {error !== '' && (
-        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+        <MessageBar intent="error">
           {`Error: ${error}`}
-        </Text>
+        </MessageBar>
       )}
       {notice !== '' && <Text role="status">{notice}</Text>}
       <Text weight="semibold">{`break queue (${queue.items.length} 件・保持中 ${held.length} 件)`}</Text>

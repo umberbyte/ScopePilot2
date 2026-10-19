@@ -5,7 +5,7 @@
  * 実行は fixture adapter (決定的応答・仮想時計で rate を進める)。実 adapter は後続増分。
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { MessageBar, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 
 interface PayloadSetView {
   readonly name: string;
@@ -114,9 +114,9 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
   return (
     <div className={styles.section}>
       {error !== '' && (
-        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+        <MessageBar intent="error">
           {`Error: ${error}`}
-        </Text>
+        </MessageBar>
       )}
       <Text className={styles.muted}>
         組合せ総数が上限 (案件上限と 200 の小さい方) を超えると送信前に拒否されます。応答は (status・長さ・hash) ごとに cluster 集約し、全体の一覧は表示しません。rate は 2 req/s 既定 (仮想時計で進めます)。

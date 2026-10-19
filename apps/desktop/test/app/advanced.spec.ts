@@ -347,6 +347,25 @@ test('キーボードだけでモードと画面ナビを操作できる (design
   await expect(page.getByText(/Scope \(現在 revision \d+\)/)).toBeVisible();
 });
 
+test('OS の明暗設定にテーマが追従する (design/28 §8.1 MUST 3)', async () => {
+  const providerColor = async (): Promise<string> =>
+    page.evaluate(() => {
+      const provider = document.querySelector('.fui-FluentProvider');
+      return provider === null ? '' : getComputedStyle(provider).backgroundColor;
+    });
+  const light = await providerColor();
+  // dark へ切替 (Electron の renderer は emulateMedia で prefers-color-scheme を切替可)。
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect
+    .poll(async () => await providerColor(), { timeout: 10_000 })
+    .not.toBe(light);
+  // 元に戻す (以後の test は light 前提ではないが、状態を残さない)。
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect
+    .poll(async () => await providerColor(), { timeout: 10_000 })
+    .toBe(light);
+});
+
 test('未実装プレースホルダはもう残っていない (全 Advanced 画面が実装済み)', async () => {
   await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toHaveCount(0);
 });

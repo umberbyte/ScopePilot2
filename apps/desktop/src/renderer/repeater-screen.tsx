@@ -5,7 +5,7 @@
  * 実送信は fixture adapter (決定的応答)。実 adapter は後続増分。
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Field, Input, makeStyles, Text, Textarea, tokens } from '@fluentui/react-components';
+import { MessageBar, Button, Field, Input, makeStyles, Text, Textarea, tokens } from '@fluentui/react-components';
 
 interface DraftView {
   readonly draftId: string;
@@ -123,9 +123,9 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
   return (
     <div className={styles.section}>
       {error !== '' && (
-        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+        <MessageBar intent="error">
           {`Error: ${error}`}
-        </Text>
+        </MessageBar>
       )}
       <Text className={styles.muted}>
         draft は tab として最大 20 件。編集のたびに revision と計画 hash が進み、画面に表示した hash と一致するときだけ送信します (編集後の古い hash では送信されません)。応答は summary のみ (binary は text 化しません)。
@@ -188,7 +188,7 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
                   )}
                 </>
               ) : (
-                <Text role="alert">{`送信しませんでした: ${sendResult.reason ?? ''}`}</Text>
+                <MessageBar intent="error">{`送信しませんでした: ${sendResult.reason ?? ''}`}</MessageBar>
               )}
             </div>
           )}

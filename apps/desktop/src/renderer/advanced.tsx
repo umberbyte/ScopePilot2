@@ -6,7 +6,7 @@
  * 編集系 (crawl 計画・テンプレート選択など) は後続増分で、API は読取 endpoint のみ使う。
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Badge, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { MessageBar, Badge, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 import { advancedDefaultRoute, advancedNavItems, type AdvancedNavItem } from '@scopepilot2/ui';
 import { revisionConflictDecision } from '@scopepilot2/ui';
 import type { AuthorizationRecord, CaseRecord, EngineCapabilitySnapshot, OperatorPermission, RunRecord } from '@scopepilot2/contracts';
@@ -148,7 +148,7 @@ function ScopeAuthorizationScreen({ apiBase }: { apiBase: string }): React.React
     return (
       <div className={styles.section}>
         <Text weight="semibold">Scope & Authorization</Text>
-        {error !== '' ? <Text role="alert">{error}</Text> : <Text>取得中…</Text>}
+        {error !== '' ? <MessageBar intent="error">{error}</MessageBar> : <Text>取得中…</Text>}
       </div>
     );
   }
@@ -189,14 +189,12 @@ function ScopeAuthorizationScreen({ apiBase }: { apiBase: string }): React.React
       <div className={styles.section}>
         {savedNote !== '' && <Text role="status">{savedNote}</Text>}
         {conflict !== '' && (
-          <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
-            {conflict}
-          </Text>
+          <MessageBar intent="warning">{conflict}</MessageBar>
         )}
         {error !== '' && (
-          <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+          <MessageBar intent="error">
             {`Error: ${error}`}
-          </Text>
+          </MessageBar>
         )}
         <Button appearance="primary" disabled={busy} onClick={() => void save()}>
           scope を保存する
@@ -289,9 +287,9 @@ function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactE
     <div className={styles.section}>
       <Text weight="semibold">{`所見 (${findings.length} 件)`}</Text>
       {error !== '' && (
-        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+        <MessageBar intent="error">
           {`Error: ${error}`}
-        </Text>
+        </MessageBar>
       )}
       {findings.length === 0 ? (
         loaded && <Text className={styles.muted}>所見はまだありません。診断の実行 (S06 / run/scan) 後に表示されます。</Text>
@@ -510,9 +508,9 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
     <div className={styles.section}>
       <Text weight="semibold">探索計画 (crawl)</Text>
       {error !== '' && (
-        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+        <MessageBar intent="error">
           {`Error: ${error}`}
-        </Text>
+        </MessageBar>
       )}
       <Field label="開始 URL (1行1件)">
         <Textarea value={seeds} onChange={(_, data) => setSeeds(data.value)} rows={2} />
@@ -603,9 +601,9 @@ function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
     <div className={styles.section}>
       <Text weight="semibold">{`観測済み page (${observations.length} 件)`}</Text>
       {error !== '' && (
-        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+        <MessageBar intent="error">
           {`Error: ${error}`}
-        </Text>
+        </MessageBar>
       )}
       {observations.length === 0 ? (
         loaded && <Text className={styles.muted}>観測はまだありません。A08 (または S03) で探索を実行すると表示されます。</Text>
@@ -771,9 +769,9 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
           {activeItem === undefined ? '' : `${activeItem.screenId} ${activeItem.label}`}
         </Text>
         {error !== '' && (
-          <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+          <MessageBar intent="error">
             {`Error: ${error}`}
-          </Text>
+          </MessageBar>
         )}
         {activeRoute === 'advanced.dashboard' && (
           <>

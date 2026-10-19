@@ -6,7 +6,7 @@
 import { createRoot } from 'react-dom/client';
 import { AdvancedApp } from './advanced.tsx';
 import { WizardApp } from './wizard.tsx';
-import { FluentProvider, webLightTheme, Text, Spinner, makeStyles, Button } from '@fluentui/react-components';
+import { FluentProvider, webDarkTheme, webLightTheme, Text, Spinner, makeStyles, Button } from '@fluentui/react-components';
 import React, { useEffect, useState } from 'react';
 
 interface DesktopBridge {
@@ -23,6 +23,25 @@ const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px' },
   modebar: { display: 'flex', gap: '8px', alignItems: 'center' },
 });
+
+/** OS の明暗設定に追従する (design/28 §8.1 MUST 3。Electron では nativeTheme が反映される)。 */
+function usePrefersLight(): boolean {
+  const query = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  const [light, setLight] = useState(query === null || !query.matches);
+  useEffect(() => {
+    if (query === null) {
+      return;
+    }
+    const onChange = (event: MediaQueryListEvent): void => {
+      setLight(!event.matches);
+    };
+    query.addEventListener('change', onChange);
+    return () => {
+      query.removeEventListener('change', onChange);
+    };
+  }, [query]);
+  return light;
+}
 
 function App(): React.ReactElement {
   const styles = useStyles();
@@ -79,8 +98,14 @@ const container = document.getElementById('root');
 if (container === null) {
   throw new Error('root element not found');
 }
-createRoot(container).render(
-  <FluentProvider theme={webLightTheme}>
-    <App />
-  </FluentProvider>,
-);
+/** provider の外で明暗を決める wrapper (FluentProvider の theme を切替)。 */
+function ThemedApp(): React.ReactElement {
+  const prefersLight = usePrefersLight();
+  return (
+    <FluentProvider theme={prefersLight ? webLightTheme : webDarkTheme}>
+      <App />
+    </FluentProvider>
+  );
+}
+
+createRoot(container).render(<ThemedApp />);

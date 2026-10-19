@@ -4,7 +4,7 @@
  * role ごとの cookie jar 割当 (共有警告) を扱う。業務ロジック検証 (design/f17) は後続増分。
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { MessageBar, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 
 interface SessionView {
   readonly role: string;
@@ -135,9 +135,9 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
   return (
     <div className={styles.section}>
       {error !== '' && (
-        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+        <MessageBar intent="error">
           {`Error: ${error}`}
-        </Text>
+        </MessageBar>
       )}
       {notice !== '' && <Text role="status">{notice}</Text>}
       <Text className={styles.muted}>

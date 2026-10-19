@@ -5,7 +5,7 @@
  * 実 adapter 接続 (design/21 の版管理) と一緒に後続増分で足す。
  */
 import React, { useEffect, useState } from 'react';
-import { makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, tokens } from '@fluentui/react-components';
+import { MessageBar, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, tokens } from '@fluentui/react-components';
 import type { EngineCapabilitySnapshot } from '@scopepilot2/contracts';
 
 const CONTROL_ASPECTS = ['preSendScopeEnforcement', 'stopControl', 'budgetLease', 'rateLimit'] as const;
@@ -43,9 +43,9 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
     <div className={styles.section}>
       <Text weight="semibold">外部 engine (能力・版・開示)</Text>
       {error !== '' && (
-        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+        <MessageBar intent="error">
           {`Error: ${error}`}
-        </Text>
+        </MessageBar>
       )}
       <Text className={styles.muted}>
         保証等級 — Enforced: ScopePilot が送信前に保証 / Delegated: 外部 engine への委譲 (入力制限・事後検知・停止で担保、送信前拒否は保証しない) / Unsupported: 当該機能を公開しない

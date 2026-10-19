@@ -4,7 +4,7 @@
  * Sequencer (token 収集・乱数解析) は sample 収集機能と共に後続増分。
  */
 import React, { useCallback, useState } from 'react';
-import { Button, Checkbox, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { MessageBar, Button, Checkbox, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 
 const CODECS = ['base64', 'url', 'hex', 'html-entity', 'gzip', 'deflate-raw'] as const;
 
@@ -80,9 +80,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   return (
     <div className={styles.section}>
       {error !== '' && (
-        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+        <MessageBar intent="error">
           {`Error: ${error}`}
-        </Text>
+        </MessageBar>
       )}
       <Text weight="semibold">Decoder (標準 codec の chain)</Text>
       <Field label="入力 (text)">
