@@ -11,6 +11,7 @@ import { FixedClock, InMemoryEvidenceStore, SequentialIdGenerator } from '@scope
 import type { ActiveScanEnginePort, Clock, ExplorationPort, LoginExecutorPort } from '@scopepilot2/core';
 import type { EngineCapabilitySnapshot, OperatorProfile } from '@scopepilot2/contracts';
 import { FixtureExplorer } from './adapters/fixture-explorer.ts';
+import { FixtureLoginExecutor } from './adapters/fixture-login.ts';
 import { FixtureZapEngine } from './adapters/fixture-zap.ts';
 import { fixtureCapabilitySnapshots, FIXTURE_RUNTIME_BUNDLE_HASH } from './fixtures/capability-snapshots.ts';
 
@@ -65,6 +66,8 @@ export function createHarness(options: HarnessOptions = {}): SimulationHarness {
   const scanEngine: ActiveScanEnginePort = options.engines?.scanEngine ?? new FixtureZapEngine();
   const capabilities = options.engines?.capabilities ?? fixtureCapabilitySnapshots();
   const runtimeBundleHash = options.engines?.runtimeBundleHash ?? FIXTURE_RUNTIME_BUNDLE_HASH;
+  // login 実行器は既定も fixture (認証付き workflow を fixture 構成で回帰できる)。
+  const loginExecutor: LoginExecutorPort = options.engines?.loginExecutor ?? new FixtureLoginExecutor();
   const service = new BaselineFlowService({
     // 実 engine 時は実時間 (認可の有効期間・監査記録)。既定は決定的な固定 clock。
     clock: options.engines?.clock ?? new FixedClock(FIXTURE_CLOCK_TIMES),
@@ -74,7 +77,7 @@ export function createHarness(options: HarnessOptions = {}): SimulationHarness {
     scanEngine,
     capabilities,
     runtimeBundleHash,
-    ...(options.engines?.loginExecutor === undefined ? {} : { loginExecutor: options.engines.loginExecutor }),
+    loginExecutor,
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
     ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });

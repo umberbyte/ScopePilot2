@@ -1120,6 +1120,7 @@
                           "role",
                           "flowVersion",
                           "stepCount",
+                          "secretReferences",
                           "cookieNames",
                           "sessionRevision"
                         ],
@@ -1132,6 +1133,13 @@
                           },
                           "stepCount": {
                             "type": "integer"
+                          },
+                          "secretReferences": {
+                            "type": "array",
+                            "description": "flow が参照する秘密値の参照名 (値は保持しない)",
+                            "items": {
+                              "type": "string"
+                            }
                           },
                           "cookieNames": {
                             "type": "array",
@@ -1369,6 +1377,101 @@
             "$ref": "#/components/responses/Error"
           },
           "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/sessions/login": {
+      "post": {
+        "operationId": "runLogin",
+        "summary": "登録済み login flow の実行 (design/f09 §4)。secretValues はこの呼出の間だけ使われ、応答・監査 event・log へ出さない",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role",
+                  "baseUrl",
+                  "expectedUrlPrefix",
+                  "secretValues"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  },
+                  "baseUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "expectedUrlPrefix": {
+                    "type": "string"
+                  },
+                  "secretValues": {
+                    "type": "object",
+                    "description": "秘密値の map (key は flow 登録の secretReference)。実行中のみ使い保持しない",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "proxyServer": {
+                    "type": "string",
+                    "description": "経由する proxy (例: ZAP。engine 側 cookie jar へ session を渡す)"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "login 実行結果 (cookie 名のみ。値は返さない)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "role",
+                    "authenticated",
+                    "finalUrl",
+                    "cookieNames",
+                    "sharedCookieNames"
+                  ],
+                  "properties": {
+                    "role": {
+                      "type": "string"
+                    },
+                    "authenticated": {
+                      "type": "boolean"
+                    },
+                    "finalUrl": {
+                      "type": "string"
+                    },
+                    "cookieNames": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "sharedCookieNames": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -2332,6 +2435,10 @@
           "maxDepth": {
             "type": "integer",
             "minimum": 1
+          },
+          "role": {
+            "type": "string",
+            "description": "runLogin 済み session で観測する role (design/f09)。未指定時は非認証"
           }
         }
       },
@@ -3183,6 +3290,18 @@
             "$ref": "#/components/schemas/FindingsImportedEvent"
           },
           {
+            "$ref": "#/components/schemas/FindingStatusChangedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/FuzzRunCompletedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/BusinessLogicCheckCompletedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/LoginCompletedEvent"
+          },
+          {
             "$ref": "#/components/schemas/ReportGeneratedEvent"
           }
         ]
@@ -3491,6 +3610,135 @@
           "duplicateCount": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "FindingStatusChangedEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "findingId",
+          "from",
+          "to",
+          "changedBy"
+        ],
+        "properties": {
+          "type": {
+            "const": "FindingStatusChanged"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "findingId": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "changedBy": {
+            "type": "string"
+          }
+        }
+      },
+      "FuzzRunCompletedEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "runId",
+          "targetUrl",
+          "total",
+          "sent"
+        ],
+        "properties": {
+          "type": {
+            "const": "FuzzRunCompleted"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "targetUrl": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sent": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "BusinessLogicCheckCompletedEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "checkId",
+          "roles",
+          "status"
+        ],
+        "properties": {
+          "type": {
+            "const": "BusinessLogicCheckCompleted"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "checkId": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "LoginCompletedEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "role",
+          "authenticated",
+          "secretReferences"
+        ],
+        "properties": {
+          "type": {
+            "const": "LoginCompleted"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "role": {
+            "type": "string"
+          },
+          "authenticated": {
+            "type": "boolean"
+          },
+          "secretReferences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "参照名のみ (値は出さない — F09-UT-006)"
           }
         }
       },

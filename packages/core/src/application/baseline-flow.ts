@@ -478,8 +478,9 @@ export class BaselineFlowService {
     return { role: input.role, authenticated: result.authenticated, finalUrl: result.finalUrl, cookieNames, sharedCookieNames: jar.shared };
   }
 
-  /** role ごとの session 状態 (cookie 名の一覧のみ。値は保持しない)。 */
-  listSessions(): readonly { role: string; flowVersion: string; stepCount: number; cookieNames: readonly string[]; sessionRevision: number }[] {    return [...this.loginFlows.keys()].map((role) => {
+  /** role ごとの session 状態 (cookie 名・秘密値の参照の一覧のみ。値は保持しない)。 */
+  listSessions(): readonly { role: string; flowVersion: string; stepCount: number; secretReferences: readonly string[]; cookieNames: readonly string[]; sessionRevision: number }[] {
+    return [...this.loginFlows.keys()].map((role) => {
       const flow = this.loginFlows.get(role);
       if (flow === undefined) {
         throw domainError('ValidationFailed', `login flow for ${role} is not registered`);
@@ -489,6 +490,7 @@ export class BaselineFlowService {
         role,
         flowVersion: flow.flowVersion,
         stepCount: flow.steps.length,
+        secretReferences: flow.secretReferences,
         cookieNames: jar?.cookieNames ?? [],
         sessionRevision: this.sessionRevisions.get(role) ?? 0,
       };

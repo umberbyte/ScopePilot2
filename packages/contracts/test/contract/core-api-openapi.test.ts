@@ -47,6 +47,10 @@ const EXPECTED_EVENT_TYPES = [
   'EgressDenied',
   'CandidatesAdopted',
   'FindingsImported',
+  'FindingStatusChanged',
+  'FuzzRunCompleted',
+  'BusinessLogicCheckCompleted',
+  'LoginCompleted',
   'ReportGenerated',
 ];
 

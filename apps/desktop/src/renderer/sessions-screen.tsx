@@ -1,7 +1,8 @@
 /**
  * A09 Sessions / Roles / Business logic。`docs/detailed-design/f09-authentication-session.md`。
- * login flow の登録 (step 構成は domain 検証・secret は参照のみ)、session refresh、
- * role ごとの cookie jar 割当 (共有警告) を扱う。業務ロジック検証 (design/f17) は後続増分。
+ * login flow の登録 (step 構成は domain 検証・secret は参照のみ)・login の実行 (秘密値は
+ * この実行の間だけ使う)・session refresh・role ごとの cookie jar 割当 (共有警告) を扱う。
+ * 業務ロジック検証 (design/f17) もこの画面から実行する。
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
@@ -11,6 +12,7 @@ interface SessionView {
   readonly role: string;
   readonly flowVersion: string;
   readonly stepCount: number;
+  readonly secretReferences: readonly string[];
   readonly cookieNames: readonly string[];
   readonly sessionRevision: number;
 }
@@ -37,7 +39,12 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
   const [sessions, setSessions] = useState<readonly SessionView[]>([]);
   const [role, setRole] = useState('admin');
   const [flowVersion, setFlowVersion] = useState('flow-1');
-  const [stepsText, setStepsText] = useState('[\n  { "kind": "navigate", "target": "http://fixture.target.test/login.php" },\n  { "kind": "fill", "target": "#username", "secretReference": "vault://admin-user" },\n  { "kind": "click", "target": "input[type=submit]" }\n]');
+  const [stepsText, setStepsText] = useState('[\n  { "kind": "navigate", "target": "http://fixture.target.test/login.php" },\n  { "kind": "fill", "target": "#username", "secretReference": "vault://admin-user" },\n  { "kind": "fill", "target": "#password", "secretReference": "vault://admin-pass" },\n  { "kind": "click", "target": "input[type=submit]" },\n  { "kind": "assert", "target": "Fixture Target Home" }\n]');
+  const [loginBaseUrl, setLoginBaseUrl] = useState('http://fixture.target.test');
+  const [loginExpectedPrefix, setLoginExpectedPrefix] = useState('http://fixture.target.test/');
+  const [loginProxy, setLoginProxy] = useState('');
+  const [secretInputs, setSecretInputs] = useState<Readonly<Record<string, string>>>({});
+  const [loginResult, setLoginResult] = useState<{ role: string; authenticated: boolean; finalUrl: string; cookieNames: readonly string[]; sharedCookieNames: boolean } | null>(null);
   const [cookieNames, setCookieNames] = useState('PHPSESSID');
   const [bizRoles, setBizRoles] = useState('admin, guest');
   const [bizExpression, setBizExpression] = useState('body.contains');
@@ -119,6 +126,34 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
     [apiBase, cookieNames, role, run],
   );
 
+  const executeLogin = useCallback(
+    () =>
+      run(async () => {
+        const references = sessions.find((session) => session.role === role)?.secretReferences ?? [];
+        if (references.length === 0) {
+          throw new Error(t('a09.loginNeedsFlow'));
+        }
+        const secretValues: Record<string, string> = {};
+        for (const reference of references) {
+          secretValues[reference] = secretInputs[reference] ?? '';
+        }
+        const result = await callJson<{ role: string; authenticated: boolean; finalUrl: string; cookieNames: readonly string[]; sharedCookieNames: boolean }>(apiBase, 'POST', '/api/sessions/login', {
+          role,
+          baseUrl: loginBaseUrl,
+          expectedUrlPrefix: loginExpectedPrefix,
+          secretValues,
+          ...(loginProxy.trim() === '' ? {} : { proxyServer: loginProxy.trim() }),
+        });
+        setLoginResult(result);
+        // 秘密値は実行後に破棄する (メモリに保持し続けない — design/f09)。
+        setSecretInputs({});
+      }),
+    [apiBase, loginBaseUrl, loginExpectedPrefix, loginProxy, role, run, secretInputs, sessions],
+  );
+
+  // 現在入力中の role の flow が参照する秘密値 (登録後に一覧から取れる)。
+  const loginReferences = sessions.find((session) => session.role === role)?.secretReferences ?? [];
+
   const runBusinessCheck = useCallback(
     () =>
       run(async () => {
@@ -155,6 +190,44 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
       <Button appearance="primary" disabled={busy} onClick={() => void registerFlow()}>
         {t('a09.register')}
       </Button>
+      <Text weight="semibold">{t('a09.loginTitle')}</Text>
+      <Text className={styles.muted}>{t('a09.loginIntro')}</Text>
+      <Field label={t('a09.baseUrlLabel')}>
+        <Input value={loginBaseUrl} onChange={(_, data) => setLoginBaseUrl(data.value)} />
+      </Field>
+      <Field label={t('a09.expectedPrefixLabel')}>
+        <Input value={loginExpectedPrefix} onChange={(_, data) => setLoginExpectedPrefix(data.value)} />
+      </Field>
+      <Field label={t('a09.proxyLabel')}>
+        <Input value={loginProxy} onChange={(_, data) => setLoginProxy(data.value)} />
+      </Field>
+      {loginReferences.length === 0 ? (
+        <Text className={styles.muted}>{t('a09.loginNeedsFlow')}</Text>
+      ) : (
+        loginReferences.map((reference) => (
+          <Field key={reference} label={t('a09.secretLabel', { reference })}>
+            <Input
+              type="password"
+              value={secretInputs[reference] ?? ''}
+              onChange={(_, data) => setSecretInputs((current) => ({ ...current, [reference]: data.value }))}
+            />
+          </Field>
+        ))
+      )}
+      <Button appearance="primary" disabled={busy} onClick={() => void executeLogin()}>
+        {t('a09.loginRun')}
+      </Button>
+      {loginResult !== null && loginResult.authenticated && (
+        <Text role="status">
+          {t('a09.loginResult', { role: loginResult.role, result: t('a09.authenticated'), finalUrl: loginResult.finalUrl, cookies: loginResult.cookieNames.join(', ') })}
+          {loginResult.sharedCookieNames ? ` ${t('a09.cookiesShared', { role: loginResult.role })}` : ''}
+        </Text>
+      )}
+      {loginResult !== null && !loginResult.authenticated && (
+        <MessageBar intent="warning">
+          {t('a09.loginResult', { role: loginResult.role, result: t('a09.unauthenticated'), finalUrl: loginResult.finalUrl, cookies: loginResult.cookieNames.join(', ') || '—' })}
+        </MessageBar>
+      )}
       <Field label={t('a09.cookiesLabel')}>
         <Input value={cookieNames} onChange={(_, data) => setCookieNames(data.value)} />
       </Field>
@@ -171,6 +244,7 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
               <TableHeaderCell>{t('a09.col.role')}</TableHeaderCell>
               <TableHeaderCell>{t('a09.col.flowVersion')}</TableHeaderCell>
               <TableHeaderCell>{t('a09.col.stepCount')}</TableHeaderCell>
+              <TableHeaderCell>{t('a09.col.secrets')}</TableHeaderCell>
               <TableHeaderCell>{t('a09.col.cookies')}</TableHeaderCell>
               <TableHeaderCell>{t('a09.col.revision')}</TableHeaderCell>
               <TableHeaderCell>{t('a09.col.actions')}</TableHeaderCell>
@@ -182,6 +256,7 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
                 <TableCell>{session.role}</TableCell>
                 <TableCell>{session.flowVersion}</TableCell>
                 <TableCell>{String(session.stepCount)}</TableCell>
+                <TableCell>{session.secretReferences.join(', ') || '—'}</TableCell>
                 <TableCell>{session.cookieNames.join(', ') || '—'}</TableCell>
                 <TableCell>{String(session.sessionRevision)}</TableCell>
                 <TableCell>

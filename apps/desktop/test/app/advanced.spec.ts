@@ -294,7 +294,14 @@ test('A09: login flow を登録し session refresh と cookie jar 割当を行�
 
   // 既定入力のまま flow を登録する (secret は参照のみ)。
   await page.getByRole('button', { name: 'flow を登録する' }).click();
-  await expect(page.getByText(/admin の flow を登録しました \(3 step/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/admin の flow を登録しました \(5 step/)).toBeVisible({ timeout: 30_000 });
+
+  // login を実行する (秘密値はこの実行の間だけ API へ渡り、実行後は入力欄が空に戻る)。
+  await page.getByLabel('秘密値: vault://admin-user').fill('fixture-user');
+  await page.getByLabel('秘密値: vault://admin-pass').fill('fixture-pass');
+  await page.getByRole('button', { name: 'login を実行する' }).click();
+  await expect(page.getByText('admin の login: 認証済み (最終 URL http://fixture.target.test/・cookie PHPSESSID)')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByLabel('秘密値: vault://admin-user')).toHaveValue('');
 
   // cookie jar を割り当て、session を refresh すると revision が進む。
   await page.getByRole('button', { name: 'cookie jar を割り当てる' }).click();

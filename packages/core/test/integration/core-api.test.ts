@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { BaselineFlowService, type BaselineFlowService as BaselineFlowServiceType } from '@scopepilot2/core';
+import {
+  type BaselineFlowService as BaselineFlowServiceType,
+  type ExplorationPort,
+  type LoginExecutionInput,
+  type LoginExecutorPort,
+  type LoginSessionCookie,
+} from '@scopepilot2/core';
+import type { PageObservation } from '@scopepilot2/contracts';
 import { createCoreApiServer } from '../../src/application/api-server.ts';
 import { createTestService, TEST_OPERATOR } from '../unit/support/test-flow.ts';
 
@@ -856,6 +863,151 @@ describe('Core API server (node:http)', () => {
     const admin = list.sessions.find((session) => session.role === 'admin');
     assert.equal(admin?.sessionRevision, 1);
     assert.deepEqual(admin?.cookieNames, ['PHPSESSID']);
+  });
+
+  // 手書き fake: 認証済み session を返す login 実行器と、cookie 受渡しを記録する explorer
+  // (design/f09 §4 の API 経路検証用。共有 service とは別の instance で組み立てる)。
+  class ItLoginExecutor implements LoginExecutorPort {
+    readonly engineVersion = 'it-login-1';
+    async execute(
+      input: LoginExecutionInput,
+    ): Promise<{ authenticated: boolean; finalUrl: string; cookies: readonly LoginSessionCookie[] }> {
+      assert.equal(input.secretValues['vault://admin-pass'], 'password123', 'executor は秘密値を受け取る');
+      return {
+        authenticated: true,
+        finalUrl: 'http://fixture.target.test/index.php',
+        cookies: [{ name: 'PHPSESSID', value: 'it-session-value', domain: 'fixture.target.test', path: '/' }],
+      };
+    }
+  }
+
+  class ItSessionExplorer implements ExplorationPort {
+    readonly engineVersion = 'it-session-explorer-1';
+    readonly sessionCookieNames: (readonly string[])[] = [];
+
+    async observe(): Promise<PageObservation | null> {
+      throw new Error('observe should not be called when a role session is given');
+    }
+
+    async observeWithSession(
+      url: string,
+      session: { readonly cookies: readonly LoginSessionCookie[] },
+    ): Promise<PageObservation | null> {
+      this.sessionCookieNames.push(session.cookies.map((cookie) => cookie.name));
+      return {
+        url,
+        status: 200,
+        contentType: 'text/html',
+        discoveredFrom: null,
+        depth: 0,
+        originType: 'crawl',
+        links: [],
+        forms: [],
+      };
+    }
+  }
+
+  test('POST /api/sessions/login は login を実行し、role 指定探索が session を使う (design/f09 §4)', async () => {
+    const explorer = new ItSessionExplorer();
+    const flow = createTestService({ loginExecutor: new ItLoginExecutor(), explorer });
+    const loginServer = createCoreApiServer({ service: flow.service, operator: TEST_OPERATOR });
+    let loginBaseUrl = '';
+    await new Promise<void>((resolve) => {
+      loginServer.listen(0, '127.0.0.1', () => {
+        const address = loginServer.address();
+        if (address !== null && typeof address !== 'string') {
+          loginBaseUrl = `http://127.0.0.1:${address.port}`;
+        }
+        resolve();
+      });
+    });
+    const post = async (path: string, body: unknown): Promise<Response> =>
+      fetch(`${loginBaseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    try {
+      await post('/api/case', {
+        name: 'login-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      });
+      await post('/api/authorization', {
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['admin'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      });
+      await post('/api/sessions/flows', {
+        role: 'admin',
+        flowVersion: 'f1',
+        steps: [
+          { kind: 'navigate', target: 'http://fixture.target.test/login.php' },
+          { kind: 'fill', target: '#username', secretReference: 'vault://admin-user' },
+          { kind: 'fill', target: '#password', secretReference: 'vault://admin-pass' },
+          { kind: 'click', target: 'input[type=submit]' },
+          { kind: 'assert', target: 'Welcome' },
+        ],
+      });
+
+      // 秘密値が 1 つでも欠ければ 409 NeedsInput。
+      const missing = await post('/api/sessions/login', {
+        role: 'admin',
+        baseUrl: 'http://fixture.target.test',
+        expectedUrlPrefix: 'http://fixture.target.test/',
+        secretValues: { 'vault://admin-user': 'admin' },
+      });
+      assert.equal(missing.status, 409);
+
+      const login = await post('/api/sessions/login', {
+        role: 'admin',
+        baseUrl: 'http://fixture.target.test',
+        expectedUrlPrefix: 'http://fixture.target.test/',
+        secretValues: { 'vault://admin-user': 'admin', 'vault://admin-pass': 'password123' },
+      });
+      assert.equal(login.status, 200);
+      const loginBody = (await login.json()) as { authenticated: boolean; finalUrl: string; cookieNames: readonly string[] };
+      assert.equal(loginBody.authenticated, true);
+      assert.deepEqual(loginBody.cookieNames, ['PHPSESSID']);
+      assert.equal(JSON.stringify(loginBody).includes('password123'), false, '応答に秘密値を含まない');
+      assert.equal(JSON.stringify(loginBody).includes('it-session-value'), false, '応答に cookie 値を含まない');
+
+      // 一覧には秘密値の参照名が出る (値は出ない)。
+      const list = (await (await fetch(`${loginBaseUrl}/api/sessions`)).json()) as { sessions: readonly { role: string; secretReferences: readonly string[] }[] };
+      const admin = list.sessions.find((session) => session.role === 'admin');
+      assert.deepEqual(admin?.secretReferences, ['vault://admin-user', 'vault://admin-pass']);
+      const listText = JSON.stringify(list);
+      assert.equal(listText.includes('password123'), false);
+      assert.equal(listText.includes('it-session-value'), false);
+
+      // role 指定探索は保存済み session で観測する。
+      const planResponse = await post('/api/plan/explore', { seeds: ['http://fixture.target.test/'] });
+      const { plan } = (await planResponse.json()) as { plan: unknown };
+      const confirmResponse = await post('/api/plan/confirm', { plan });
+      const confirmation = (await confirmResponse.json()) as { confirmationId: string };
+      const runResponse = await post('/api/run/explore', { plan, confirmation, maxDepth: 1, role: 'admin' });
+      assert.equal(runResponse.status, 200);
+      const run = (await runResponse.json()) as { runRecord: { state: string }; observations: readonly unknown[] };
+      assert.equal(run.runRecord.state, 'Completed');
+      assert.ok(run.observations.length > 0);
+      assert.deepEqual(explorer.sessionCookieNames, [['PHPSESSID']], '探索は session cookie を explorer へ渡した');
+
+      // 監査 event は参照のみ (F09-UT-006)。
+      const eventsText = await (await fetch(`${loginBaseUrl}/api/events`)).text();
+      assert.match(eventsText, /LoginCompleted/);
+      assert.ok(eventsText.includes('vault://admin-user'));
+      assert.equal(eventsText.includes('password123'), false);
+      assert.equal(eventsText.includes('it-session-value'), false);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        loginServer.close(() => {
+          resolve();
+        });
+        loginServer.closeAllConnections?.();
+        setTimeout(() => reject(new Error('login server close timeout')), 2000);
+      });
+    }
   });
 
   test('business-logic check は role 差分検証を inconclusive/pass/fail で返す (design/f17)', async () => {

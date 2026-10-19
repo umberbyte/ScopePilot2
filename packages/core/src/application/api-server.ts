@@ -200,6 +200,8 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       try {
         const result = await service.runExploration(operator, planField(body), confirmationField(body), {
           maxDepth: positiveIntegerField(body, 'maxDepth'),
+          // role 指定時は runLogin 済み session で観測する (design/f09)。
+          ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
         });
         return respondJson(response, 200, result);
       } catch (cause) {
@@ -506,6 +508,35 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           steps,
         });
         return respondJson(response, 201, { flow: result });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/sessions/login') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const secretValuesValue = body.secretValues;
+        if (typeof secretValuesValue !== 'object' || secretValuesValue === null || Array.isArray(secretValuesValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field secretValues must be an object of strings', false);
+        }
+        const secretValues: Record<string, string> = {};
+        for (const [name, value] of Object.entries(secretValuesValue)) {
+          if (typeof value !== 'string') {
+            throw new DomainError('ValidationFailed', `secretValues['${name}'] must be a string`);
+          }
+          secretValues[name] = value;
+        }
+        const result = await service.runLogin(operator, {
+          role: stringField(body, 'role'),
+          baseUrl: stringField(body, 'baseUrl'),
+          expectedUrlPrefix: stringField(body, 'expectedUrlPrefix'),
+          secretValues,
+          ...(typeof body.proxyServer === 'string' ? { proxyServer: stringField(body, 'proxyServer') } : {}),
+        });
+        return respondJson(response, 200, result);
       } catch (cause) {
         return respondDomainError(response, cause);
       }
