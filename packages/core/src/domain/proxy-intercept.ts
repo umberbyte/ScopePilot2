@@ -69,6 +69,11 @@ export class BreakQueue {
     return this.items.get(itemId);
   }
 
+  /** 全 item (状態を問わない。UI/API の queue 表示用)。 */
+  list(): readonly BreakItem[] {
+    return [...this.items.values()];
+  }
+
   recordedEvents(): readonly BreakQueueEvent[] {
     return [...this.events];
   }

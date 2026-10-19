@@ -531,6 +531,110 @@
           }
         }
       }
+    },
+    "/api/proxy/intercept": {
+      "get": {
+        "operationId": "listBreakItems",
+        "summary": "break queue の一覧と event (deadline 経過を反映)",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/BreakQueueState"
+          }
+        }
+      }
+    },
+    "/api/proxy/intercept/intake": {
+      "post": {
+        "operationId": "intakeBreakItem",
+        "summary": "break queue への受付 (実運用では proxy adapter 経路。fixture/UI 検証用の直接受付)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BreakIntakeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/BreakItem"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/proxy/intercept/forward": {
+      "post": {
+        "operationId": "forwardBreakItem",
+        "summary": "保持中 item の判断 (scope 外 URL への編集は reject)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BreakForwardRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/InterceptDecision"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/proxy/intercept/drop": {
+      "post": {
+        "operationId": "dropBreakItem",
+        "summary": "保持中 item を破棄 (暗黙 forward しない)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "itemId"
+                ],
+                "properties": {
+                  "itemId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/BreakItem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2346,6 +2450,98 @@
           }
         },
         "additionalProperties": false
+      },
+      "BreakIntakeRequest": {
+        "type": "object",
+        "required": [
+          "direction",
+          "messageReference"
+        ],
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "request",
+              "response"
+            ]
+          },
+          "messageReference": {
+            "type": "string"
+          },
+          "holdMs": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "BreakForwardRequest": {
+        "type": "object",
+        "required": [
+          "itemId",
+          "targetUrl"
+        ],
+        "properties": {
+          "itemId": {
+            "type": "string"
+          },
+          "targetUrl": {
+            "type": "string"
+          },
+          "requestHash": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "BreakItem": {
+        "type": "object",
+        "required": [
+          "itemId",
+          "messageReference",
+          "direction",
+          "receivedAtMs",
+          "deadlineMs",
+          "originalRequestHash",
+          "state"
+        ],
+        "properties": {
+          "itemId": {
+            "type": "string"
+          },
+          "messageReference": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "request",
+              "response"
+            ]
+          },
+          "receivedAtMs": {
+            "type": "integer"
+          },
+          "deadlineMs": {
+            "type": "integer"
+          },
+          "originalRequestHash": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "Held",
+              "Forwarded",
+              "Dropped",
+              "Expired"
+            ]
+          },
+          "editedRequestHash": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -2671,6 +2867,112 @@
                       "additionalProperties": true
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      },
+      "BreakItem": {
+        "description": "break item",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "item"
+              ],
+              "properties": {
+                "item": {
+                  "$ref": "#/components/schemas/BreakItem"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "BreakQueueState": {
+        "description": "break queue items and events",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "items",
+                "events"
+              ],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BreakItem"
+                  }
+                },
+                "events": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "type",
+                      "itemId"
+                    ],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "expired",
+                          "dropped"
+                        ]
+                      },
+                      "itemId": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "InterceptDecision": {
+        "description": "intercept decision",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "decision"
+              ],
+              "properties": {
+                "decision": {
+                  "type": "object",
+                  "required": [
+                    "itemId",
+                    "action"
+                  ],
+                  "properties": {
+                    "itemId": {
+                      "type": "string"
+                    },
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "forward",
+                        "reject"
+                      ]
+                    },
+                    "newRequestHash": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
                 }
               }
             }

@@ -596,6 +596,77 @@ describe('Core API server (node:http)', () => {
     assert.notEqual(diff.provenance.leftHash, diff.provenance.rightHash);
   });
 
+  test('break queue は intake → forward/drop を管理し、scope 外への編集は reject する (design/f02)', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'proxy-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+
+    const intake = async (messageReference: string): Promise<{ item: { itemId: string; state: string } }> => {
+      const response = await fetch(`${baseUrl}/api/proxy/intercept/intake`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: 'request', messageReference, holdMs: 600_000 }),
+      });
+      assert.equal(response.status, 201);
+      return (await response.json()) as { item: { itemId: string; state: string } };
+    };
+    const forward = async (itemId: string, targetUrl: string) => {
+      const response = await fetch(`${baseUrl}/api/proxy/intercept/forward`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId, targetUrl }),
+      });
+      return { status: response.status, body: (await response.json()) as { decision: { action: string; reason?: string } } };
+    };
+
+    // 対象内 URL への編集は forward、対象外は reject (F02-UT-004 の HTTP 経路)。
+    const first = await intake('proxy-it-1');
+    const forwarded = await forward(first.item.itemId, 'http://fixture.target.test/edited');
+    assert.equal(forwarded.status, 200);
+    assert.equal(forwarded.body.decision.action, 'forward');
+
+    const second = await intake('proxy-it-2');
+    const rejected = await forward(second.item.itemId, 'http://elsewhere.example/');
+    assert.equal(rejected.status, 200);
+    assert.equal(rejected.body.decision.action, 'reject');
+    assert.match(rejected.body.decision.reason ?? '', /not in allowed origins/);
+
+    // reject 後も item は Held のまま (別 URL で再判断できる)。
+    const retried = await forward(second.item.itemId, 'http://fixture.target.test/ok');
+    assert.equal(retried.body.decision.action, 'forward');
+
+    // drop と一覧・event。
+    const third = await intake('proxy-it-3');
+    const dropped = await fetch(`${baseUrl}/api/proxy/intercept/drop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId: third.item.itemId }),
+    });
+    assert.equal(dropped.status, 200);
+    const list = (await (await fetch(`${baseUrl}/api/proxy/intercept`)).json()) as {
+      items: readonly { itemId: string; state: string }[];
+      events: readonly { type: string; itemId: string }[];
+    };
+    const thirdItem = list.items.find((item) => item.itemId === third.item.itemId);
+    assert.equal(thirdItem?.state, 'Dropped');
+    assert.ok(list.events.some((event) => event.type === 'dropped' && event.itemId === third.item.itemId));
+
+    // 保持でない item への操作は 409。
+    const conflict = await fetch(`${baseUrl}/api/proxy/intercept/drop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId: first.item.itemId }),
+    });
+    assert.equal(conflict.status, 409);
+  });
+
   test('GET /api/observations は site map 用の観測一覧と scope 拒否を返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',

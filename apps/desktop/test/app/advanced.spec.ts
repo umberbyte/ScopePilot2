@@ -217,7 +217,33 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await expect(page.getByText(/乱数性解析は sample 収集機能と共に後続増分/)).toBeVisible();
 });
 
-test('未実装画面はプレースホルダで明示される (A05)', async () => {
+test('A05: break queue の受付・転送・破棄と対象外 URL の拒否を扱う', async () => {
   await page.getByRole('button', { name: /A05 Proxy \/ Intercept/ }).click();
+  await expect(page.getByText(/break queue \(0 件・保持中 0 件\)/)).toBeVisible();
+
+  // 対象内 URL へ転送すると Forwarded になる。
+  await page.getByLabel(/messageReference/).fill('a05-first');
+  await page.getByRole('button', { name: '受け取る (fixture 受付)' }).click();
+  await expect(page.getByText(/break queue \(1 件・保持中 1 件\)/)).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: '転送' }).click();
+  await expect(page.getByText(/を転送しました/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('転送済み').first()).toBeVisible();
+
+  // 対象外 URL への転送は拒否され、item は保持されたまま。
+  await page.getByLabel(/messageReference/).fill('a05-second');
+  await page.getByRole('button', { name: '受け取る (fixture 受付)' }).click();
+  await page.getByLabel(/転送先 URL/).fill('http://elsewhere.example/');
+  await page.getByRole('button', { name: '転送' }).click();
+  await expect(page.getByText(/転送を拒否されました/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/保持中 1 件/)).toBeVisible();
+
+  // 保持中 item は破棄できる (暗黙転送しない)。
+  await page.getByRole('button', { name: '破棄' }).click();
+  await expect(page.getByText(/を破棄しました/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/保持中 0 件/)).toBeVisible();
+});
+
+test('未実装画面はプレースホルダで明示される (A06)', async () => {
+  await page.getByRole('button', { name: /A06 Repeater/ }).click();
   await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toBeVisible();
 });

@@ -8,7 +8,7 @@
  */
 import type { Server } from 'node:http';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { DomainError, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
+import { DomainError, hashStable, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
 import type { BaselineFlowService } from './baseline-flow.ts';
 import { CodecRegistry, compareText, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
 
@@ -320,6 +320,59 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/proxy/intercept') {
+      return respondJson(response, 200, { items: service.listBreakItems(), events: service.breakQueueEvents() });
+    }
+    if (route === 'POST /api/proxy/intercept/intake') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const direction = stringField(body, 'direction');
+        if (direction !== 'request' && direction !== 'response') {
+          return respondError(response, 400, 'ValidationFailed', "field direction must be 'request' or 'response'", false);
+        }
+        const holdMs = body.holdMs === undefined ? undefined : numberField(body, 'holdMs');
+        const item = service.enqueueBreakItem(operator, {
+          direction,
+          messageReference: stringField(body, 'messageReference'),
+          ...(holdMs === undefined ? {} : { holdMs }),
+        });
+        return respondJson(response, 201, { item });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/proxy/intercept/forward') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const itemId = stringField(body, 'itemId');
+        const targetUrl = stringField(body, 'targetUrl');
+        // 編集後要求 hash は、指定がなければ編集先 URL から決定的に作る。
+        const requestHash =
+          body.requestHash === undefined ? requireHash(targetUrl) : stringField(body, 'requestHash');
+        const decision = service.decideBreakItem(operator, itemId, { requestHash, targetUrl });
+        return respondJson(response, 200, { decision });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/proxy/intercept/drop') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const item = service.dropBreakItem(operator, stringField(body, 'itemId'));
+        return respondJson(response, 200, { item });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/runs/interrupted') {
       if (runRepository === undefined) {
         return respondError(response, 501, 'Unsupported', 'run persistence is not configured for this server', false);
@@ -411,6 +464,10 @@ function respondError(response: ServerResponse, status: number, code: string, me
 function respondJson(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(body));
+}
+
+function requireHash(targetUrl: string): string {
+  return hashStable('scopepilot2.request.edited', targetUrl);
 }
 
 function stringField(body: Record<string, unknown>, field: string): string {

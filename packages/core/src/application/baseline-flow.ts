@@ -46,6 +46,7 @@ import {
   validatePlan,
 } from '../domain/plan-service.ts';
 import { FindingImporter } from '../domain/finding-importer.ts';
+import { BreakQueue, decideIntercept, type BreakItem, type BreakQueueEvent, type InterceptDecision } from '../domain/proxy-intercept.ts';
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
@@ -130,6 +131,9 @@ export class BaselineFlowService {
   private authorization: AuthorizationRecord | null = null;
   private readonly eventsLog: BaselineFlowEvent[] = [];
   private readonly importer = new FindingImporter();
+  /** proxy の break queue (design/f02)。deadline 経過は既定で drop (暗黙 forward しない)。 */
+  private readonly breakQueue = new BreakQueue(100);
+
   /** site map 用の観測台帳 (URL 単位・再観測は上書き、初回観測順を維持)。 */
   private readonly observationsByUrl = new Map<string, PageObservation>();
   /** scope により拒否された URL の記録 (design/02 A04 の開示用)。 */
@@ -165,6 +169,60 @@ export class BaselineFlowService {
   /** 探索で scope 拒否された URL (開示用)。 */
   listDeniedUrls(): readonly { url: string; reason: string }[] {
     return [...this.deniedUrlLog];
+  }
+
+  /** break queue の一覧 (deadline 経過を反映してから返す)。 */
+  listBreakItems(): readonly BreakItem[] {
+    this.breakQueue.expireDeadlines(this.deps.clock.now().getTime());
+    return this.breakQueue.list();
+  }
+
+  breakQueueEvents(): readonly BreakQueueEvent[] {
+    return this.breakQueue.recordedEvents();
+  }
+
+  /**
+   * break queue への受付。実運用では proxy adapter が呼ぶ経路。fixture/UI 検証では
+   * 画面から入れる (messageReference は原本の参照、秘密値は持たない)。
+   */
+  enqueueBreakItem(
+    operator: OperatorProfile,
+    input: { readonly direction: 'request' | 'response'; readonly messageReference: string; readonly holdMs?: number },
+  ): BreakItem {
+    this.requirePermission(operator, 'run.manage');
+    if (input.messageReference.trim() === '') {
+      throw domainError('ValidationFailed', 'messageReference must not be empty');
+    }
+    const nowMs = this.deps.clock.now().getTime();
+    return this.breakQueue.enqueue({
+      itemId: this.deps.ids.next('break'),
+      messageReference: input.messageReference,
+      direction: input.direction,
+      receivedAtMs: nowMs,
+      deadlineMs: nowMs + (input.holdMs ?? 60_000),
+      originalRequestHash: hashStable('scopepilot2.request', input.messageReference),
+    });
+  }
+
+  /** 保持中 item の判断。scope 外 URL への編集は forward されず reject される (F02-UT-004)。 */
+  decideBreakItem(
+    operator: OperatorProfile,
+    itemId: string,
+    edited: { readonly requestHash: string; readonly targetUrl: string },
+  ): InterceptDecision {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    return decideIntercept(this.breakQueue, itemId, edited, caseRecord.scope);
+  }
+
+  dropBreakItem(operator: OperatorProfile, itemId: string): BreakItem {
+    this.requirePermission(operator, 'run.manage');
+    this.breakQueue.drop(itemId);
+    const item = this.breakQueue.get(itemId);
+    if (item === undefined) {
+      throw domainError('ValidationFailed', `break item ${itemId} does not exist`);
+    }
+    return item;
   }
 
   /** 所見の確認状態変更 (6.3)。変更は監査 event に確認者付きで記録する。 */
