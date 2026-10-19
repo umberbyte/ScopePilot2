@@ -182,6 +182,17 @@ test('A03: catalog の診断項目をガイドライン切替・絞り込み・�
   await expect(page.getByText(/ZAP 診断ルール: \d+ 件/)).toBeVisible();
 });
 
+test('A13: engine 能力の詳細 (overshoot・測定時刻・fixture hash) と現状開示を表示する', async () => {
+  await page.getByRole('button', { name: /A13 Settings \/ Certificates/ }).click();
+  await expect(page.getByText(/保証等級 — Enforced: /)).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'overshoot 上限比' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '5%' }).first()).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'fixture hash' })).toBeVisible();
+  // 証明書と AI は「未提供・未設定」を偽りなく表示する。
+  await expect(page.getByText(/後続増分で提供します \(design\/24\)/)).toBeVisible();
+  await expect(page.getByText(/AI provider は未設定です/)).toBeVisible();
+});
+
 test('未実装画面はプレースホルダで明示される (A05)', async () => {
   await page.getByRole('button', { name: /A05 Proxy \/ Intercept/ }).click();
   await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toBeVisible();
