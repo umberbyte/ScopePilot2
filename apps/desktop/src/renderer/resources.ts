@@ -274,6 +274,7 @@ export const strings = {
 
   'a08.exploreTitle': '探索計画 (crawl)',
   'a08.seedsLabel': '開始 URL (1行1件)',
+  'a08.exploreRoleLabel': '探索 session の role (任意・A09 で login 済みの role。空なら非認証)',
   'a08.maxRequestsOptionalLabel': '最大リクエスト数 (空=既定)',
   'a08.maxPagesOptionalLabel': '最大ページ数 (空=既定)',
   'a08.maxDurationOptionalLabel': '最大実行分 (空=既定)',

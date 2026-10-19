@@ -75,16 +75,46 @@ export const FIXTURE_SITE_PAGES: Readonly<Record<string, FixturePage>> = {
   },
 };
 
+/**
+ * 認証後のみ観測できる頁 (design/f09 の role session 探索の実証用)。
+ * 通常頁からは link しない — 非 session 探索では観測が null になり、
+ * seed を与えた role session 探索でのみ現れる (DVWA の認証後 menu 相当)。
+ */
+export const FIXTURE_AUTHENTICATED_PAGES: Readonly<Record<string, FixturePage>> = {
+  [`${SITE_ORIGIN}/authenticated/menu.php`]: {
+    title: 'Authenticated Menu (fixture)',
+    links: [],
+    forms: [],
+  },
+};
+
 export function targetSiteFixtureHash(): string {
   return hashStable('scopepilot2.simulation.target-site', {
     origin: SITE_ORIGIN,
     pages: FIXTURE_SITE_PAGES,
+    authenticatedPages: FIXTURE_AUTHENTICATED_PAGES,
   });
 }
 
 /** 固定ページを PageObservation へ写す。depth・発見元は探索側の値を使う。 */
 export function observeFixturePage(url: string, depth: number, discoveredFrom: string | null): PageObservation | null {
-  const page = FIXTURE_SITE_PAGES[url];
+  return toObservation(FIXTURE_SITE_PAGES[url], url, depth, discoveredFrom);
+}
+
+/**
+ * 認証済み session での観測。認証後しか見えない頁 (public page からは link されて
+ * いない = seed でのみ到達) を先に引き、次に通常頁を引く。
+ */
+export function observeAuthenticatedFixturePage(url: string, depth: number, discoveredFrom: string | null): PageObservation | null {
+  return toObservation(FIXTURE_AUTHENTICATED_PAGES[url] ?? FIXTURE_SITE_PAGES[url], url, depth, discoveredFrom);
+}
+
+function toObservation(
+  page: FixturePage | undefined,
+  url: string,
+  depth: number,
+  discoveredFrom: string | null,
+): PageObservation | null {
   if (page === undefined) {
     return null;
   }

@@ -1,12 +1,12 @@
 /**
  * ExplorationPort の固定 fixture adapter。観測は fixture サイトから返し、
  * 呼出し記録を残して FT で scope 強制 (Enforced) の検証に使う。
- * observeWithSession は認証済み session (design/f09) の経路 — cookie を記録して
- * 同じ fixture page を観測する (session でしか見えない頁の模擬はしない)。
+ * observeWithSession は認証済み session (design/f09) の経路 — cookie を記録し、
+ * 認証後しか見えない頁 (FIXTURE_AUTHENTICATED_PAGES) も観測する。
  */
 import type { PageObservation } from '@scopepilot2/contracts';
 import type { ExplorationPort, LoginSessionCookie } from '@scopepilot2/core';
-import { observeFixturePage, targetSiteFixtureHash } from '../fixtures/target-site.ts';
+import { observeAuthenticatedFixturePage, observeFixturePage, targetSiteFixtureHash } from '../fixtures/target-site.ts';
 
 export class FixtureExplorer implements ExplorationPort {
   readonly engineVersion = 'fixture-playwright-1';
@@ -23,7 +23,7 @@ export class FixtureExplorer implements ExplorationPort {
     session: { readonly cookies: readonly LoginSessionCookie[] },
   ): Promise<PageObservation | null> {
     this.sessionObservations.push({ url, cookieNames: session.cookies.map((cookie) => cookie.name) });
-    return observeFixturePage(url, 0, null);
+    return observeAuthenticatedFixturePage(url, 0, null);
   }
 
   calls(): readonly string[] {

@@ -409,6 +409,7 @@ function planSummaryLines(steps: readonly PlanStepView[], planHash: string): str
 function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const styles = useStyles();
   const [seeds, setSeeds] = useState('http://fixture.target.test/');
+  const [exploreRole, setExploreRole] = useState('');
   const [exploreLimits, setExploreLimits] = useState({ maxRequests: '', maxPages: '', maxDurationMinutes: '' });
   const [explorePlan, setExplorePlan] = useState<{ plan: { steps: readonly PlanStepView[] }; planHash: string; steps: readonly PlanStepView[] } | null>(null);
   const [exploreConfirmation, setExploreConfirmation] = useState<{ confirmationId: string } | null>(null);
@@ -466,10 +467,12 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
         plan: explorePlan.plan,
         confirmation: exploreConfirmation,
         maxDepth: 5,
+        // 任意: runLogin 済み role の session で観測する (design/f09)。空なら非認証。
+        ...(exploreRole.trim() === '' ? {} : { role: exploreRole.trim() }),
       });
       setCandidates(result.candidates);
       setExploreResult(t('a08.exploreDone', { observations: result.observations.length, candidates: result.candidates.length, denied: result.deniedUrls.length }));
-    }), [apiBase, exploreConfirmation, explorePlan, run]);
+    }), [apiBase, exploreConfirmation, explorePlan, exploreRole, run]);
 
   const buildScan = useCallback(() =>
     run(async () => {
@@ -515,6 +518,9 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
       )}
       <Field label={t('a08.seedsLabel')}>
         <Textarea value={seeds} onChange={(_, data) => setSeeds(data.value)} rows={2} />
+      </Field>
+      <Field label={t('a08.exploreRoleLabel')}>
+        <Input value={exploreRole} onChange={(_, data) => setExploreRole(data.value)} />
       </Field>
       <LimitsFields values={exploreLimits} onChange={setExploreLimits} />
       <div className={styles.section}>

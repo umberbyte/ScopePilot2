@@ -303,6 +303,18 @@ test('A09: login flow を登録し session refresh と cookie jar 割当を行�
   await expect(page.getByText('admin の login: 認証済み (最終 URL http://fixture.target.test/・cookie PHPSESSID)')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByLabel('秘密値: vault://admin-user')).toHaveValue('');
 
+  // 認証付き探索 (design/f09): A08 で role を指定すると認証後のみ見える頁が観測できる。
+  await page.getByRole('button', { name: /A08 Scan plans/ }).click();
+  await page.getByLabel('開始 URL (1行1件)').fill('http://fixture.target.test/authenticated/menu.php');
+  await page.getByLabel('探索 session の role (任意・A09 で login 済みの role。空なら非認証)').fill('admin');
+  await page.getByRole('button', { name: '探索計画を構築する' }).click();
+  await page.getByRole('button', { name: '探索計画を確認する' }).click();
+  await page.getByRole('button', { name: '探索を実行する' }).click();
+  await expect(page.getByText('探索完了: 観測 1 件・候補 1 件・scope 外拒否 0 件')).toBeVisible({ timeout: 30_000 });
+
+  // A09 に戻して session 系の操作を続ける。
+  await page.getByRole('button', { name: /A09 Sessions/ }).click();
+
   // cookie jar を割り当て、session を refresh すると revision が進む。
   await page.getByRole('button', { name: 'cookie jar を割り当てる' }).click();
   await expect(page.getByText(/admin に cookie jar を割り当てました/)).toBeVisible({ timeout: 30_000 });

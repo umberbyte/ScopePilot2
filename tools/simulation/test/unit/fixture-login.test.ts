@@ -75,4 +75,18 @@ describe('FixtureExplorer observeWithSession', () => {
     // 非認証の呼出記録とは分離される。
     assert.deepEqual(explorer.calls(), []);
   });
+
+  test('認証後のみ見える頁は session 探索でのみ観測できる (design/f09)', async () => {
+    const explorer = new FixtureExplorer();
+    const session = { cookies: [{ name: 'PHPSESSID', value: 'fixture-session', domain: 'fixture.target.test', path: '/' }] };
+    const menuUrl = 'http://fixture.target.test/authenticated/menu.php';
+
+    // 非 session の観測では頁が存在しない (null)。
+    assert.equal(await explorer.observe(menuUrl), null);
+
+    // session 探索では認証後 menu が観測される。
+    const observation = await explorer.observeWithSession(menuUrl, session);
+    assert.equal(observation?.title, 'Authenticated Menu (fixture)');
+    assert.deepEqual(observation?.links, []);
+  });
 });
