@@ -60,6 +60,7 @@ const EXPECTED_EVENT_TYPES = [
   'WsFramesImported',
   'WsMessagesSent',
   'TransportNegotiated',
+  'ExtensionInstalled',
   'ReportGenerated',
 ];
 

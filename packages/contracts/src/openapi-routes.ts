@@ -54,6 +54,8 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'POST', path: '/api/tools/transport/negotiate', operationId: 'negotiateTransportFor' },
   { method: 'POST', path: '/api/tools/transport/validate-headers', operationId: 'validateTransportHeaders' },
   { method: 'POST', path: '/api/tools/dom-flows', operationId: 'analyzeDomFlows' },
+  { method: 'GET', path: '/api/extensions', operationId: 'listExtensions' },
+  { method: 'POST', path: '/api/extensions', operationId: 'installExtension' },
   { method: 'GET', path: '/api/documents/auth-hints', operationId: 'listDocumentAuthHints' },
   { method: 'POST', path: '/api/documents/auth-hints', operationId: 'registerDocumentAuthHints' },
   { method: 'GET', path: '/api/business-logic/checks', operationId: 'listBusinessLogicChecks' },

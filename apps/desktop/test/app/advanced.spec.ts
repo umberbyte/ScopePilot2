@@ -1,5 +1,6 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { hashStable } from '@scopepilot2/contracts';
 
 /**
  * Advanced モードの実 DOM 検証。`docs/detailed-design/02-ui-information-architecture.md` §3。
@@ -252,6 +253,15 @@ test('A13: engine 能力の詳細 (overshoot・測定時刻・fixture hash) と�
   // 証明書と AI は「未提供・未設定」を偽りなく表示する。
   await expect(page.getByText(/後続増分で提供します \(design\/24\)/)).toBeVisible();
   await expect(page.getByText(/AI provider は未設定です/)).toBeVisible();
+
+  // extension は署名検証を通過したものだけ読み込まれる (design/f20)。
+  // 署名は UI 入力欄から与える (fixture 信頼 root の規約は画面の注記どおり)。
+  await page.getByLabel('extension ID').fill('app-helper');
+  const manifestHash = hashStable('scopepilot2.extension.manifest', { extensionId: 'app-helper', version: '1.0.0', publisherTrusted: true, permissions: ['observations.read'], apiRange: ['scopepilot2.api.v1'] });
+  await page.getByLabel('署名').fill(`trusted-app-helper-1.0.0-${manifestHash.slice(0, 8)}`);
+  await page.getByRole('button', { name: 'extension を読み込む' }).click();
+  await expect(page.getByText('app-helper 1.0.0 を読み込みました')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('cell', { name: 'app-helper' })).toBeVisible();
 });
 
 test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができる', async () => {

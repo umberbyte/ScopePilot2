@@ -446,6 +446,28 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/extensions') {
+      return respondJson(response, 200, { extensions: service.listExtensions() });
+    }
+    if (route === 'POST /api/extensions') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.installExtension(operator, {
+          extensionId: stringField(body, 'extensionId'),
+          version: stringField(body, 'version'),
+          signature: stringField(body, 'signature'),
+          publisherTrusted: body.publisherTrusted === true,
+          permissions: stringArrayField(body, 'permissions'),
+          apiRange: stringArrayField(body, 'apiRange'),
+        });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/documents/hints') {
       return respondJson(response, 200, { hints: service.listDocumentHints() });
     }

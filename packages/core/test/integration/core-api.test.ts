@@ -1114,6 +1114,34 @@ describe('Core API server (node:http)', () => {
     }
   });
 
+  test('extensions は署名検証を通過した manifest だけを読み込む (design/f20)', async () => {
+    const post = async (path: string, body: unknown): Promise<Response> =>
+      fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    const untrusted = await post('/api/extensions', { extensionId: 'bad', version: '1', signature: 's', publisherTrusted: false, permissions: [], apiRange: ['scopepilot2.api.v1'] });
+    assert.equal(untrusted.status, 400);
+
+    // fixture 信頼 root と同一規約の署名を組み立てる。
+    const { hashStable } = await import('@scopepilot2/contracts');
+    const manifestHash = hashStable('scopepilot2.extension.manifest', { extensionId: 'it-helper', version: '1.0.0', publisherTrusted: true, permissions: ['observations.read'], apiRange: ['scopepilot2.api.v1'] });
+    const signature = `trusted-it-helper-1.0.0-${manifestHash.slice(0, 8)}`;
+    const installed = await post('/api/extensions', { extensionId: 'it-helper', version: '1.0.0', signature, publisherTrusted: true, permissions: ['observations.read'], apiRange: ['scopepilot2.api.v1'] });
+    assert.equal(installed.status, 201);
+    const installedBody = (await installed.json()) as { loaded: boolean; extension: { extensionId: string } };
+    assert.equal(installedBody.loaded, true);
+    assert.equal(installedBody.extension.extensionId, 'it-helper');
+
+    // secret read 権限の要求は署名が正しくても拒否 (値を返す権限は存在しない)。
+    const greedyHash = hashStable('scopepilot2.extension.manifest', { extensionId: 'greedy', version: '1', publisherTrusted: true, permissions: ['secrets.read'], apiRange: ['scopepilot2.api.v1'] });
+    const secretRead = await post('/api/extensions', { extensionId: 'greedy', version: '1', signature: `trusted-greedy-1-${greedyHash.slice(0, 8)}`, publisherTrusted: true, permissions: ['secrets.read'], apiRange: ['scopepilot2.api.v1'] });
+    assert.equal(secretRead.status, 403, 'secret read 権限は 403 PermissionDenied');
+
+    const list = (await (await fetch(`${baseUrl}/api/extensions`)).json()) as { extensions: readonly { extensionId: string }[] };
+    assert.ok(list.extensions.some((extension) => extension.extensionId === 'it-helper'));
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /ExtensionInstalled/);
+  });
+
   test('tools/dom-flows は観測から source→sink 候補を返す (design/f16)', async () => {
     const analyzed = await fetch(`${baseUrl}/api/tools/dom-flows`, {
       method: 'POST',

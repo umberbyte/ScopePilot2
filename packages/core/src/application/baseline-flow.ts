@@ -97,6 +97,7 @@ import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollD
 import { buildWsSendPlan, importFrames, sendWithPolicy, wsEvidence, type WsFrame } from '../domain/websocket.ts';
 import { checkAuthorityScope, negotiateTransport, transportCapability, transportEvidence, validateHeaderValues, validatePseudoHeaders } from '../domain/advanced-transport.ts';
 import { buildDomCandidate, domEvidenceProjection } from '../domain/dom-investigation.ts';
+import { checkCompatibility, respondToSecretRead, verifyExtensionManifest, type ExtensionManifest } from '../domain/product-api.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
 import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, LoginSessionCookie } from '../ports/engines.ts';
@@ -222,6 +223,9 @@ export class BaselineFlowService {
   private readonly wsFrames: WsFrame[] = [];
   private readonly wsSeenFingerprints = new Set<string>();
   private wsSessionRevision = 1;
+
+  /** 読み込み済み extension (design/f20)。manifest の署名検証を通過したもののみ。 */
+  private readonly loadedExtensions: readonly { extensionId: string; version: string; permissions: readonly string[]; apiRange: readonly string[] }[] = [];
 
   /** 取り込んだ API 仕様の記録 (design/f12)。endpoint の一覧は都度応答する。 */
   private readonly apiSpecImports: readonly { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[] = [];
@@ -1088,6 +1092,52 @@ export class BaselineFlowService {
     const candidates = buildDomCandidate(input.observations);
     const evidence = domEvidenceProjection(input.nodes ?? []);
     return { candidates, evidence };
+  }
+
+  /**
+   * extension の読み込み (design/f20)。署名不一致・非信頼 publisher は load しない
+   * (F20-UT-006)。apiRange が現行 API 版を含まない場合は Unsupported (F20-UT-007)。
+   * secret 値の read 権限は存在しない (F20-UT-008 — 参照 ID のみ)。fixture の
+   * 信頼 root は決定的署名 `trusted-{extensionId}-{version}`。
+   */
+  installExtension(
+    operator: OperatorProfile,
+    input: { readonly extensionId: string; readonly version: string; readonly signature: string; readonly publisherTrusted: boolean; readonly permissions: readonly string[]; readonly apiRange: readonly string[] },
+  ): { loaded: true; extension: { extensionId: string; version: string; permissions: readonly string[]; apiRange: readonly string[] } } {
+    this.requirePermission(operator, 'case.manage');
+    if (input.extensionId.trim() === '' || input.version.trim() === '') {
+      throw domainError('ValidationFailed', 'extension id and version must not be empty');
+    }
+    const manifest: ExtensionManifest = {
+      extensionId: input.extensionId,
+      version: input.version,
+      signature: input.signature,
+      publisherTrusted: input.publisherTrusted,
+      permissions: [...input.permissions],
+      apiRange: [...input.apiRange],
+    };
+    const verification = verifyExtensionManifest(manifest, (hash) => `trusted-${input.extensionId}-${input.version}-${hash.slice(0, 8)}`);
+    if (!verification.loaded) {
+      throw domainError('ValidationFailed', verification.reason ?? 'extension manifest rejected');
+    }
+    try {
+      checkCompatibility('scopepilot2.api.v1', manifest.apiRange);
+    } catch {
+      throw domainError('Unsupported', `extension ${input.extensionId} does not support the current API version (scopepilot2.api.v1)`);
+    }
+    // secret read 権限を要求する extension は最初から拒否 (値を返す権限は存在しない)。
+    for (const permission of manifest.permissions) {
+      respondToSecretRead({ permission });
+    }
+    const entry = { extensionId: manifest.extensionId, version: manifest.version, permissions: [...manifest.permissions], apiRange: [...manifest.apiRange] };
+    (this.loadedExtensions as typeof entry[]).push(entry);
+    this.record({ type: 'ExtensionInstalled', at: this.deps.clock.now().toISOString(), extensionId: entry.extensionId, version: entry.version });
+    return { loaded: true, extension: entry };
+  }
+
+  /** 読み込み済み extension の一覧 (manifest の公開情報のみ・署名は出さない)。 */
+  listExtensions(): readonly { extensionId: string; version: string; permissions: readonly string[]; apiRange: readonly string[] }[] {
+    return [...this.loadedExtensions];
   }
 
   listApiSpecImports(): readonly { documentLabel: string; endpointCount: number; importedAt: string }[] {

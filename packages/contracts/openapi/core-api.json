@@ -2712,6 +2712,174 @@
         }
       }
     },
+    "/api/extensions": {
+      "get": {
+        "operationId": "listExtensions",
+        "summary": "読み込み済み extension の一覧 (manifest の公開情報のみ)",
+        "responses": {
+          "200": {
+            "description": "extensions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "extensions"
+                  ],
+                  "properties": {
+                    "extensions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "extensionId",
+                          "version",
+                          "permissions",
+                          "apiRange"
+                        ],
+                        "properties": {
+                          "extensionId": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          },
+                          "permissions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "apiRange": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "対応 API 版の範囲。現行は scopepilot2.api.v1 を含む必要がある"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "installExtension",
+        "summary": "extension manifest を検証して読み込む (design/f20)。署名不一致・非信頼 publisher・API 範囲外・secret read 権限の要求は拒否",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "extensionId",
+                  "version",
+                  "signature",
+                  "publisherTrusted",
+                  "permissions",
+                  "apiRange"
+                ],
+                "properties": {
+                  "extensionId": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "signature": {
+                    "type": "string",
+                    "description": "fixture 信頼 root の規約: trusted-{extensionId}-{version}-{manifestHash 先頭 8 桁}"
+                  },
+                  "publisherTrusted": {
+                    "type": "boolean"
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "secrets.read は存在しない (F20-UT-008)"
+                  },
+                  "apiRange": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "読み込み結果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "loaded",
+                    "extension"
+                  ],
+                  "properties": {
+                    "loaded": {
+                      "type": "boolean"
+                    },
+                    "extension": {
+                      "type": "object",
+                      "required": [
+                        "extensionId",
+                        "version",
+                        "permissions",
+                        "apiRange"
+                      ],
+                      "properties": {
+                        "extensionId": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "string"
+                        },
+                        "permissions": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "apiRange": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "対応 API 版の範囲。現行は scopepilot2.api.v1 を含む必要がある"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/documents/auth-hints": {
       "get": {
         "operationId": "listDocumentAuthHints",
@@ -4730,6 +4898,9 @@
             "$ref": "#/components/schemas/TransportNegotiatedEvent"
           },
           {
+            "$ref": "#/components/schemas/ExtensionInstalledEvent"
+          },
+          {
             "$ref": "#/components/schemas/ReportGeneratedEvent"
           }
         ]
@@ -5465,6 +5636,30 @@
           },
           "downgraded": {
             "type": "boolean"
+          }
+        }
+      },
+      "ExtensionInstalledEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "extensionId",
+          "version"
+        ],
+        "properties": {
+          "type": {
+            "const": "ExtensionInstalled"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "extensionId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
           }
         }
       },
