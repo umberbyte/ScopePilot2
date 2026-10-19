@@ -140,9 +140,11 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
     ]);
     const state = scansBody.scans.find((scan) => scan.id === engineRunId)?.state ?? 'RUNNING';
     const progress = Number(statusBody.status);
-    const status: EngineProgress['status'] = state.toUpperCase().includes('COMPLETE')
+    const upperState = state.toUpperCase();
+    // 実 ZAP の state は FINISHED (旧表記 COMPLETED も許容)。
+    const status: EngineProgress['status'] = upperState.includes('FINISHED') || upperState.includes('COMPLETE')
       ? 'complete'
-      : state.toUpperCase().includes('FAILED') || state.toUpperCase().includes('STOPPED')
+      : upperState.includes('FAILED') || upperState.includes('STOPPED')
         ? 'failed'
         : 'running';
     return {

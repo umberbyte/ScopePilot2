@@ -13,9 +13,10 @@ interface RecordedRequest {
   readonly query: URLSearchParams;
 }
 
-async function startFakeZap(): Promise<{ server: Server; base: string; requests: readonly RecordedRequest[]; accessUrls: string[] }> {
+async function startFakeZap(): Promise<{ server: Server; base: string; requests: readonly RecordedRequest[]; accessUrls: string[]; setScansState: (scans: readonly { id: string; state: string }[]) => void; scansState: readonly { id: string; state: string }[] }> {
   const requests: RecordedRequest[] = [];
   const accessUrls: string[] = [];
+  let scans: readonly { id: string; state: string }[] = [{ id: '7', state: 'RUNNING' }];
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     const query = url.searchParams;
@@ -43,7 +44,7 @@ async function startFakeZap(): Promise<{ server: Server; base: string; requests:
       return;
     }
     if (url.pathname === '/JSON/ascan/view/scans') {
-      respond({ scans: [{ id: '7', state: 'RUNNING' }] });
+      respond({ scans });
       return;
     }
     if (url.pathname === '/JSON/core/view/alerts') {
@@ -79,7 +80,18 @@ async function startFakeZap(): Promise<{ server: Server; base: string; requests:
   if (address === null || typeof address === 'string') {
     throw new Error('expected TCP address');
   }
-  return { server, base: `http://127.0.0.1:${address.port}`, requests, accessUrls };
+  return {
+    server,
+    base: `http://127.0.0.1:${address.port}`,
+    requests,
+    accessUrls,
+    setScansState: (next: readonly { id: string; state: string }[]) => {
+      scans = next;
+    },
+    get scansState(): readonly { id: string; state: string }[] {
+      return scans;
+    },
+  };
 }
 
 describe('ZAP adapter (fake server 契約検証)', () => {
@@ -151,6 +163,21 @@ describe('ZAP adapter (fake server 契約検証)', () => {
       } else {
         process.env['SCOPEPILOT_ZAP_API_KEY'] = previous;
       }
+      zap.server.close();
+    }
+  });
+
+  test('実 ZAP の完了表記 FINISHED は complete に写像する', async () => {
+    const zap = await startFakeZap();
+    try {
+      // 実 ZAP 2.17 の ascan/view/scans は FINISHED を返す (COMPLETED ではない)。
+      const original = zap.scansState;
+      zap.setScansState([{ id: '7', state: 'FINISHED' }]);
+      const adapter = new ZapEngineAdapter({ baseUrl: zap.base });
+      const progress = await adapter.progress('7');
+      assert.equal(progress.status, 'complete');
+      zap.setScansState(original);
+    } finally {
       zap.server.close();
     }
   });

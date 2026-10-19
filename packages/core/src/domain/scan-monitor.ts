@@ -18,11 +18,13 @@ export class ScanMonitor {
   private readonly engine: ActiveScanEnginePort;
   private readonly engineRunId: string;
   private readonly maxIterations: number;
+  private readonly pollIntervalMs: number;
 
-  constructor(engine: ActiveScanEnginePort, engineRunId: string, maxIterations = 1000) {
+  constructor(engine: ActiveScanEnginePort, engineRunId: string, maxIterations = 1000, pollIntervalMs = 2_000) {
     this.engine = engine;
     this.engineRunId = engineRunId;
     this.maxIterations = maxIterations;
+    this.pollIntervalMs = pollIntervalMs;
   }
 
   /** 停止要求は冪等。engine.stop を呼ぶのは初回だけ。 */
@@ -58,6 +60,13 @@ export class ScanMonitor {
       }
       if (progress.status !== 'running') {
         break;
+      }
+      // 実 engine (Delegated) は完了まで分単位でかかる: poll 間隔を空けて
+      // API を叩き続けない (stub は即座に完了するので sleep しない)。
+      if (this.pollIntervalMs > 0) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, this.pollIntervalMs);
+        });
       }
     }
     if (status === 'running') {
