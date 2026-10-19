@@ -114,6 +114,18 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "get": {
+        "operationId": "getCurrentAuthorization",
+        "summary": "現在の認可 (未付与の場合は 400 ValidationFailed)",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Authorization"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/plan/explore": {

@@ -6,9 +6,10 @@
  * 編集系 (crawl 計画・テンプレート選択など) は後続増分で、API は読取 endpoint のみ使う。
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Badge, Button, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, tokens } from '@fluentui/react-components';
+import { Badge, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 import { advancedDefaultRoute, advancedNavItems, type AdvancedNavItem } from '@scopepilot2/ui';
-import type { CaseRecord, EngineCapabilitySnapshot, OperatorPermission, RunRecord } from '@scopepilot2/contracts';
+import { revisionConflictDecision } from '@scopepilot2/ui';
+import type { AuthorizationRecord, CaseRecord, EngineCapabilitySnapshot, OperatorPermission, RunRecord } from '@scopepilot2/contracts';
 
 /** desktop harness の operator (fixture・全権限)。operator 照会 API は後続増分で追加する。 */
 const OPERATOR_PERMISSIONS: readonly OperatorPermission[] = ['case.manage', 'case.read', 'run.manage', 'finding.confirm', 'report.export'];
@@ -37,8 +38,9 @@ async function callJson<T>(apiBase: string, method: string, path: string, body?:
     ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   });
   if (!response.ok) {
-    const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
-    throw new Error(errorBody?.message ?? `HTTP ${response.status}`);
+    const errorBody = (await response.json().catch(() => null)) as { message?: string; code?: string } | null;
+    // DomainError の code を添えて投げる (画面側は code で競合と検証 error を分ける)。
+    throw Object.assign(new Error(errorBody?.message ?? `HTTP ${response.status}`), { code: errorBody?.code });
   }
   return (await response.json()) as T;
 }
@@ -50,6 +52,166 @@ async function callNdjson<T>(apiBase: string, path: string): Promise<readonly T[
   }
   const text = await response.text();
   return text.split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as T);
+}
+
+/** A02 Scope & Authorization。scope 編集 (revision guard つき) と認可状態の表示。 */
+function ScopeAuthorizationScreen({ apiBase }: { apiBase: string }): React.ReactElement {
+  const styles = useStyles();
+  const [caseRecord, setCaseRecord] = useState<CaseRecord | null>(null);
+  const [allowedDraft, setAllowedDraft] = useState('');
+  const [deniedDraft, setDeniedDraft] = useState('');
+  const [limitsDraft, setLimitsDraft] = useState({ maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 });
+  const [authorization, setAuthorization] = useState<AuthorizationRecord | null>(null);
+  const [authzMissing, setAuthzMissing] = useState(false);
+  const [conflict, setConflict] = useState('');
+  const [savedNote, setSavedNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const record = await callJson<CaseRecord>(apiBase, 'GET', '/api/case');
+      setCaseRecord(record);
+      setAllowedDraft(record.scope.allowedOrigins.join('\n'));
+      setDeniedDraft(record.scope.deniedOrigins.join('\n'));
+      setLimitsDraft(record.scope.limits);
+    } catch {
+      setCaseRecord(null);
+      setError('案件が未作成です。A01 で案件を作成してください。');
+      return;
+    }
+    setError('');
+    try {
+      const authz = await callJson<AuthorizationRecord>(apiBase, 'GET', '/api/authorization');
+      setAuthorization(authz);
+      setAuthzMissing(false);
+    } catch {
+      setAuthorization(null);
+      setAuthzMissing(true);
+    }
+  }, [apiBase]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = useCallback(async () => {
+    if (caseRecord === null) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setConflict('');
+    setSavedNote('');
+    try {
+      const outcome = await callJson<{ revision: number; narrowed: boolean; invalidatedConfirmationIds: readonly string[] }>(apiBase, 'POST', '/api/case/scope', {
+        expectedRevision: caseRecord.revision,
+        allowedOrigins: allowedDraft.split('\n').map((line) => line.trim()).filter((line) => line !== ''),
+        deniedOrigins: deniedDraft.split('\n').map((line) => line.trim()).filter((line) => line !== ''),
+        limits: limitsDraft,
+      });
+      const invalidationNote =
+        outcome.invalidatedConfirmationIds.length > 0 ? `・確認 ${outcome.invalidatedConfirmationIds.length} 件を無効化` : '';
+      setSavedNote(`revision ${outcome.revision} で保存しました${invalidationNote}`);
+      await load();
+    } catch (cause) {
+      const code = (cause as { code?: string }).code;
+      if (code === 'Conflict') {
+        // 競合時は自動上書きしない (UI-UT-006)。server 側の最新 revision を見に行き案内文を作る。
+        let latest: { caseId: string; revision: number } | null = null;
+        try {
+          latest = await callJson<CaseRecord>(apiBase, 'GET', '/api/case');
+        } catch {
+          // 案件が消えた等の場合は server 応答の error 文面だけ示す。
+        }
+        const decision =
+          latest !== null && caseRecord !== null
+            ? revisionConflictDecision({ caseId: caseRecord.caseId, revision: caseRecord.revision }, { caseId: latest.caseId, revision: latest.revision })
+            : undefined;
+        setConflict(decision?.message ?? `案件は別の操作で更新されています (${String(cause)})。再読込してください。`);
+      } else {
+        setError(String(cause));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [allowedDraft, apiBase, caseRecord, deniedDraft, limitsDraft, load]);
+
+  if (caseRecord === null) {
+    return (
+      <div className={styles.section}>
+        <Text weight="semibold">Scope & Authorization</Text>
+        {error !== '' ? <Text role="alert">{error}</Text> : <Text>取得中…</Text>}
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.section}>
+      <Text weight="semibold">{`Scope (現在 revision ${caseRecord.revision})`}</Text>
+      <Field label="許可 Origin (1行1件)">
+        <Textarea value={allowedDraft} onChange={(_, data) => setAllowedDraft(data.value)} rows={3} />
+      </Field>
+      <Field label="禁止 Origin (1行1件)">
+        <Textarea value={deniedDraft} onChange={(_, data) => setDeniedDraft(data.value)} rows={3} />
+      </Field>
+      <div className={styles.section}>
+        <Text>上限</Text>
+        <Field label="最大リクエスト数">
+          <Input
+            type="number"
+            value={String(limitsDraft.maxRequests)}
+            onChange={(_, data) => setLimitsDraft((current) => ({ ...current, maxRequests: Number(data.value) }))}
+          />
+        </Field>
+        <Field label="最大ページ数">
+          <Input
+            type="number"
+            value={String(limitsDraft.maxPages)}
+            onChange={(_, data) => setLimitsDraft((current) => ({ ...current, maxPages: Number(data.value) }))}
+          />
+        </Field>
+        <Field label="最大実行分">
+          <Input
+            type="number"
+            value={String(limitsDraft.maxDurationMinutes)}
+            onChange={(_, data) => setLimitsDraft((current) => ({ ...current, maxDurationMinutes: Number(data.value) }))}
+          />
+        </Field>
+      </div>
+      <div className={styles.section}>
+        {savedNote !== '' && <Text>{savedNote}</Text>}
+        {conflict !== '' && (
+          <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+            {conflict}
+          </Text>
+        )}
+        {error !== '' && (
+          <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+            {`Error: ${error}`}
+          </Text>
+        )}
+        <Button appearance="primary" disabled={busy} onClick={() => void save()}>
+          scope を保存する
+        </Button>
+        <Button disabled={busy} onClick={() => { setConflict(''); setSavedNote(''); void load(); }}>
+          再読込
+        </Button>
+      </div>
+      <Text weight="semibold">Authorization</Text>
+      {authorization !== null ? (
+        <>
+          <Text>{`認可: 付与済み (${authorization.validFrom} 〜 ${authorization.validUntil})`}</Text>
+          <Text className={styles.muted}>{`許可操作: ${authorization.allowedOperationClasses.join(', ')}`}</Text>
+          <Text className={styles.muted}>{`対象 role: ${authorization.targetRoles.join(', ')}`}</Text>
+        </>
+      ) : authzMissing ? (
+        <Text>認可: 未付与 (A01 の案件作成で付与、または POST /api/authorization で付与)</Text>
+      ) : (
+        <Text>取得中…</Text>
+      )}
+    </div>
+  );
 }
 
 export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElement {
@@ -223,7 +385,8 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
             )}
           </div>
         )}
-        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && (
+        {activeRoute === 'advanced.scope' && <ScopeAuthorizationScreen apiBase={apiBase} />}
+        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && (
           <Text className={styles.muted}>この画面は未実装です (後続増分で提供します)。</Text>
         )}
       </div>

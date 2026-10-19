@@ -44,7 +44,45 @@ test('A12: 監査 event に案件作成が記録されている', async () => {
   await expect(page.getByText(/CaseCreated/)).toBeVisible();
 });
 
-test('未実装画面はプレースホルダで明示される (A02)', async () => {
+test('A02: scope を編集して保存し、競合時は再読込を案内する', async () => {
   await page.getByRole('button', { name: /A02 Scope & Authorization/ }).click();
+  // 認可は A01 の案件作成で付与済み。有効期間と許可操作を表示する。
+  await expect(page.getByText(/認可: 付与済み/)).toBeVisible();
+  await expect(page.getByText(/Browse, ActiveScan/)).toBeVisible();
+
+  // 禁止 Origin を追記して保存 → revision が進む。
+  const denied = page.getByLabel('禁止 Origin (1行1件)');
+  await denied.fill('http://fixture.target.test\nhttp://denied.fixture.target.test');
+  await page.getByRole('button', { name: 'scope を保存する' }).click();
+  await expect(page.getByText(/revision 2 で保存しました/)).toBeVisible({ timeout: 30_000 });
+
+  // 別 window による更新を擬似する (page 内から直接 scope を更新して revision 3 へ)。
+  await page.evaluate(async () => {
+    const base = window.scopepilotDesktop?.apiBase ?? '';
+    const current = (await (await fetch(`${base}/api/case`)).json()) as {
+      revision: number;
+      scope: { allowedOrigins: readonly string[]; deniedOrigins: readonly string[]; limits: { maxRequests: number; maxPages: number; maxDurationMinutes: number } };
+    };
+    await fetch(`${base}/api/case/scope`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expectedRevision: current.revision,
+        allowedOrigins: current.scope.allowedOrigins,
+        deniedOrigins: current.scope.deniedOrigins,
+        limits: { maxRequests: current.scope.limits.maxRequests - 1, maxPages: current.scope.limits.maxPages, maxDurationMinutes: current.scope.limits.maxDurationMinutes },
+      }),
+    });
+  });
+  // 画面の保持 revision (2) で保存しようとすると 409 → 競合表示、自動上書きしない。
+  await page.getByRole('button', { name: 'scope を保存する' }).click();
+  await expect(page.getByText(/自動上書きは行いません/)).toBeVisible({ timeout: 30_000 });
+  // 再読込で最新 revision (3) を取り込める。
+  await page.getByRole('button', { name: '再読込' }).click();
+  await expect(page.getByText(/Scope \(現在 revision 3\)/)).toBeVisible({ timeout: 30_000 });
+});
+
+test('未実装画面はプレースホルダで明示される (A03)', async () => {
+  await page.getByRole('button', { name: /A03 Guidelines & Check Catalog/ }).click();
   await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toBeVisible();
 });

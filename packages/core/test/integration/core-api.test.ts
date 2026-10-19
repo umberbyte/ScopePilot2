@@ -87,6 +87,50 @@ describe('Core API server (node:http)', () => {
     assert.equal(error.retryable, false);
   });
 
+  test('GET /api/authorization は現在の認可を返し、未付与では 400 ValidationFailed', async () => {
+    // この test は独立した server ではなく共有 server を使うため、先に案件を作る。
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'authz-get-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+    const missing = await fetch(`${baseUrl}/api/authorization`);
+    assert.equal(missing.status, 400);
+    const missingBody = (await missing.json()) as { code: string };
+    assert.equal(missingBody.code, 'ValidationFailed');
+
+    await fetch(`${baseUrl}/api/authorization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['unauthenticated'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      }),
+    });
+    const current = await fetch(`${baseUrl}/api/authorization`);
+    assert.equal(current.status, 200);
+    const record = (await current.json()) as {
+      allowedOperationClasses: readonly string[];
+      targetRoles: readonly string[];
+      validFrom: string;
+      validUntil: string;
+      evidenceRef: { readonly kind?: string };
+    };
+    assert.deepEqual(record.allowedOperationClasses, ['Browse', 'ActiveScan']);
+    assert.equal(record.validUntil, '2026-10-19T00:00:00.000Z');
+    // 証跡は hash 参照のみで、秘密値 (本文) は含まない。
+    assert.equal(JSON.stringify(record).includes('it authorization evidence'), false);
+  });
+
   test('権限不足・競合は安定した status に写る (403 / 409)', async () => {
     const scopeUpdate = await fetch(`${baseUrl}/api/case/scope`, {
       method: 'POST',

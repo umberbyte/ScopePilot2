@@ -97,6 +97,13 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/authorization') {
+      try {
+        return respondJson(response, 200, service.currentAuthorization());
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'POST /api/authorization') {
       const body = await readJsonBody(request, response);
       if (body === undefined) {

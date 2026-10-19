@@ -7,6 +7,7 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'GET', path: '/api/case', operationId: 'getCurrentCase' },
   { method: 'POST', path: '/api/case', operationId: 'createCase' },
   { method: 'POST', path: '/api/case/scope', operationId: 'updateCaseScope' },
+  { method: 'GET', path: '/api/authorization', operationId: 'getCurrentAuthorization' },
   { method: 'POST', path: '/api/authorization', operationId: 'grantAuthorization' },
   { method: 'POST', path: '/api/plan/explore', operationId: 'buildExplorePlan' },
   { method: 'POST', path: '/api/plan/scan', operationId: 'buildActiveScanPlan' },
