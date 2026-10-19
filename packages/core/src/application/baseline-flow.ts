@@ -33,6 +33,8 @@ import {
   type DocumentAuthHint,
   type DocumentAuthHintEntry,
   type DocumentPriorityRule,
+  type DocumentParameterHint,
+  type DocumentParameterHintEntry,
   DocumentAuthMethods,
   DocumentPriorityCategories,
 } from '@scopepilot2/contracts';
@@ -255,6 +257,8 @@ export class BaselineFlowService {
   private readonly documentAuthHintDocuments: DocumentAuthHintEntry[] = [];
   /** 入力文書由来の優先付け規則 (AGENTS.md: pii・payment を高優先)。探索の処理順に効く。 */
   private readonly documentPriorityRules: readonly DocumentPriorityRule[] = [];
+  /** 入力文書由来の parameter バリエーション (AGENTS.md: fuzzer positions の未確認参照)。 */
+  private readonly documentParameterHintDocuments: DocumentParameterHintEntry[] = [];
   /** 計画ごとの hint 由来開始点 (canonical)。観測の由来 (document-hint) 判定に使う。 */
   private readonly explorationHintSeeds = new Map<string, ReadonlySet<string>>();
   /** runLogin で得た role session (cookie 値は service 内部のみ。API・監査へ出さない)。 */
@@ -406,6 +410,45 @@ export class BaselineFlowService {
   /** 登録済みの優先付け規則の一覧。 */
   listDocumentPriorityRules(): readonly DocumentPriorityRule[] {
     return [...this.documentPriorityRules];
+  }
+
+  /**
+   * 入力文書由来の API parameter バリエーションの登録 (AGENTS.md)。
+   * 文書の記載は未確認のため A07 の fuzzer positions の「参照」としてのみ表示し、
+   * 自動的には適用しない。
+   */
+  registerDocumentParameterHints(
+    operator: OperatorProfile,
+    input: { readonly documentLabel: string; readonly parameters: readonly DocumentParameterHint[] },
+  ): { documentLabel: string; parameterCount: number } {
+    this.requirePermission(operator, 'case.manage');
+    if (input.documentLabel.trim() === '') {
+      throw domainError('ValidationFailed', 'documentLabel must not be empty');
+    }
+    if (input.parameters.length === 0) {
+      throw domainError('ValidationFailed', 'parameter hints need at least one parameter');
+    }
+    for (const [index, parameter] of input.parameters.entries()) {
+      if (parameter.name.trim() === '') {
+        throw domainError('ValidationFailed', `parameters[${index}]: name must not be empty`);
+      }
+      if (parameter.values.length === 0) {
+        throw domainError('ValidationFailed', `parameters[${index}]: values need at least one entry`);
+      }
+    }
+    this.documentParameterHintDocuments.push({ documentLabel: input.documentLabel, parameters: [...input.parameters] });
+    this.record({
+      type: 'DocumentParameterHintsRegistered',
+      at: this.deps.clock.now().toISOString(),
+      documentLabel: input.documentLabel,
+      parameterCount: input.parameters.length,
+    });
+    return { documentLabel: input.documentLabel, parameterCount: input.parameters.length };
+  }
+
+  /** 登録済みの parameter バリエーション (未確認参照)。 */
+  listDocumentParameterHints(): readonly DocumentParameterHintEntry[] {
+    return [...this.documentParameterHintDocuments];
   }
 
   /** URL が優先付け規則に一致するか (探索の処理順用)。 */

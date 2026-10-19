@@ -1367,6 +1367,27 @@ describe('Core API server (node:http)', () => {
     assert.match(eventsText, /DocumentHintsRegistered/);
   });
 
+  test('documents/parameter-hints は parameter バリエーションを登録・一覧する (AGENTS.md)', async () => {
+    const post = async (path: string, body: unknown): Promise<Response> =>
+      fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    const emptyValues = await post('/api/documents/parameter-hints', { documentLabel: 'x', parameters: [{ name: 'a', values: [] }] });
+    assert.equal(emptyValues.status, 400);
+
+    const registered = await post('/api/documents/parameter-hints', {
+      documentLabel: 'IT API 仕様',
+      parameters: [{ name: 'user', values: ['admin', 'guest'] }],
+    });
+    assert.equal(registered.status, 201);
+    const registration = (await registered.json()) as { documentLabel: string; parameterCount: number };
+    assert.deepEqual(registration, { documentLabel: 'IT API 仕様', parameterCount: 1 });
+
+    const list = (await (await fetch(`${baseUrl}/api/documents/parameter-hints`)).json()) as { hints: readonly { documentLabel: string; parameters: readonly { name: string; values: readonly string[] }[] }[] };
+    assert.deepEqual(list.hints[0]?.parameters[0], { name: 'user', values: ['admin', 'guest'] });
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /DocumentParameterHintsRegistered/);
+  });
+
   test('documents/priority-hints は探索の処理順に優先を反映する (AGENTS.md)', async () => {
     const post = async (path: string, body: unknown): Promise<Response> =>
       fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

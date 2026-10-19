@@ -53,6 +53,7 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
   const [payloadValues, setSetValues] = useState('');
   const [targetUrl, setTargetUrl] = useState('http://fixture.target.test/fuzz');
   const [sessionRole, setSessionRole] = useState('');
+  const [paramHints, setParamHints] = useState<readonly { documentLabel: string; parameters: readonly { name: string; values: readonly string[] }[] }[]>([]);
   const [positionsText, setPositionsText] = useState('user: admin, guest\nid: 1, 2');
   const [result, setResult] = useState<FuzzRunResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -90,6 +91,17 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
       setBusy(false);
     }
   }, [apiBase, license, loadSets, payloadName, payloadSource, payloadValues, payloadVersion]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const body = await callJson<{ hints: readonly { documentLabel: string; parameters: readonly { name: string; values: readonly string[] }[] }[] }>(apiBase, 'GET', '/api/documents/parameter-hints');
+        setParamHints(body.hints);
+      } catch {
+        // 参照情報の取得失敗は fuzz 実行を妨げない。
+      }
+    })();
+  }, [apiBase]);
 
   const runFuzz = useCallback(async () => {
     setBusy(true);
@@ -157,6 +169,13 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
       <Field label={t('a07.sessionRoleLabel')}>
         <Input value={sessionRole} onChange={(_, data) => setSessionRole(data.value)} />
       </Field>
+      {paramHints.length > 0 && (
+        <Text className={styles.muted}>
+          {t('a07.paramHintReference', {
+            entries: paramHints.flatMap((hint) => hint.parameters.map((parameter) => `${parameter.name}: ${parameter.values.join(', ')}`)).join('・'),
+          })}
+        </Text>
+      )}
       <Field label={t('a07.positionsLabel')}>
         <Textarea value={positionsText} onChange={(_, data) => setPositionsText(data.value)} rows={3} />
       </Field>

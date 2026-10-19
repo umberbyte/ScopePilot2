@@ -114,6 +114,37 @@ describe('document hints (入力ドキュメントの活用)', () => {
     );
   });
 
+  test('parameter バリエーションを登録・一覧できる (未確認参照・値の検証あり)', async () => {
+    const { service, operator } = await bootstrapFlow();
+    const result = service.registerDocumentParameterHints(operator, {
+      documentLabel: 'API 仕様書 v1',
+      parameters: [
+        { name: 'user', values: ['admin', 'guest'] },
+        { name: 'id', values: ['1', '2', '3'] },
+      ],
+    });
+    assert.deepEqual(result, { documentLabel: 'API 仕様書 v1', parameterCount: 2 });
+    assert.deepEqual(service.listDocumentParameterHints(), [
+      {
+        documentLabel: 'API 仕様書 v1',
+        parameters: [
+          { name: 'user', values: ['admin', 'guest'] },
+          { name: 'id', values: ['1', '2', '3'] },
+        ],
+      },
+    ]);
+    assert.ok(JSON.stringify(service.events()).includes('DocumentParameterHintsRegistered'));
+
+    assert.throws(
+      () => service.registerDocumentParameterHints(operator, { documentLabel: 'd', parameters: [{ name: '', values: ['x'] }] }),
+      /name must not be empty/,
+    );
+    assert.throws(
+      () => service.registerDocumentParameterHints(operator, { documentLabel: 'd', parameters: [{ name: 'x', values: [] }] }),
+      /at least one entry/,
+    );
+  });
+
   test('空 label・空 URL 一覧は検証 error。権限なしは拒否', async () => {
     const { service, operator } = await bootstrapFlow();
     assert.throws(

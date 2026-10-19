@@ -38,3 +38,15 @@ export interface DocumentPriorityHintEntry {
   readonly documentLabel: string;
   readonly rules: readonly DocumentPriorityRule[];
 }
+
+/** 文書に記載されていた API parameter のバリエーション (fuzzer positions の参照用・未確認)。 */
+export interface DocumentParameterHint {
+  readonly name: string;
+  readonly values: readonly string[];
+}
+
+/** 登録済みの parameter hint (文書 label 付き)。 */
+export interface DocumentParameterHintEntry {
+  readonly documentLabel: string;
+  readonly parameters: readonly DocumentParameterHint[];
+}

@@ -519,6 +519,35 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/documents/parameter-hints') {
+      return respondJson(response, 200, { hints: service.listDocumentParameterHints() });
+    }
+    if (route === 'POST /api/documents/parameter-hints') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const parametersValue = body.parameters;
+        if (!Array.isArray(parametersValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field parameters must be an array', false);
+        }
+        const parameters = parametersValue.map((parameter: unknown, index: number) => {
+          if (typeof parameter !== 'object' || parameter === null) {
+            throw new DomainError('ValidationFailed', `parameters[${index}] must be an object`);
+          }
+          const record = parameter as Record<string, unknown>;
+          return { name: stringField(record, 'name'), values: stringArrayField(record, 'values') };
+        });
+        const result = service.registerDocumentParameterHints(operator, {
+          documentLabel: stringField(body, 'documentLabel'),
+          parameters,
+        });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/documents/auth-hints') {
       return respondJson(response, 200, { hints: service.listDocumentAuthHints() });
     }

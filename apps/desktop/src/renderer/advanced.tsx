@@ -414,6 +414,9 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const [hintUrls, setHintUrls] = useState('');
   const [hints, setHints] = useState<readonly { documentLabel: string; urls: readonly string[] }[]>([]);
   const [hintNotice, setHintNotice] = useState('');
+  const [paramHintName, setParamHintName] = useState('');
+  const [paramHintValues, setParamHintValues] = useState('');
+  const [paramHints, setParamHints] = useState<readonly { documentLabel: string; parameters: readonly { name: string; values: readonly string[] }[] }[]>([]);
   const [priorityIncludes, setPriorityIncludes] = useState('');
   const [priorityCategory, setPriorityCategory] = useState('pii');
   const [priorityRules, setPriorityRules] = useState<readonly { urlIncludes: string; category: string }[]>([]);
@@ -475,6 +478,29 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
     [apiBase, hintLabel, hintUrls, loadHints, run],
   );
 
+  const loadParamHints = useCallback(async () => {
+    try {
+      const body = await callJson<{ hints: readonly { documentLabel: string; parameters: readonly { name: string; values: readonly string[] }[] }[] }>(apiBase, 'GET', '/api/documents/parameter-hints');
+      setParamHints(body.hints);
+    } catch (cause) {
+      setError(String(cause));
+    }
+  }, [apiBase]);
+
+  const registerParamHints = useCallback(
+    () =>
+      run(async () => {
+        const values = paramHintValues.split(',').map((value) => value.trim()).filter((value) => value !== '');
+        const result = await callJson<{ documentLabel: string; parameterCount: number }>(apiBase, 'POST', '/api/documents/parameter-hints', {
+          documentLabel: hintLabel,
+          parameters: [{ name: paramHintName, values }],
+        });
+        setHintNotice(t('a08.paramHintRegistered', { label: result.documentLabel, count: result.parameterCount }));
+        await loadParamHints();
+      }),
+    [apiBase, hintLabel, loadParamHints, paramHintName, paramHintValues, run],
+  );
+
   const loadPriorityRules = useCallback(async () => {
     try {
       const body = await callJson<{ rules: readonly { urlIncludes: string; category: string }[] }>(apiBase, 'GET', '/api/documents/priority-hints');
@@ -486,8 +512,9 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
 
   useEffect(() => {
     void loadHints();
+    void loadParamHints();
     void loadPriorityRules();
-  }, [loadHints, loadPriorityRules]);
+  }, [loadHints, loadParamHints, loadPriorityRules]);
 
   const registerPriorityHints = useCallback(
     () =>
@@ -648,6 +675,19 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
       </Button>
       {priorityRules.length > 0 && (
         <Text className={styles.muted}>{t('a08.priorityList', { rules: priorityRules.map((rule) => `${rule.urlIncludes} (${rule.category})`).join('・') })}</Text>
+      )}
+      <Text className={styles.muted}>{t('a08.paramHintIntro')}</Text>
+      <Field label={t('a08.paramHintNameLabel')}>
+        <Input value={paramHintName} onChange={(_, data) => setParamHintName(data.value)} />
+      </Field>
+      <Field label={t('a08.paramHintValuesLabel')}>
+        <Input value={paramHintValues} onChange={(_, data) => setParamHintValues(data.value)} />
+      </Field>
+      <Button disabled={busy} onClick={() => void registerParamHints()}>
+        {t('a08.paramHintRegister')}
+      </Button>
+      {paramHints.length > 0 && (
+        <Text className={styles.muted}>{t('a08.paramHintList', { entries: paramHints.flatMap((hint) => hint.parameters.map((parameter) => `${parameter.name}: ${parameter.values.join(', ')}`)).join('・') })}</Text>
       )}
       <Text weight="semibold">{t('a08.exploreTitle')}</Text>
       {error !== '' && (

@@ -148,6 +148,12 @@ test('A08: 上限を狭めた探索計画を構築・確認・実行し、診断
   await page.getByRole('button', { name: '優先付けを登録する' }).click();
   await expect(page.getByText('操作手順書 (app test) の優先付けを 1 件登録しました (以後の探索で先に処理されます)')).toBeVisible({ timeout: 30_000 });
 
+  // parameter バリエーションも登録し、A07 で未確認参照として表示する (AGENTS.md)。
+  await page.getByLabel('parameter 名').fill('user');
+  await page.getByLabel('値 (comma 区切)').fill('admin, guest');
+  await page.getByRole('button', { name: 'parameter バリエーションを登録する' }).click();
+  await expect(page.getByText('操作手順書 (app test) の parameter バリエーションを 1 件登録しました (A07 に未確認付きで表示されます)')).toBeVisible({ timeout: 30_000 });
+
   // 上限 (ページ数) を 50 に狭めて計画を構築すると、計画表示に 50 が反映される。
   // 上限欄は探索・診断の両 section にあるため、先頭 (探索側) を指定する。
   await page.getByLabel('最大ページ数 (空=既定)').first().fill('50');
@@ -422,6 +428,9 @@ test('A07: payload 集合を登録し fuzz を実行して cluster 集約を見�
   await page.getByLabel(/値 \(1行1件\)/).fill('<script>1</script>\n<img src=x onerror=1>');
   await page.getByRole('button', { name: 'payload 集合を登録する' }).click();
   await expect(page.getByText(/登録済み: xss-basic \(fixture-handbook 1\.0\.0・MIT・2 件\)/)).toBeVisible({ timeout: 30_000 });
+
+  // A08 で登録した parameter バリエーションが未確認参照として表示される。
+  await expect(page.getByText('文書の記載 (未確認): user: admin, guest')).toBeVisible({ timeout: 30_000 });
 
   // positions を実行して cluster 集約を確認する。
   await page.getByLabel(/positions \(1行1件/).fill('user: admin, guest\nid: 1, 2');

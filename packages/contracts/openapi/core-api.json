@@ -3154,6 +3154,148 @@
         }
       }
     },
+    "/api/documents/parameter-hints": {
+      "get": {
+        "operationId": "listDocumentParameterHints",
+        "summary": "登録済みの parameter バリエーション一覧 (文書の記載・未確認)",
+        "responses": {
+          "200": {
+            "description": "hints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "hints"
+                  ],
+                  "properties": {
+                    "hints": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "documentLabel",
+                          "parameters"
+                        ],
+                        "properties": {
+                          "documentLabel": {
+                            "type": "string"
+                          },
+                          "parameters": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "values"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "values": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "registerDocumentParameterHints",
+        "summary": "文書に記載された API parameter のバリエーションを登録する (AGENTS.md)。A07 fuzzer positions の未確認参照としてのみ表示",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "documentLabel",
+                  "parameters"
+                ],
+                "properties": {
+                  "documentLabel": {
+                    "type": "string"
+                  },
+                  "parameters": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "values"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "values": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "登録結果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "documentLabel",
+                    "parameterCount"
+                  ],
+                  "properties": {
+                    "documentLabel": {
+                      "type": "string"
+                    },
+                    "parameterCount": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/business-logic/checks": {
       "get": {
         "operationId": "listBusinessLogicChecks",
@@ -5010,6 +5152,9 @@
             "$ref": "#/components/schemas/DocumentPriorityHintsRegisteredEvent"
           },
           {
+            "$ref": "#/components/schemas/DocumentParameterHintsRegisteredEvent"
+          },
+          {
             "$ref": "#/components/schemas/SequencerSessionCompletedEvent"
           },
           {
@@ -5549,6 +5694,31 @@
             "type": "string"
           },
           "ruleCount": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "DocumentParameterHintsRegisteredEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "documentLabel",
+          "parameterCount"
+        ],
+        "properties": {
+          "type": {
+            "const": "DocumentParameterHintsRegistered"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "documentLabel": {
+            "type": "string"
+          },
+          "parameterCount": {
             "type": "integer",
             "minimum": 1
           }
