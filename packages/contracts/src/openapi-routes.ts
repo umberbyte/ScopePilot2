@@ -16,6 +16,8 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'POST', path: '/api/run/explore', operationId: 'runExploration' },
   { method: 'POST', path: '/api/run/scan', operationId: 'runActiveScan' },
   { method: 'POST', path: '/api/import/nuclei', operationId: 'importNucleiResults' },
+  { method: 'GET', path: '/api/findings', operationId: 'listFindings' },
+  { method: 'POST', path: '/api/findings/status', operationId: 'updateFindingStatus' },
   { method: 'POST', path: '/api/report', operationId: 'generateReport' },
   { method: 'GET', path: '/api/capabilities', operationId: 'listCapabilities' },
   { method: 'GET', path: '/api/runs/interrupted', operationId: 'listInterruptedRuns' },

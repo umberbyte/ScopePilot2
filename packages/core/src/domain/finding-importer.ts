@@ -5,7 +5,8 @@
  * Nuclei match も同じ台帳へ取り込む (f18 §4 NucleiResultImporter。dedupe key は template/target)。
  * engine 由来の所見は常に実影響未確認 (unverified) として扱う。
  */
-import type { EngineAlert, Finding, FindingSeverity } from '@scopepilot2/contracts';
+import { domainError, type EngineAlert, type Finding, type FindingSeverity } from '@scopepilot2/contracts';
+import { confirmFinding } from './reporting.ts';
 import type { NucleiMatch } from './known-vulnerabilities.ts';
 import { normalizeNucleiSeverity } from './known-vulnerabilities.ts';
 
@@ -51,6 +52,39 @@ export class FindingImporter {
   /** 現在の全所見 (作成順)。 */
   list(): readonly Finding[] {
     return [...this.findingsByDedupeKey.values()];
+  }
+
+  /**
+   * 確認状態の変更 (6.3・F19)。candidate からの確定/棄却と、確定↔棄却のやり直しのみ許す。
+   * 確定は証拠参照が 1 つ以上あること (F19-UT-001 と同じ規則)。人間が未着手の candidate
+   * へは戻せない (確認者が触った事実を消さない)。
+   */
+  updateStatus(findingId: string, next: 'confirmed' | 'rejected', context: { readonly now: string; readonly changedBy: string }): Finding {
+    let existing: Finding | undefined;
+    let key: string | undefined;
+    for (const [candidateKey, candidate] of this.findingsByDedupeKey) {
+      if (candidate.findingId === findingId) {
+        existing = candidate;
+        key = candidateKey;
+        break;
+      }
+    }
+    if (existing === undefined || key === undefined) {
+      throw domainError('ValidationFailed', `finding ${findingId} does not exist`);
+    }
+    if (existing.status === next) {
+      throw domainError('ValidationFailed', `finding ${findingId} is already ${next}`);
+    }
+    if (existing.status === 'merged') {
+      throw domainError('ValidationFailed', `transition ${existing.status} -> ${next} is not allowed for finding ${findingId}`);
+    }
+    if (next === 'confirmed') {
+      // 証拠参照なしの確定は拒否 (reporting.confirmFinding が throw する)。
+      confirmFinding(existing, existing.evidenceRefs.map((evidenceId) => ({ evidenceId })));
+    }
+    const updated: Finding = { ...existing, status: next, lastSeenAt: context.now };
+    this.findingsByDedupeKey.set(key, updated);
+    return updated;
   }
 
   importAlerts(alerts: readonly EngineAlert[], context: ImportAlertsContext): ImportAlertsResult {

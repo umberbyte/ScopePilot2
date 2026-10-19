@@ -239,6 +239,26 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/findings') {
+      return respondJson(response, 200, { findings: service.listFindings() });
+    }
+    if (route === 'POST /api/findings/status') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const findingId = stringField(body, 'findingId');
+        const status = stringField(body, 'status');
+        if (status !== 'confirmed' && status !== 'rejected') {
+          return respondError(response, 400, 'ValidationFailed', "field status must be 'confirmed' or 'rejected'", false);
+        }
+        const finding = service.updateFindingStatus(operator, { findingId, next: status });
+        return respondJson(response, 200, { finding });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/runs/interrupted') {
       if (runRepository === undefined) {
         return respondError(response, 501, 'Unsupported', 'run persistence is not configured for this server', false);

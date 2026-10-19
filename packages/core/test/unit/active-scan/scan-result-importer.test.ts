@@ -51,6 +51,25 @@ describe('FindingImporter', () => {
     assert.equal(reobserved?.source.unverified, true);
   });
 
+  test('[F19] 確認状態は candidate→確定/棄却・確定↔棄却のみ許し、監査向けに変更者を返す', () => {
+    const importer = new FindingImporter();
+    importer.importAlerts([baseAlert], importContext());
+    const findingId = importer.list()[0]?.findingId ?? '';
+    const context = { now: '2026-10-18T09:10:00.000Z', changedBy: 'operator-fixture' };
+
+    const confirmed = importer.updateStatus(findingId, 'confirmed', context);
+    assert.equal(confirmed.status, 'confirmed');
+    assert.equal(confirmed.lastSeenAt, context.now);
+
+    // 確定→棄却 (レビューやり直し) は許す。
+    assert.equal(importer.updateStatus(findingId, 'rejected', context).status, 'rejected');
+    // 棄却→確定も許す。
+    assert.equal(importer.updateStatus(findingId, 'confirmed', context).status, 'confirmed');
+    // 同一状態への再変更・未知の所見は拒否。
+    assert.throws(() => importer.updateStatus(findingId, 'confirmed', context), /already confirmed/);
+    assert.throws(() => importer.updateStatus('finding-9999', 'rejected', context), /does not exist/);
+  });
+
   test('[F11-UT-006] param の有無は別の観測として区別される', () => {
     const importer = new FindingImporter();
     importer.importAlerts([baseAlert], importContext());

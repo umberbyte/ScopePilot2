@@ -555,6 +555,101 @@ describe('Core API server (node:http)', () => {
 `));
   });
 
+  test('GET /api/findings と POST /api/findings/status は所見確認状態を監査付きで扱う', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'findings-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+    await fetch(`${baseUrl}/api/authorization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allowedOperationClasses: ['Browse', 'ActiveScan'],
+        targetRoles: ['unauthenticated'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      }),
+    });
+
+    // 診断を実行して所見を作る (plan → confirm → run/scan)。
+    const planResponse = await fetch(`${baseUrl}/api/plan/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targets: ['http://fixture.target.test/page'] }),
+    });
+    const { plan } = (await planResponse.json()) as { plan: unknown };
+    const confirmationResponse = await fetch(`${baseUrl}/api/plan/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan }),
+    });
+    const confirmation = (await confirmationResponse.json()) as { confirmationId: string };
+    const scanResponse = await fetch(`${baseUrl}/api/run/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        plan,
+        confirmation,
+        adopted: [
+          { candidateId: 'cand-findings-1', url: 'http://fixture.target.test/page', method: 'GET', category: 'page', guidelineBasis: ['provisional:page'], confidence: 0.7, observationUrl: 'http://fixture.target.test/page' },
+        ],
+      }),
+    });
+    assert.equal(scanResponse.status, 200);
+    const scanBody = (await scanResponse.json()) as { findings: readonly { findingId: string; status: string; source: { unverified: boolean } }[] };
+    assert.ok(scanBody.findings.length > 0, '診断で所見が 1 件以上作られる');
+
+    const listResponse = await fetch(`${baseUrl}/api/findings`);
+    assert.equal(listResponse.status, 200);
+    const listBody = (await listResponse.json()) as { findings: readonly { findingId: string; status: string }[] };
+    const target = listBody.findings[0];
+    assert.notEqual(target, undefined);
+    assert.equal(target?.status, 'candidate');
+
+    const updateResponse = await fetch(`${baseUrl}/api/findings/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ findingId: target?.findingId, status: 'confirmed' }),
+    });
+    assert.equal(updateResponse.status, 200);
+    const updated = (await updateResponse.json()) as { finding: { status: string } };
+    assert.equal(updated.finding.status, 'confirmed');
+
+    // 不正な status と未知の findingId は 400。同じ状態への再設定も 400。
+    const badStatus = await fetch(`${baseUrl}/api/findings/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ findingId: target?.findingId, status: 'candidate' }),
+    });
+    assert.equal(badStatus.status, 400);
+    const unknown = await fetch(`${baseUrl}/api/findings/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ findingId: 'finding-9999', status: 'confirmed' }),
+    });
+    assert.equal(unknown.status, 400);
+    const same = await fetch(`${baseUrl}/api/findings/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ findingId: target?.findingId, status: 'confirmed' }),
+    });
+    assert.equal(same.status, 400);
+
+    // 状態変更は監査 event に確認者付きで残る。
+    const eventsResponse = await fetch(`${baseUrl}/api/events`);
+    const eventsText = await eventsResponse.text();
+    assert.match(eventsText, /FindingStatusChanged/);
+    assert.match(eventsText, /operator-test/);
+  });
+
   test('GET /api/runs/interrupted は実行中残置 run を Interrupted 化し、再実行は空を返す', async () => {
     const first = await fetch(`${baseUrl}/api/runs/interrupted`);
     assert.equal(first.status, 200);

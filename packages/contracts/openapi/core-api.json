@@ -428,6 +428,44 @@
           }
         }
       }
+    },
+    "/api/findings": {
+      "get": {
+        "operationId": "listFindings",
+        "summary": "所見一覧 (作成順)",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Findings"
+          }
+        }
+      }
+    },
+    "/api/findings/status": {
+      "post": {
+        "operationId": "updateFindingStatus",
+        "summary": "所見の確認状態変更 (finding.confirm 権限。候補→確定/棄除、確定↔棄除)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindingStatusRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Finding"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2128,6 +2166,26 @@
             "pattern": "^[0-9a-f]{64}$"
           }
         }
+      },
+      "FindingStatusRequest": {
+        "type": "object",
+        "required": [
+          "findingId",
+          "status"
+        ],
+        "properties": {
+          "findingId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "rejected"
+            ]
+          }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -2267,6 +2325,47 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Findings": {
+        "description": "findings list",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "findings"
+              ],
+              "properties": {
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Finding"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "Finding": {
+        "description": "updated finding",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "finding"
+              ],
+              "properties": {
+                "finding": {
+                  "$ref": "#/components/schemas/Finding"
+                }
+              },
+              "additionalProperties": false
             }
           }
         }

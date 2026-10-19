@@ -15,4 +15,5 @@ export type BaselineFlowEvent =
   | { readonly type: 'EgressDenied'; readonly at: string; readonly url: string; readonly reason: string }
   | { readonly type: 'CandidatesAdopted'; readonly at: string; readonly adoptedCount: number }
   | { readonly type: 'FindingsImported'; readonly at: string; readonly source: FindingSourceKind; readonly engineVersion?: string; readonly importedCount: number; readonly duplicateCount: number }
+  | { readonly type: 'FindingStatusChanged'; readonly at: string; readonly findingId: string; readonly from: string; readonly to: string; readonly changedBy: string }
   | { readonly type: 'ReportGenerated'; readonly at: string; readonly reportId: string; readonly modelHash: string };

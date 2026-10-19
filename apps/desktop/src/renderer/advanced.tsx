@@ -214,6 +214,135 @@ function ScopeAuthorizationScreen({ apiBase }: { apiBase: string }): React.React
   );
 }
 
+/** A11 が表示する所見の全体形 (contracts.Finding の表示に必要な部分)。 */
+interface FindingView {
+  readonly findingId: string;
+  readonly title: string;
+  readonly severity: string;
+  readonly url: string;
+  readonly method?: string;
+  readonly occurrences: number;
+  readonly status: string;
+  readonly source: { readonly unverified: boolean; readonly engineVersion?: string };
+}
+
+/** A11 Findings / Organizer / Report。所見一覧・確認状態 (確定/棄却)・報告書生成。 */
+function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactElement {
+  const styles = useStyles();
+  const [findings, setFindings] = useState<readonly FindingView[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [reportContent, setReportContent] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const body = await callJson<{ findings: readonly FindingView[] }>(apiBase, 'GET', '/api/findings');
+      setFindings(body.findings);
+      setLoaded(true);
+    } catch (cause) {
+      setError(String(cause));
+    }
+  }, [apiBase]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const changeStatus = useCallback(async (findingId: string, next: 'confirmed' | 'rejected') => {
+    setBusy(true);
+    setError('');
+    try {
+      await callJson(apiBase, 'POST', '/api/findings/status', { findingId, status: next });
+      await load();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, load]);
+
+  const generateReport = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const report = await callJson<{ content: string }>(apiBase, 'POST', '/api/report', { guidelines: ['OWASP WSTG 4.2'] });
+      setReportContent(report.content);
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase]);
+
+  const statusLabel = (status: string): string =>
+    ({ candidate: '候補 (未確認)', confirmed: '確定済み', rejected: '棄却済み', merged: '統合済み' })[status] ?? status;
+
+  return (
+    <div className={styles.section}>
+      <Text weight="semibold">{`所見 (${findings.length} 件)`}</Text>
+      {error !== '' && (
+        <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
+          {`Error: ${error}`}
+        </Text>
+      )}
+      {findings.length === 0 ? (
+        loaded && <Text className={styles.muted}>所見はまだありません。診断の実行 (S06 / run/scan) 後に表示されます。</Text>
+      ) : (
+        <Table size="small" aria-label="所見一覧">
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>severity</TableHeaderCell>
+              <TableHeaderCell>title</TableHeaderCell>
+              <TableHeaderCell>URL</TableHeaderCell>
+              <TableHeaderCell>観測</TableHeaderCell>
+              <TableHeaderCell>状態</TableHeaderCell>
+              <TableHeaderCell>操作</TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {findings.map((finding) => (
+              <TableRow key={finding.findingId}>
+                <TableCell>{finding.severity}</TableCell>
+                <TableCell>{finding.title}</TableCell>
+                <TableCell>
+                  {finding.url}
+                  {finding.method === undefined ? '' : ` (${finding.method})`}
+                  {finding.source.unverified ? ' [実影響未確認]' : ''}
+                </TableCell>
+                <TableCell>{`${finding.occurrences} 回`}</TableCell>
+                <TableCell>{statusLabel(finding.status)}</TableCell>
+                <TableCell>
+                  <Button
+                    size="small"
+                    disabled={busy || finding.status === 'confirmed' || finding.status === 'merged'}
+                    onClick={() => void changeStatus(finding.findingId, 'confirmed')}
+                  >
+                    確定
+                  </Button>
+                  <Button
+                    size="small"
+                    disabled={busy || finding.status === 'rejected' || finding.status === 'merged'}
+                    onClick={() => void changeStatus(finding.findingId, 'rejected')}
+                  >
+                    棄却
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+      <div className={styles.section}>
+        <Button appearance="primary" disabled={busy} onClick={() => void generateReport()}>
+          報告書を生成する
+        </Button>
+        {reportContent !== '' && <Text block>{reportContent}</Text>}
+      </div>
+    </div>
+  );
+}
+
 export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElement {
   const styles = useStyles();
   const [items] = useState<readonly AdvancedNavItem[]>(() => advancedNavItems(OPERATOR_PERMISSIONS));
@@ -386,7 +515,8 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
           </div>
         )}
         {activeRoute === 'advanced.scope' && <ScopeAuthorizationScreen apiBase={apiBase} />}
-        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && (
+        {activeRoute === 'findings' && <FindingsOrganizerScreen apiBase={apiBase} />}
+        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && (
           <Text className={styles.muted}>この画面は未実装です (後続増分で提供します)。</Text>
         )}
       </div>

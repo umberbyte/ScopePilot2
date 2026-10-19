@@ -145,6 +145,27 @@ export class BaselineFlowService {
     return [...this.eventsLog];
   }
 
+  /** 現在の全所見 (作成順)。UI/CLI の organizer 表示用。 */
+  listFindings(): readonly Finding[] {
+    return this.importer.list();
+  }
+
+  /** 所見の確認状態変更 (6.3)。変更は監査 event に確認者付きで記録する。 */
+  updateFindingStatus(
+    operator: OperatorProfile,
+    input: { readonly findingId: string; readonly next: 'confirmed' | 'rejected' },
+  ): Finding {
+    this.requirePermission(operator, 'finding.confirm');
+    const at = this.deps.clock.now().toISOString();
+    const before = this.importer.list().find((finding) => finding.findingId === input.findingId);
+    if (before === undefined) {
+      throw domainError('ValidationFailed', `finding ${input.findingId} does not exist`);
+    }
+    const updated = this.importer.updateStatus(input.findingId, input.next, { now: at, changedBy: operator.operatorId });
+    this.record({ type: 'FindingStatusChanged', at, findingId: input.findingId, from: before.status, to: input.next, changedBy: operator.operatorId });
+    return updated;
+  }
+
   /** 能力表 (fixture または実測)。API 経由で UI/CLI が版と fixture hash を確認するのに使う。 */
   capabilities(): readonly EngineCapabilitySnapshot[] {
     return [...this.deps.capabilities];
