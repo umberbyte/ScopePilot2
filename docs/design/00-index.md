@@ -37,6 +37,7 @@
 | [25 文書ヒント・全作業AI支援](25-document-hints-ai.md) | 7章 | A1 |
 | [26 要求トレーサビリティ](26-requirements-traceability.md) | F01–F21、横断要件 | 全段階 |
 | [27 ガイドライン参照・候補選定](27-security-guidelines.md) | F03、F08、F19、6.3、5.1 | A1 |
+| [28 Windows UI 原則・AI 実装規則](28-windows-ui-guidelines.md) | 8章、UI 全般 | A1–A4 |
 
 ## 全文書に適用する規則
 
