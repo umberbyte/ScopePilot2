@@ -153,6 +153,39 @@ test('A08: 上限を狭めた探索計画を構築・確認・実行し、診断
   await page.getByRole('button', { name: '診断計画を確認する' }).click();
   await page.getByRole('button', { name: '診断を実行する' }).click();
   await expect(page.getByText(/診断完了 \(engine/)).toBeVisible({ timeout: 30_000 });
+
+  // role を指定した診断は session cookie を適用する (design/08・login は API で setup)。
+  await page.evaluate(async () => {
+    const base = (window as { scopepilotDesktop?: { apiBase: string } }).scopepilotDesktop?.apiBase ?? '';
+    const post = async (path: string, body: unknown): Promise<void> => {
+      const response = await fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!response.ok) {
+        throw new Error(`${path}: HTTP ${response.status}`);
+      }
+    };
+    await post('/api/sessions/flows', {
+      role: 'admin',
+      flowVersion: 'f1',
+      steps: [
+        { kind: 'navigate', target: 'http://fixture.target.test/login.php' },
+        { kind: 'fill', target: '#username', secretReference: 'vault://admin-user' },
+        { kind: 'fill', target: '#password', secretReference: 'vault://admin-pass' },
+        { kind: 'click', target: 'input[type=submit]' },
+        { kind: 'assert', target: 'Fixture Target Home' },
+      ],
+    });
+    await post('/api/sessions/login', {
+      role: 'admin',
+      baseUrl: 'http://fixture.target.test',
+      expectedUrlPrefix: 'http://fixture.target.test/',
+      secretValues: { 'vault://admin-user': 'fixture-user', 'vault://admin-pass': 'fixture-pass' },
+    });
+  });
+  await page.getByLabel('診断 session の role (任意・A09 で login 済みの role。空なら非認証)').fill('admin');
+  await page.getByRole('button', { name: '診断計画を構築する' }).click();
+  await page.getByRole('button', { name: '診断計画を確認する' }).click();
+  await page.getByRole('button', { name: '診断を実行する' }).click();
+  await expect(page.getByText('(session cookie 適用: PHPSESSID)')).toBeVisible({ timeout: 30_000 });
 });
 
 test('A04: site map に観測一覧と scope 拒否が表示される', async () => {

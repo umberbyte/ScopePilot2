@@ -214,7 +214,9 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return;
       }
       try {
-        const result = await service.runActiveScan(operator, planField(body), confirmationField(body), adoptedField(body));
+        // role 指定時はその role の session cookie 適用を診断へ指示する (design/08)。
+        const role = typeof body.role === 'string' ? stringField(body, 'role') : undefined;
+        const result = await service.runActiveScan(operator, planField(body), confirmationField(body), adoptedField(body), role);
         return respondJson(response, 200, {
           runRecord: result.runRecord,
           planHash: result.planHash,

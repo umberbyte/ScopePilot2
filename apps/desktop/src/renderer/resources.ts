@@ -294,6 +294,8 @@ export const strings = {
   'a08.confirmExplore': '探索計画を確認する',
   'a08.runExplore': '探索を実行する',
   'a08.scanTitle': '診断計画 (active scan)',
+  'a08.scanRoleLabel': '診断 session の role (任意・A09 で login 済みの role。空なら非認証)',
+  'a08.sessionApplied': '(session cookie 適用: {cookies})',
   'a08.targetsLabel': '対象 URL (1行1件・探索で観測済みの URL)',
   'a08.adoptAll': '探索結果の候補をすべて対象に設定',
   'a08.buildScan': '診断計画を構築する',

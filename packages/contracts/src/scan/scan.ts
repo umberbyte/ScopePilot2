@@ -12,6 +12,12 @@ export interface ActiveScanRequest {
   readonly attackStrength: ScanAttackStrength;
   readonly leasedLimits: PlanLimits;
   readonly authorizationRef: string;
+  /**
+   * role session 適用時の cookie 名 (design/08: F11 は Cookie 適用対象)。名前のみ —
+   * 値は要求に入れない (API 応答に scanRequest が映るため)。実 ZAP は proxy 経由
+   * login で jar へ session を作る既存経路を使い、ここは trace と検証に使う。
+   */
+  readonly sessionCookieNames?: readonly string[];
 }
 
 /** ZAP 形式の alert 要約。取込時に重複除外し、実影響は未確認として扱う。 */

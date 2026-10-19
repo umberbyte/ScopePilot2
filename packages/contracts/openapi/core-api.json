@@ -2597,6 +2597,10 @@
             "items": {
               "$ref": "#/components/schemas/ScanCandidate"
             }
+          },
+          "role": {
+            "type": "string",
+            "description": "runLogin 済み role。指定時はその role の session を診断に適用する (design/08: F11)。実 ZAP は proxy 経由 login で jar へ session を作る前提"
           }
         }
       },
@@ -3037,6 +3041,13 @@
           },
           "authorizationRef": {
             "type": "string"
+          },
+          "sessionCookieNames": {
+            "type": "array",
+            "description": "role session 適用時の cookie 名 (対象 URL の host/path に一致するもののみ。値は含まない)",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

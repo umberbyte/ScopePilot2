@@ -420,6 +420,7 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const [exploreResult, setExploreResult] = useState('');
   const [candidates, setCandidates] = useState<readonly CandidateView[]>([]);
   const [targets, setTargets] = useState('');
+  const [scanRole, setScanRole] = useState('');
   const [scanLimits, setScanLimits] = useState({ maxRequests: '', maxPages: '', maxDurationMinutes: '' });
   const [scanPlan, setScanPlan] = useState<{ plan: { steps: readonly PlanStepView[] }; planHash: string; steps: readonly PlanStepView[] } | null>(null);
   const [scanConfirmation, setScanConfirmation] = useState<{ confirmationId: string } | null>(null);
@@ -531,13 +532,18 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
       if (scanPlan === null || scanConfirmation === null || candidates.length === 0) {
         return;
       }
-      const result = await callJson<{ findings: readonly unknown[]; engineVersion: string }>(apiBase, 'POST', '/api/run/scan', {
+      const result = await callJson<{ findings: readonly unknown[]; engineVersion: string; scanRequest: { sessionCookieNames?: readonly string[] } }>(apiBase, 'POST', '/api/run/scan', {
         plan: scanPlan.plan,
         confirmation: scanConfirmation,
         adopted: candidates,
+        // role 指定時はその role の session を診断へ適用する (design/08)。空なら非認証。
+        ...(scanRole.trim() === '' ? {} : { role: scanRole.trim() }),
       });
-      setScanResult(t('a08.scanDone', { engineVersion: result.engineVersion, findings: result.findings.length }));
-    }), [apiBase, candidates, run, scanConfirmation, scanPlan]);
+      const sessionNote = result.scanRequest.sessionCookieNames !== undefined
+        ? ` ${t('a08.sessionApplied', { cookies: result.scanRequest.sessionCookieNames.join(', ') || '—' })}`
+        : '';
+      setScanResult(`${t('a08.scanDone', { engineVersion: result.engineVersion, findings: result.findings.length })}${sessionNote}`);
+    }), [apiBase, candidates, run, scanConfirmation, scanPlan, scanRole]);
 
   return (
     <div className={styles.section}>
@@ -586,7 +592,10 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
 
       <Text weight="semibold">{t('a08.scanTitle')}</Text>
       <Field label={t('a08.targetsLabel')}>
-        <Textarea value={targets} onChange={(_, data) => setTargets(data.value)} rows={3} />
+        <Textarea value={targets} onChange={(_, data) => setTargets(data.value)} rows={2} />
+      </Field>
+      <Field label={t('a08.scanRoleLabel')}>
+        <Input value={scanRole} onChange={(_, data) => setScanRole(data.value)} />
       </Field>
       <Button disabled={busy || candidates.length === 0} onClick={() => setTargets(candidates.map((candidate) => candidate.url).join('\n'))}>
         {t('a08.adoptAll')}

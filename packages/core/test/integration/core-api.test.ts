@@ -328,6 +328,17 @@ describe('Core API server (node:http)', () => {
       body: JSON.stringify({ candidates: [] }),
     });
     assert.equal(emptyCandidates.status, 400);
+
+    // role 指定は service まで伝播する — session の無い role は 400 (適用の本体は UT で検証)。
+    const ghostScan = await fetch(`${baseUrl}/api/run/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan, confirmation, adopted, role: 'ghost' }),
+    });
+    assert.equal(ghostScan.status, 400);
+    const ghostScanBody = (await ghostScan.json()) as { code: string; message: string };
+    assert.equal(ghostScanBody.code, 'ValidationFailed');
+    assert.match(ghostScanBody.message, /no session for role/);
   });
 
   test('POST /api/import/nuclei は JSONL 取込結果 (quarantine・scope外・重複・正規化) を返す', async () => {

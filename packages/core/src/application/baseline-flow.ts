@@ -1224,6 +1224,7 @@ export class BaselineFlowService {
     plan: ExecutionPlan,
     confirmation: PlanConfirmation,
     adopted: readonly ScanCandidate[],
+    role?: string,
   ): Promise<ActiveScanRunResult> {
     this.requirePermission(operator, 'run.manage');
     this.requireMatchingConfirmation(plan, confirmation);
@@ -1249,6 +1250,25 @@ export class BaselineFlowService {
       throw domainError('ValidationFailed', `plan target snapshot does not cover adopted candidates: ${uncovered.join(', ')}`);
     }
 
+    // role session 適用 (design/08: F11)。対象 URL の host/path に一致する cookie 名を
+    // scan request へ添える。実 ZAP は proxy 経由 login で jar を作るため値は渡さない。
+    let sessionCookieNames: readonly string[] | undefined;
+    if (role !== undefined) {
+      const session = this.roleSessionCookies.get(role);
+      if (session === undefined) {
+        throw domainError('ValidationFailed', `no session for role '${role}'; run login first`);
+      }
+      const names: string[] = [];
+      for (const target of targets) {
+        for (const cookie of applicableSessionCookies([...session.cookies], target)) {
+          if (!names.includes(cookie.name)) {
+            names.push(cookie.name);
+          }
+        }
+      }
+      sessionCookieNames = names;
+    }
+
     const runId = this.deps.ids.next('run');
     const planHash = planHashOf(plan);
     this.record({ type: 'RunStarted', at: this.deps.clock.now().toISOString(), runId, planHash });
@@ -1265,6 +1285,7 @@ export class BaselineFlowService {
       attackStrength: 'Low',
       leasedLimits: { ...step.limits, maxRequests: engineLease },
       authorizationRef: `authorization:${this.currentAuthorization().authorizationId}`,
+      ...(sessionCookieNames === undefined ? {} : { sessionCookieNames }),
     };
 
     const engineRunId = await this.deps.scanEngine.start(scanRequest);
