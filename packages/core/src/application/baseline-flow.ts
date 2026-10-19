@@ -47,6 +47,16 @@ import {
 } from '../domain/plan-service.ts';
 import { FindingImporter } from '../domain/finding-importer.ts';
 import { BreakQueue, decideIntercept, type BreakItem, type BreakQueueEvent, type InterceptDecision } from '../domain/proxy-intercept.ts';
+import {
+  DraftRegistry,
+  applyEdit,
+  recordSendAttempt,
+  renderInitialRequest,
+  sendCommand,
+  summarizeResponse,
+  type RepeaterDraft,
+  type SendAttemptRecord,
+} from '../domain/repeater.ts';
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
@@ -134,6 +144,13 @@ export class BaselineFlowService {
   /** proxy の break queue (design/f02)。deadline 経過は既定で drop (暗黙 forward しない)。 */
   private readonly breakQueue = new BreakQueue(100);
 
+  /** Repeater の draft 台帳 (design/f04)。tab 上限は domain (20)。 */
+  private readonly repeaterDrafts = new DraftRegistry();
+  private readonly repeaterDraftOrder: string[] = [];
+  private readonly repeaterAttempts: SendAttemptRecord[] = [];
+  /** fixture adapter が受け取った送信 command (実 adapter 接続までの記録)。 */
+  private readonly repeaterSentCommands: import('../domain/repeater.ts').SendCommand[] = [];
+
   /** site map 用の観測台帳 (URL 単位・再観測は上書き、初回観測順を維持)。 */
   private readonly observationsByUrl = new Map<string, PageObservation>();
   /** scope により拒否された URL の記録 (design/02 A04 の開示用)。 */
@@ -213,6 +230,112 @@ export class BaselineFlowService {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     return decideIntercept(this.breakQueue, itemId, edited, caseRecord.scope);
+  }
+
+  /** draft の表示形 (UI 確認用に plan hash を添える)。 */
+  private repeaterDraftView(draft: RepeaterDraft): { draftId: string; targetUrl: string; protocol: RepeaterDraft['protocol']; revision: number; requestBytes: string; planHash: string } {
+    return {
+      draftId: draft.draftId,
+      targetUrl: draft.targetUrl,
+      protocol: draft.protocol,
+      revision: draft.revision,
+      requestBytes: draft.requestBytes,
+      planHash: hashStable('scopepilot2.repeater.request', { bytes: draft.requestBytes, revision: draft.revision, target: draft.targetUrl }),
+    };
+  }
+
+  listRepeaterDrafts(): readonly ReturnType<BaselineFlowService['repeaterDraftView']>[] {
+    return [...this.repeaterDraftViews().values()];
+  }
+
+  private repeaterDraftViews(): Map<string, ReturnType<BaselineFlowService['repeaterDraftView']>> {
+    const views = new Map<string, ReturnType<BaselineFlowService['repeaterDraftView']>>();
+    for (const draft of this.listRepeaterDraftList()) {
+      views.set(draft.draftId, this.repeaterDraftView(draft));
+    }
+    return views;
+  }
+
+  private listRepeaterDraftList(): readonly RepeaterDraft[] {
+    // DraftRegistry に list は無いが service は get を id 経由で使うため、作成順を別に持つ。
+    return this.repeaterDraftOrder.map((draftId) => this.repeaterDrafts.get(draftId)).filter((draft): draft is RepeaterDraft => draft !== undefined);
+  }
+
+  /** Repeater draft の作成 (design/f04)。対象 URL は案件 scope 内に限る。 */
+  createRepeaterDraft(
+    operator: OperatorProfile,
+    input: { readonly targetUrl: string; readonly protocol: RepeaterDraft['protocol'] },
+  ): ReturnType<BaselineFlowService['repeaterDraftView']> {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
+    const decision = ScopePolicy.decide(caseRecord.scope, canonical);
+    if (!decision.allowed) {
+      throw domainError('OutOfScope', `repeater target is out of scope: ${decision.reason}`);
+    }
+    const draft = this.repeaterDrafts.create({
+      draftId: this.deps.ids.next('draft'),
+      baseExchangeId: this.deps.ids.next('exchange'),
+      protocol: input.protocol,
+      requestBytes: renderInitialRequest(canonical),
+      targetUrl: canonical,
+    });
+    this.repeaterDraftOrder.push(draft.draftId);
+    return this.repeaterDraftView(draft);
+  }
+
+  /** header/body 編集。改行を含む header は拒否され、revision が進む (F04-UT-002)。 */
+  editRepeaterDraft(
+    operator: OperatorProfile,
+    draftId: string,
+    edit: { readonly headers: readonly (readonly [string, string])[]; readonly body: string },
+  ): ReturnType<BaselineFlowService['repeaterDraftView']> {
+    this.requirePermission(operator, 'run.manage');
+    const draft = this.repeaterDrafts.get(draftId);
+    if (draft === undefined) {
+      throw domainError('ValidationFailed', `repeater draft ${draftId} does not exist`);
+    }
+    applyEdit(draft, edit);
+    return this.repeaterDraftView(draft);
+  }
+
+  /**
+   * draft の送信。UI が表示した plan hash と現在の hash が一致する場合だけ adapter へ渡す
+   * (F04-UT-003)。応答は summary のみ返し、binary は text 化しない (F04-UT-006)。
+   * timeout 相当は応答なし attempt として記録する (F04-UT-007)。
+   */
+  async sendRepeaterDraft(
+    operator: OperatorProfile,
+    draftId: string,
+    confirmedPlanHash: string,
+  ): Promise<{ sent: boolean; reason?: string; attempt?: SendAttemptRecord; response?: ReturnType<typeof summarizeResponse> }> {
+    this.requirePermission(operator, 'run.manage');
+    const draft = this.repeaterDrafts.get(draftId);
+    if (draft === undefined) {
+      throw domainError('ValidationFailed', `repeater draft ${draftId} does not exist`);
+    }
+    const currentHash = hashStable('scopepilot2.repeater.request', { bytes: draft.requestBytes, revision: draft.revision, target: draft.targetUrl });
+    const outcome = await sendCommand(draft, confirmedPlanHash, {
+      send: async (command) => {
+        // fixture adapter: 対象 URL から決定的な text 応答を返す。実 adapter は後続増分。
+        this.repeaterSentCommands.push(command);
+      },
+    });
+    if (!outcome.sent) {
+      return { sent: false, reason: 'confirmed plan hash does not match the current draft (revision が進んでいないか確認してください)' };
+    }
+    const body = Buffer.from(`<html><body>fixture response for ${new URL(draft.targetUrl).pathname}</body></html>`, 'utf8');
+    const attempt = recordSendAttempt(draft.draftId, body);
+    this.repeaterAttempts.push(attempt);
+    return {
+      sent: true,
+      attempt,
+      response: summarizeResponse({ status: 200, headers: [['content-type', 'text/html']], body }),
+    };
+  }
+
+  repeaterAttemptLog(): readonly SendAttemptRecord[] {
+    return [...this.repeaterAttempts];
   }
 
   dropBreakItem(operator: OperatorProfile, itemId: string): BreakItem {

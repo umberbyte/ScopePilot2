@@ -667,6 +667,76 @@ describe('Core API server (node:http)', () => {
     assert.equal(conflict.status, 409);
   });
 
+  test('repeater は draft 作成・編集・hash 一致送信を API 経路で扱う (design/f04)', async () => {
+    await fetch(`${baseUrl}/api/case`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'repeater-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      }),
+    });
+
+    const created = await fetch(`${baseUrl}/api/repeater/drafts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/page', protocol: 'http/1.1' }),
+    });
+    assert.equal(created.status, 201);
+    const { draft } = (await created.json()) as { draft: { draftId: string; revision: number; planHash: string } };
+
+    // 編集で revision と plan hash が進む。
+    const editedResponse = await fetch(`${baseUrl}/api/repeater/edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draftId: draft.draftId, headers: [['X-Test', '1']], body: 'payload' }),
+    });
+    assert.equal(editedResponse.status, 200);
+    const { draft: edited } = (await editedResponse.json()) as { draft: { revision: number; planHash: string } };
+    assert.equal(edited.revision, 2);
+    assert.notEqual(edited.planHash, draft.planHash);
+
+    // 古い hash では送信されない。
+    const stale = await fetch(`${baseUrl}/api/repeater/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draftId: draft.draftId, confirmedPlanHash: draft.planHash }),
+    });
+    const staleBody = (await stale.json()) as { sent: boolean; reason?: string };
+    assert.equal(staleBody.sent, false);
+    assert.match(staleBody.reason ?? '', /does not match/);
+
+    // 現行 hash では送信され、応答 summary が返る。
+    const sent = await fetch(`${baseUrl}/api/repeater/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draftId: draft.draftId, confirmedPlanHash: edited.planHash }),
+    });
+    const sentBody = (await sent.json()) as { sent: boolean; response?: { status: number; bodyPreview?: string }; attempt?: { outcome: string } };
+    assert.equal(sentBody.sent, true);
+    assert.equal(sentBody.response?.status, 200);
+    assert.match(sentBody.response?.bodyPreview ?? '', /fixture response for/);
+    assert.equal(sentBody.attempt?.outcome, 'responded');
+
+    // 一覧に draft と attempt が載る。
+    const list = (await (await fetch(`${baseUrl}/api/repeater`)).json()) as {
+      drafts: readonly { draftId: string }[];
+      attempts: readonly { draftId: string; outcome: string }[];
+    };
+    assert.ok(list.drafts.some((entry) => entry.draftId === draft.draftId));
+    assert.ok(list.attempts.some((entry) => entry.draftId === draft.draftId));
+
+    // scope 外 URL の draft は 403 OutOfScope。
+    const outOfScope = await fetch(`${baseUrl}/api/repeater/drafts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://elsewhere.example/', protocol: 'http/1.1' }),
+    });
+    assert.equal(outOfScope.status, 403);
+  });
+
   test('GET /api/observations は site map 用の観測一覧と scope 拒否を返す', async () => {
     await fetch(`${baseUrl}/api/case`, {
       method: 'POST',

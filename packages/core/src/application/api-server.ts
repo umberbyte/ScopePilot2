@@ -373,6 +373,50 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/repeater') {
+      return respondJson(response, 200, { drafts: service.listRepeaterDrafts(), attempts: service.repeaterAttemptLog() });
+    }
+    if (route === 'POST /api/repeater/drafts') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const protocol = stringField(body, 'protocol');
+        if (protocol !== 'http/1.1' && protocol !== 'http/2') {
+          return respondError(response, 400, 'ValidationFailed', "field protocol must be 'http/1.1' or 'http/2'", false);
+        }
+        const draft = service.createRepeaterDraft(operator, { targetUrl: stringField(body, 'targetUrl'), protocol });
+        return respondJson(response, 201, { draft });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/repeater/edit') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const headers = headerPairsField(body);
+        const draft = service.editRepeaterDraft(operator, stringField(body, 'draftId'), { headers, body: stringBodyField(body) });
+        return respondJson(response, 200, { draft });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/repeater/send') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = await service.sendRepeaterDraft(operator, stringField(body, 'draftId'), stringField(body, 'confirmedPlanHash'));
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/runs/interrupted') {
       if (runRepository === undefined) {
         return respondError(response, 501, 'Unsupported', 'run persistence is not configured for this server', false);
@@ -464,6 +508,26 @@ function respondError(response: ServerResponse, status: number, code: string, me
 function respondJson(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(body));
+}
+
+/** headers は [name, value] の pair 配列として受ける (改行入りは domain が拒否)。 */
+function headerPairsField(body: Record<string, unknown>): readonly (readonly [string, string])[] {
+  const value = body.headers;
+  if (!Array.isArray(value) || value.some((entry) => !Array.isArray(entry) || entry.length !== 2 || entry.some((part) => typeof part !== 'string'))) {
+    throw new DomainError('ValidationFailed', 'field headers must be an array of [name, value] string pairs');
+  }
+  return value as readonly (readonly [string, string])[];
+}
+
+function stringBodyField(body: Record<string, unknown>): string {
+  const value = body.body;
+  if (value === undefined) {
+    return '';
+  }
+  if (typeof value !== 'string') {
+    throw new DomainError('ValidationFailed', 'field body must be a string');
+  }
+  return value;
 }
 
 function requireHash(targetUrl: string): string {

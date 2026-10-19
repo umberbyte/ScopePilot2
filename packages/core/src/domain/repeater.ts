@@ -47,6 +47,11 @@ function renderRequest(targetUrl: string, headers: readonly (readonly [string, s
   return `${parsed.pathname}${parsed.search} HTTP/1.1\nHost: ${parsed.host}\n${headers.map(([n, v]) => `${n}: ${v}`).join('\n')}\n\n${body}`;
 }
 
+/** draft 作成時の初期要求 (既定 header なし・空 body)。service が呼ぶ。 */
+export function renderInitialRequest(targetUrl: string): string {
+  return renderRequest(targetUrl, [], '');
+}
+
 /** header/body 編集は canonical bytes と新 revision を作る (F04-UT-002)。 */
 export function applyEdit(draft: RepeaterDraft, edit: RequestEdit): { requestBytes: string; revision: number } {
   if (edit.headers.some(([name, value]) => name.includes('\n') || value.includes('\n'))) {

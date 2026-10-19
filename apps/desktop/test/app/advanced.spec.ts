@@ -243,7 +243,28 @@ test('A05: break queue の受付・転送・破棄と対象外 URL の拒否を�
   await expect(page.getByText(/保持中 0 件/)).toBeVisible();
 });
 
-test('未実装画面はプレースホルダで明示される (A06)', async () => {
+test('A06: Repeater draft を編集し表示 hash で確認送信する', async () => {
   await page.getByRole('button', { name: /A06 Repeater/ }).click();
+  await page.getByRole('button', { name: '新規 draft を作る' }).click();
+  await expect(page.getByText(/draft-\d+ — http:\/\/fixture.target.test\/repeater/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/計画 hash: /)).toBeVisible();
+
+  // header/body を編集すると revision が進み要求が組み上がる。
+  await page.getByLabel(/headers \(1行1件/).fill('X-Test: 1');
+  await page.getByLabel('body').fill('hello-repeater');
+  await page.getByRole('button', { name: '編集を適用する' }).click();
+  await expect(page.getByText(/revision 2/)).toBeVisible({ timeout: 30_000 });
+  // header 値は入力欄と要求 preview の両方に出るため preview 側 (後方) を指定する。
+  await expect(page.getByText(/X-Test: 1/).last()).toBeVisible();
+  await expect(page.getByText(/hello-repeater/).first()).toBeVisible();
+
+  // 表示 hash での送信は fixture 応答を返す。
+  await page.getByRole('button', { name: 'この hash を確認して送信する' }).click();
+  await expect(page.getByText(/送信しました \(responded\)/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/fixture response for/)).toBeVisible();
+});
+
+test('未実装画面はプレースホルダで明示される (A07)', async () => {
+  await page.getByRole('button', { name: /A07 Fuzzer/ }).click();
   await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toBeVisible();
 });

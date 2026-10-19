@@ -635,6 +635,223 @@
           }
         }
       }
+    },
+    "/api/repeater": {
+      "get": {
+        "operationId": "listRepeaterDrafts",
+        "summary": "draft 一覧 (plan hash 付き) と送信 attempt 記録",
+        "responses": {
+          "200": {
+            "description": "drafts and attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "drafts",
+                    "attempts"
+                  ],
+                  "properties": {
+                    "drafts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RepeaterDraft"
+                      }
+                    },
+                    "attempts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RepeaterAttempt"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/repeater/drafts": {
+      "post": {
+        "operationId": "createRepeaterDraft",
+        "summary": "draft 作成 (対象 URL は案件 scope 内に限る)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetUrl",
+                  "protocol"
+                ],
+                "properties": {
+                  "targetUrl": {
+                    "type": "string"
+                  },
+                  "protocol": {
+                    "type": "string",
+                    "enum": [
+                      "http/1.1",
+                      "http/2"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/RepeaterDraft"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/repeater/edit": {
+      "post": {
+        "operationId": "editRepeaterDraft",
+        "summary": "header/body 編集 (revision と plan hash が進む)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "draftId",
+                  "headers"
+                ],
+                "properties": {
+                  "draftId": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  },
+                  "body": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/RepeaterDraft"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/repeater/send": {
+      "post": {
+        "operationId": "sendRepeaterDraft",
+        "summary": "送信 (表示 plan hash と現行 hash の一致時のみ。応答は summary のみ)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "draftId",
+                  "confirmedPlanHash"
+                ],
+                "properties": {
+                  "draftId": {
+                    "type": "string"
+                  },
+                  "confirmedPlanHash": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "send result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "sent"
+                  ],
+                  "properties": {
+                    "sent": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "attempt": {
+                      "$ref": "#/components/schemas/RepeaterAttempt"
+                    },
+                    "response": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer"
+                        },
+                        "contentType": {
+                          "type": "string"
+                        },
+                        "bodyBytes": {
+                          "type": "integer"
+                        },
+                        "bodyPreview": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2542,6 +2759,69 @@
           }
         },
         "additionalProperties": false
+      },
+      "RepeaterDraft": {
+        "type": "object",
+        "required": [
+          "draftId",
+          "targetUrl",
+          "protocol",
+          "revision",
+          "requestBytes",
+          "planHash"
+        ],
+        "properties": {
+          "draftId": {
+            "type": "string"
+          },
+          "targetUrl": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "http/1.1",
+              "http/2"
+            ]
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "requestBytes": {
+            "type": "string"
+          },
+          "planHash": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RepeaterAttempt": {
+        "type": "object",
+        "required": [
+          "attemptId",
+          "draftId",
+          "outcome"
+        ],
+        "properties": {
+          "attemptId": {
+            "type": "string"
+          },
+          "draftId": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "responded",
+              "timeout"
+            ]
+          },
+          "responseHash": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -2975,6 +3255,25 @@
                   "additionalProperties": false
                 }
               }
+            }
+          }
+        }
+      },
+      "RepeaterDraft": {
+        "description": "repeater draft",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "draft"
+              ],
+              "properties": {
+                "draft": {
+                  "$ref": "#/components/schemas/RepeaterDraft"
+                }
+              },
+              "additionalProperties": false
             }
           }
         }
