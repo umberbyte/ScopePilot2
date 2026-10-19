@@ -284,6 +284,14 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await page.getByLabel('対象 URL (scope 内)').fill('http://fixture.target.test/fixed-token');
   await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
   await expect(page.getByText(/結果: assessed \(sample 40・重複 39・欠落 0\)/)).toBeVisible({ timeout: 30_000 });
+
+  // OAST: token を発行し、callback を記録すると相関として数えられる (design/f13)。
+  await page.getByRole('button', { name: 'OAST token を発行する' }).click();
+  const tokenText = page.getByText(/token: oast-[0-9a-f]+/);
+  await expect(tokenText).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/attempt oast-\d+ を開始しました/)).toBeVisible();
+  await page.getByRole('button', { name: 'callback を記録する (fixture)' }).click();
+  await expect(page.getByText('callback 記録: 相関 1・未知 0・重複 0')).toBeVisible({ timeout: 30_000 });
 });
 
 test('A05: break queue の受付・転送・破棄と対象外 URL の拒否を扱う', async () => {

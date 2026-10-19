@@ -93,6 +93,7 @@ import {
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
 import { assess, createSamplePlan, extractToken, reportProjection, SampleCollector } from '../domain/sequencer.ts';
 import { parseOpenApiDocument } from '../domain/api-scanning.ts';
+import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, TokenIssuer, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
 import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, LoginSessionCookie } from '../ports/engines.ts';
@@ -206,6 +207,13 @@ export class BaselineFlowService {
   private readonly payloadSetNames: string[] = [];
   private readonly payloadRegistrations = new Map<string, PayloadSetRegistration>();
   private readonly fuzzRuns: readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] = [];
+
+  /** OAST の attempt・観測 (design/f13)。token は発行時に一度だけ応答し、一覧には出さない。 */
+  private readonly oastIssuer = new TokenIssuer();
+  private readonly oastAttempts: { attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; issuedAtMs: number }[] = [];
+  private readonly oastSeenEventIds = new Set<string>();
+  private readonly oastInteractions: { token: string; payload: string; recordedAt: string }[] = [];
+  private readonly oastUncorrelated: { token: string; reason: string; recordedAt: string }[] = [];
 
   /** 取り込んだ API 仕様の記録 (design/f12)。endpoint の一覧は都度応答する。 */
   private readonly apiSpecImports: readonly { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[] = [];
@@ -815,6 +823,87 @@ export class BaselineFlowService {
       excludedServerCount: excluded.length,
     });
     return { documentLabel: input.documentLabel, servers: candidates, excludedServers: excluded, endpoints, warnings };
+  }
+
+  /**
+   * OAST attempt の開始 (design/f13)。protocol 能力は provider (fixture は
+   * http/dns) で検証し、非対応は CapabilityUnavailable。token はこの応答で
+   * 一度だけ返し、監査・一覧には出さない (F13-UT-007)。
+   */
+  startOastAttempt(
+    operator: OperatorProfile,
+    input: { readonly targetUrl: string; readonly protocol: OastProtocol },
+  ): { attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; waitMs: number } {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
+    const decision = ScopePolicy.decide(caseRecord.scope, canonical);
+    if (!decision.allowed) {
+      throw domainError('OutOfScope', `oast target is out of scope: ${decision.reason}`);
+    }
+    if (providerCapability(['http', 'dns'], input.protocol) === 'Unsupported') {
+      throw domainError('CapabilityUnavailable', `oast provider does not support protocol ${input.protocol}`);
+    }
+    const attemptId = this.deps.ids.next('oast');
+    const { token } = this.oastIssuer.issue(attemptId);
+    this.oastAttempts.push({ attemptId, targetUrl: canonical, protocol: input.protocol, token, issuedAtMs: this.deps.clock.now().getTime() });
+    this.record({ type: 'OastAttemptStarted', at: this.deps.clock.now().toISOString(), attemptId, targetUrl: canonical, protocol: input.protocol });
+    return { attemptId, targetUrl: canonical, protocol: input.protocol, token, waitMs: OAST_DEFAULT_WAIT_MS };
+  }
+
+  /**
+   * provider からの callback 記録 (design/f13)。同一 event は dedupe し
+   * (F13-UT-002)、未知 token は uncorrelated として隔離する (F13-UT-003)。
+   */
+  recordOastCallbacks(
+    operator: OperatorProfile,
+    input: { readonly events: readonly ProviderEvent[] },
+  ): { kept: number; duplicates: number; correlated: number; uncorrelated: number } {
+    this.requirePermission(operator, 'run.manage');
+    if (input.events.length === 0) {
+      throw domainError('ValidationFailed', 'oast callbacks need at least one event');
+    }
+    const fresh = input.events.filter((event) => !this.oastSeenEventIds.has(event.eventId));
+    const persistedDuplicates = input.events.length - fresh.length;
+    const { kept, duplicates: inCallDuplicates } = normalizeCallbacks(fresh);
+    const duplicates = persistedDuplicates + inCallDuplicates;
+    for (const event of kept) {
+      this.oastSeenEventIds.add(event.eventId);
+    }
+    const knownTokens = new Set(this.oastAttempts.map((attempt) => attempt.token));
+    const callbacks = correlate(kept, knownTokens);
+    let correlatedCount = 0;
+    let uncorrelatedCount = 0;
+    const at = this.deps.clock.now().toISOString();
+    for (const callback of callbacks) {
+      if (callback.kind === 'correlated') {
+        correlatedCount += 1;
+        this.oastInteractions.push({ token: callback.token, payload: callback.payload, recordedAt: at });
+      } else {
+        uncorrelatedCount += 1;
+        this.oastUncorrelated.push({ token: callback.token, reason: callback.reason, recordedAt: at });
+      }
+    }
+    this.record({ type: 'OastCallbacksRecorded', at, kept: kept.length, duplicates, correlated: correlatedCount, uncorrelated: uncorrelatedCount });
+    return { kept: kept.length, duplicates, correlated: correlatedCount, uncorrelated: uncorrelatedCount };
+  }
+
+  /** attempt 一覧 (token なし。interactions と曖昧判定のみ)。 */
+  listOastAttempts(): readonly { attemptId: string; targetUrl: string; protocol: OastProtocol; status: 'waiting' | 'expired'; interactions: number; candidateOnly: boolean }[] {
+    const nowMs = this.deps.clock.now().getTime();
+    return this.oastAttempts.map((attempt) => {
+      const interactions = this.oastInteractions.filter((interaction) => interaction.token === attempt.token);
+      const linked = linkFinding(interactions.map(() => ({ kind: 'correlated' as const, token: attempt.token, payload: '' })));
+      return {
+        attemptId: attempt.attemptId,
+        targetUrl: attempt.targetUrl,
+        protocol: attempt.protocol,
+        status: pollDeadline(attempt.issuedAtMs, nowMs).expired ? ('expired' as const) : ('waiting' as const),
+        interactions: interactions.length,
+        // 複数 token にまたがる相関は無い (attempt 単位) が、観測 0 件は候補にもしない。
+        candidateOnly: linked.linkedTokens.length === 1 && linked.candidateOnly === false ? false : true,
+      };
+    });
   }
 
   listApiSpecImports(): readonly { documentLabel: string; endpointCount: number; importedAt: string }[] {

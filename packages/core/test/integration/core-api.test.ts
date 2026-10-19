@@ -1114,6 +1114,39 @@ describe('Core API server (node:http)', () => {
     }
   });
 
+  test('oast は token 発行・callback 記録・attempt 一覧を扱う (design/f13)', async () => {
+    const post = async (path: string, body: unknown): Promise<Response> =>
+      fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    const unsupported = await post('/api/oast/attempts', { targetUrl: 'http://fixture.target.test/x', protocol: 'smtp' });
+    assert.equal(unsupported.status, 503, '非対応 protocol は CapabilityUnavailable');
+
+    const started = await post('/api/oast/attempts', { targetUrl: 'http://fixture.target.test/xss', protocol: 'http' });
+    assert.equal(started.status, 201);
+    const attempt = (await started.json()) as { attemptId: string; token: string };
+    assert.match(attempt.token, /^oast-/);
+
+    const recorded = await post('/api/oast/callbacks', {
+      events: [
+        { eventId: 'oast-ev-1', token: attempt.token, payload: 'interaction' },
+        { eventId: 'oast-unknown', token: 'oast-not-ours', payload: 'noise' },
+      ],
+    });
+    assert.equal(recorded.status, 200);
+    const counts = (await recorded.json()) as { kept: number; correlated: number; uncorrelated: number };
+    assert.deepEqual(counts, { kept: 2, duplicates: 0, correlated: 1, uncorrelated: 1 });
+
+    const list = (await (await fetch(`${baseUrl}/api/oast/attempts`)).json()) as { attempts: readonly { attemptId: string; status: string; interactions: number; candidateOnly: boolean }[] };
+    const entry = list.attempts.find((candidate) => candidate.attemptId === attempt.attemptId);
+    assert.equal(entry?.status, 'waiting');
+    assert.equal(entry?.interactions, 1);
+    assert.equal(JSON.stringify(list).includes(attempt.token), false, '一覧に token を出さない');
+
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /OastAttemptStarted/);
+    assert.match(eventsText, /OastCallbacksRecorded/);
+  });
+
   test('import/api-spec は OpenAPI 仕様から endpoint を返す (design/f12)', async () => {
     const imported = await fetch(`${baseUrl}/api/import/api-spec`, {
       method: 'POST',

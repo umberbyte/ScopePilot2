@@ -287,6 +287,48 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/oast/attempts') {
+      return respondJson(response, 200, { attempts: service.listOastAttempts() });
+    }
+    if (route === 'POST /api/oast/attempts') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const protocol = stringField(body, 'protocol');
+        if (protocol !== 'http' && protocol !== 'dns' && protocol !== 'smtp' && protocol !== 'icmp') {
+          return respondError(response, 400, 'ValidationFailed', 'field protocol must be one of http/dns/smtp/icmp', false);
+        }
+        const result = service.startOastAttempt(operator, { targetUrl: stringField(body, 'targetUrl'), protocol });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/oast/callbacks') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const eventsValue = body.events;
+        if (!Array.isArray(eventsValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field events must be an array', false);
+        }
+        const events = eventsValue.map((event, index) => {
+          if (typeof event !== 'object' || event === null) {
+            throw new DomainError('ValidationFailed', `events[${index}] must be an object`);
+          }
+          const record = event as Record<string, unknown>;
+          return { eventId: stringField(record, 'eventId'), token: stringField(record, 'token'), payload: stringField(record, 'payload') };
+        });
+        const result = service.recordOastCallbacks(operator, { events });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'GET /api/documents/hints') {
       return respondJson(response, 200, { hints: service.listDocumentHints() });
     }

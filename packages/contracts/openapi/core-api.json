@@ -1954,6 +1954,257 @@
         }
       }
     },
+    "/api/oast/attempts": {
+      "get": {
+        "operationId": "listOastAttempts",
+        "summary": "OAST attempt の一覧 (token なし・interactions と曖昧判定のみ)",
+        "responses": {
+          "200": {
+            "description": "attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "attempts"
+                  ],
+                  "properties": {
+                    "attempts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "attemptId",
+                          "targetUrl",
+                          "protocol",
+                          "status",
+                          "interactions",
+                          "candidateOnly"
+                        ],
+                        "properties": {
+                          "attemptId": {
+                            "type": "string"
+                          },
+                          "targetUrl": {
+                            "type": "string"
+                          },
+                          "protocol": {
+                            "type": "string",
+                            "enum": [
+                              "http",
+                              "dns",
+                              "smtp",
+                              "icmp"
+                            ],
+                            "description": "OAST protocol。fixture provider は http/dns のみ対応 (他は CapabilityUnavailable)"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "waiting",
+                              "expired"
+                            ],
+                            "description": "待機上限 (既定 24h) を過ぎると expired (F13-UT-004)"
+                          },
+                          "interactions": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "candidateOnly": {
+                            "type": "boolean",
+                            "description": "観測が無い・曖昧な相関は所見候補にしかしない (F13-UT-006)"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "startOastAttempt",
+        "summary": "OAST token を発行して待機を開始する (design/f13)。token はこの応答で一度だけ返す",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetUrl",
+                  "protocol"
+                ],
+                "properties": {
+                  "targetUrl": {
+                    "type": "string"
+                  },
+                  "protocol": {
+                    "type": "string",
+                    "enum": [
+                      "http",
+                      "dns",
+                      "smtp",
+                      "icmp"
+                    ],
+                    "description": "OAST protocol。fixture provider は http/dns のみ対応 (他は CapabilityUnavailable)"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "attempt 開始 (token は要求へ埋め込んで使う。report には出ない)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "attemptId",
+                    "targetUrl",
+                    "protocol",
+                    "token",
+                    "waitMs"
+                  ],
+                  "properties": {
+                    "attemptId": {
+                      "type": "string"
+                    },
+                    "targetUrl": {
+                      "type": "string"
+                    },
+                    "protocol": {
+                      "type": "string",
+                      "enum": [
+                        "http",
+                        "dns",
+                        "smtp",
+                        "icmp"
+                      ],
+                      "description": "OAST protocol。fixture provider は http/dns のみ対応 (他は CapabilityUnavailable)"
+                    },
+                    "token": {
+                      "type": "string",
+                      "description": "一意 token (F13-UT-001)。report projection からは除外される (F13-UT-007)"
+                    },
+                    "waitMs": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/oast/callbacks": {
+      "post": {
+        "operationId": "recordOastCallbacks",
+        "summary": "provider 由来の callback を記録する (design/f13)。同一 event は dedupe・未知 token は uncorrelated として隔離",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "events"
+                ],
+                "properties": {
+                  "events": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "eventId",
+                        "token",
+                        "payload"
+                      ],
+                      "properties": {
+                        "eventId": {
+                          "type": "string"
+                        },
+                        "token": {
+                          "type": "string"
+                        },
+                        "payload": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "記録結果 (相関計数のみ)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "kept",
+                    "duplicates",
+                    "correlated",
+                    "uncorrelated"
+                  ],
+                  "properties": {
+                    "kept": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "duplicates": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "correlated": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "uncorrelated": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/documents/auth-hints": {
       "get": {
         "operationId": "listDocumentAuthHints",
@@ -3957,6 +4208,12 @@
             "$ref": "#/components/schemas/ApiSpecImportedEvent"
           },
           {
+            "$ref": "#/components/schemas/OastAttemptStartedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/OastCallbacksRecordedEvent"
+          },
+          {
             "$ref": "#/components/schemas/ReportGeneratedEvent"
           }
         ]
@@ -4524,6 +4781,77 @@
             "minimum": 1
           },
           "excludedServerCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OastAttemptStartedEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "attemptId",
+          "targetUrl",
+          "protocol"
+        ],
+        "properties": {
+          "type": {
+            "const": "OastAttemptStarted"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "attemptId": {
+            "type": "string"
+          },
+          "targetUrl": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "http",
+              "dns",
+              "smtp",
+              "icmp"
+            ],
+            "description": "OAST protocol。fixture provider は http/dns のみ対応 (他は CapabilityUnavailable)"
+          }
+        }
+      },
+      "OastCallbacksRecordedEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "kept",
+          "duplicates",
+          "correlated",
+          "uncorrelated"
+        ],
+        "properties": {
+          "type": {
+            "const": "OastCallbacksRecorded"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kept": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duplicates": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "correlated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uncorrelated": {
             "type": "integer",
             "minimum": 0
           }

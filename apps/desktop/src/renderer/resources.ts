@@ -121,6 +121,16 @@ export const strings = {
   'a10.sequencerResult': '結果: {verdict} (sample {samples}・重複 {duplicates}・欠落 {missing})',
   'a10.sequencerEntropy': 'entropy {entropy} bits/byte・出現 byte 種 {distinct}',
   'a10.sequencerInsufficient': 'sample 不足のため断定しません (最小 {minimum} 件が必要)。',
+  'a10.oastTitle': 'OAST (out-of-band 検出)',
+  'a10.oastIntro':
+    '一意 token を発行して待機します (design/f13)。token を要求に埋め込んで送信し、外部相互作用の callback を記録します。相関は所見候補にしかなりません。fixture provider は http/dns のみ対応です。',
+  'a10.oastTargetLabel': '対象 URL (OAST・scope 内)',
+  'a10.oastProtocolLabel': 'protocol (http/dns/smtp/icmp)',
+  'a10.oastStart': 'OAST token を発行する',
+  'a10.oastStarted': 'attempt {attemptId} を開始しました (待機上限約 {waitHours} 時間)',
+  'a10.oastToken': 'token: {token}',
+  'a10.oastRecord': 'callback を記録する (fixture)',
+  'a10.oastRecorded': 'callback 記録: 相関 {correlated}・未知 {uncorrelated}・重複 {duplicates}',
 
   'a05.intro':
     '実 proxy listener (通信傍受・転送本体) は実 engine 接続と共に後続増分です。ここでは break queue への受付と判断 (forward / drop) を扱います。deadline 経過・queue 上限は既定で drop し、暗黙 forward はしません。',

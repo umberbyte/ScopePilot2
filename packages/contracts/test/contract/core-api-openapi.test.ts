@@ -55,6 +55,8 @@ const EXPECTED_EVENT_TYPES = [
   'DocumentAuthHintsRegistered',
   'SequencerSessionCompleted',
   'ApiSpecImported',
+  'OastAttemptStarted',
+  'OastCallbacksRecorded',
   'ReportGenerated',
 ];
 

@@ -54,6 +54,10 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [sequencerTarget, setSequencerTarget] = useState('http://fixture.target.test/session-token');
   const [sequencerSamples, setSequencerSamples] = useState('100');
   const [sequencerResult, setSequencerResult] = useState<{ verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number } | null>(null);
+  const [oastTarget, setOastTarget] = useState('http://fixture.target.test/callback');
+  const [oastProtocol, setOastProtocol] = useState('http');
+  const [oastToken, setOastToken] = useState('');
+  const [oastResult, setOastResult] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -94,6 +98,36 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       setBusy(false);
     }
   }, [apiBase, sequencerSamples, sequencerTarget]);
+
+  const startOastAttempt = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    setOastResult('');
+    try {
+      const result = await callJson<{ attemptId: string; token: string; waitMs: number }>(apiBase, '/api/oast/attempts', { targetUrl: oastTarget, protocol: oastProtocol });
+      setOastToken(result.token);
+      setOastResult(t('a10.oastStarted', { attemptId: result.attemptId, waitHours: Math.round(result.waitMs / 3_600_000) }));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, oastProtocol, oastTarget]);
+
+  const recordOastCallback = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await callJson<{ kept: number; duplicates: number; correlated: number; uncorrelated: number }>(apiBase, '/api/oast/callbacks', {
+        events: [{ eventId: `fixture-${Date.now()}`, token: oastToken, payload: 'fixture interaction' }],
+      });
+      setOastResult(t('a10.oastRecorded', { correlated: result.correlated, uncorrelated: result.uncorrelated, duplicates: result.duplicates }));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, oastToken]);
 
   return (
     <div className={styles.section}>
@@ -189,6 +223,26 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
           )}
         </div>
       )}
+      <Text weight="semibold">{t('a10.oastTitle')}</Text>
+      <Text className={styles.muted}>{t('a10.oastIntro')}</Text>
+      <Field label={t('a10.oastTargetLabel')}>
+        <Input value={oastTarget} onChange={(_, data) => setOastTarget(data.value)} />
+      </Field>
+      <Field label={t('a10.oastProtocolLabel')}>
+        <Input value={oastProtocol} onChange={(_, data) => setOastProtocol(data.value)} />
+      </Field>
+      <Button appearance="primary" disabled={busy} onClick={() => void startOastAttempt()}>
+        {t('a10.oastStart')}
+      </Button>
+      {oastToken !== '' && (
+        <div className={styles.section}>
+          <Text role="status">{t('a10.oastToken', { token: oastToken })}</Text>
+          <Button disabled={busy} onClick={() => void recordOastCallback()}>
+            {t('a10.oastRecord')}
+          </Button>
+        </div>
+      )}
+      {oastResult !== '' && <Text>{oastResult}</Text>}
     </div>
   );
 }
