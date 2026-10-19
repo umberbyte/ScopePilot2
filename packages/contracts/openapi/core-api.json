@@ -45,6 +45,18 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateCaseRequest"
+              },
+              "example": {
+                "name": "example-案件",
+                "allowedOrigins": [
+                  "http://fixture.target.test"
+                ],
+                "deniedOrigins": [],
+                "limits": {
+                  "maxRequests": 5000,
+                  "maxPages": 500,
+                  "maxDurationMinutes": 60
+                }
               }
             }
           }
@@ -138,6 +150,11 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BuildExplorePlanRequest"
+              },
+              "example": {
+                "seeds": [
+                  "http://fixture.target.test/"
+                ]
               }
             }
           }
@@ -488,6 +505,12 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/DecodeRequest"
+              },
+              "example": {
+                "inputText": "SGVsbG8=",
+                "codecs": [
+                  "base64"
+                ]
               }
             }
           }
@@ -1444,6 +1467,14 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "example": {
+                "role": "admin",
+                "baseUrl": "http://fixture.target.test",
+                "expectedUrlPrefix": "http://fixture.target.test/",
+                "secretValues": {
+                  "vault://admin-user": "(実行中のみ渡る値・保存しない)"
+                }
               }
             }
           }
@@ -1570,6 +1601,13 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "example": {
+                "documentLabel": "操作手順書 v2",
+                "urls": [
+                  "http://fixture.target.test/setup.php",
+                  "http://elsewhere.example/out-of-scope"
+                ]
               }
             }
           }
@@ -3889,6 +3927,11 @@
           "retryable": {
             "type": "boolean"
           }
+        },
+        "example": {
+          "code": "ValidationFailed",
+          "message": "field seeds must be an array of strings",
+          "retryable": false
         }
       },
       "OperationClass": {
@@ -6499,6 +6542,22 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/CaseRecord"
+            },
+            "example": {
+              "caseId": "case-0001",
+              "name": "example-案件",
+              "revision": 1,
+              "scope": {
+                "allowedOrigins": [
+                  "http://fixture.target.test"
+                ],
+                "deniedOrigins": [],
+                "limits": {
+                  "maxRequests": 5000,
+                  "maxPages": 500,
+                  "maxDurationMinutes": 60
+                }
+              }
             }
           }
         }
@@ -6614,7 +6673,7 @@
         }
       },
       "Error": {
-        "description": "domain error",
+        "description": "domain error。body は ErrorResponse {code, message, retryable}。status は code から決まる: ValidationFailed=400・PermissionDenied=403・OutOfScope=403・Conflict=409・NeedsInput=409・ConfirmationRequired=409・CapabilityUnavailable=503・EngineFailure=502。retryable は再試行可否。",
         "content": {
           "application/json": {
             "schema": {

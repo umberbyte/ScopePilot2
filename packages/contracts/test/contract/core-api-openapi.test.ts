@@ -159,6 +159,36 @@ describe('Core API OpenAPI 契約', () => {
     ]);
   });
 
+  test('全 operation の全 response が description を持つ (文書品質)', () => {
+    const missing: string[] = [];
+    for (const [path, operations] of Object.entries(spec.paths)) {
+      for (const [method, operation] of Object.entries(operations)) {
+        if (!['get', 'post', 'put', 'delete', 'patch'].includes(method)) {
+          continue;
+        }
+        const responses = (operation as { readonly responses?: Readonly<Record<string, unknown>> }).responses;
+        if (responses === undefined) {
+          missing.push(`${method} ${path}: responses なし`);
+          continue;
+        }
+        for (const [status, response] of Object.entries(responses)) {
+          const record = response as { readonly description?: unknown };
+          if (typeof record.description !== 'string' || record.description.trim() === '') {
+            // $ref で共有 component を参照する場合は参照先で判定する。
+            if (typeof (response as { readonly $ref?: unknown }).$ref === 'string') {
+              const target = resolveRef(spec, (response as { readonly $ref: string }).$ref) as { readonly description?: unknown } | undefined;
+              if (target !== undefined && typeof target.description === 'string' && target.description.trim() !== '') {
+                continue;
+              }
+            }
+            missing.push(`${method} ${path} ${status}: description なし`);
+          }
+        }
+      }
+    }
+    assert.deepEqual(missing, [], 'description の無い response がある');
+  });
+
   test('AuditEventLine は BaselineFlowEvent の全種を oneOf で網羅する', () => {
     const line = spec.components.schemas.AuditEventLine as { readonly oneOf?: Json };
     assert.ok(Array.isArray(line.oneOf), 'AuditEventLine に oneOf が必要');
