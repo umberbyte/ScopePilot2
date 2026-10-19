@@ -540,6 +540,17 @@ test('A09: login flow を登録し session refresh と cookie jar 割当を行�
   await expect(page.getByText(/観測: admin=business-response:admin・guest=business-response:guest/)).toBeVisible();
 });
 
+test('言語を ja/en で切り替えられる (design/28 §8.1)', async () => {
+  // 既定は ja。トグルで en になり、主要ラベルが英語表記に切り替わる。
+  await expect(page.getByRole('button', { name: 'アドバンスド' })).toBeVisible();
+  await page.getByRole('button', { name: /言語 \/ Language/ }).click();
+  await expect(page.getByRole('button', { name: 'Advanced', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Simple', exact: true })).toBeVisible();
+  // 戻すと ja に戻る (以後の test は ja 前提)。
+  await page.getByRole('button', { name: /言語 \/ Language/ }).click();
+  await expect(page.getByRole('button', { name: 'アドバンスド' })).toBeVisible();
+});
+
 test('キーボードだけでモードと画面ナビを操作できる (design/02 §6)', async () => {
   // Simple へ戻し、モード切替を keyboard だけで行う。
   await page.getByRole('button', { name: 'シンプル' }).click();

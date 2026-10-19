@@ -5,7 +5,7 @@
  */
 import { createRoot } from 'react-dom/client';
 import { AdvancedApp } from './advanced.tsx';
-import { t } from './resources.ts';
+import { setLocale, t, type Locale } from './resources.ts';
 import { WizardApp } from './wizard.tsx';
 import { FluentProvider, webDarkTheme, webLightTheme, Text, Spinner, makeStyles, Button } from '@fluentui/react-components';
 import React, { useEffect, useState } from 'react';
@@ -50,6 +50,9 @@ function App(): React.ReactElement {
   // モードは表示と編集範囲だけを変える (design/02 §0)。wizard 側の状態はモード切替で
   // 失われないよう、Simple を隠すだけで mount を維持する。
   const [mode, setMode] = useState<'simple' | 'advanced'>('simple');
+  // 言語切替 (design/28 §8.1)。setLocale は即座に t() へ反映するため、
+  // 再描画の trigger として locale state を併せて持つ。
+  const [locale, setLocaleState] = useState<Locale>('ja');
   const apiBase = window.scopepilotDesktop?.apiBase;
 
   useEffect(() => {
@@ -80,6 +83,16 @@ function App(): React.ReactElement {
         </Button>
         <Button appearance={mode === 'advanced' ? 'primary' : 'secondary'} onClick={() => setMode('advanced')}>
           {t('app.mode.advanced')}
+        </Button>
+        <Button
+          appearance="secondary"
+          onClick={() => {
+            const next: Locale = locale === 'ja' ? 'en' : 'ja';
+            setLocale(next);
+            setLocaleState(next);
+          }}
+        >
+          {t('app.language')}
         </Button>
       </div>
       <Spinner size="tiny" label={t('app.harnessLabel')} />
