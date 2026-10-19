@@ -128,11 +128,17 @@ test('A11: 所見一覧から確定/棄却でき、報告書を生成できる',
 test('A08: 上限を狭めた探索計画を構築・確認・実行し、診断まで実行できる', async () => {
   await page.getByRole('button', { name: /A08 Scan plans/ }).click();
 
+  // 入力文書の hint を登録すると、以後の探索計画へ許可内 URL が統合される。
+  await page.getByLabel('文書 label').fill('操作手順書 (app test)');
+  await page.getByLabel('URL (1行1件)').first().fill('http://fixture.target.test/setup.php');
+  await page.getByRole('button', { name: 'hint を登録する' }).click();
+  await expect(page.getByText('操作手順書 (app test) の hint を登録しました (許可内 1/1 URL・以後の探索計画に統合されます)')).toBeVisible({ timeout: 30_000 });
+
   // 上限 (ページ数) を 50 に狭めて計画を構築すると、計画表示に 50 が反映される。
   // 上限欄は探索・診断の両 section にあるため、先頭 (探索側) を指定する。
   await page.getByLabel('最大ページ数 (空=既定)').first().fill('50');
   await page.getByRole('button', { name: '探索計画を構築する' }).click();
-  await expect(page.getByText(/50 page/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/explore: 対象 2 件・上限 \d+ req \/ 50 page/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/計画 hash: /)).toBeVisible();
 
   await page.getByRole('button', { name: '探索計画を確認する' }).click();
@@ -155,6 +161,8 @@ test('A04: site map に観測一覧と scope 拒否が表示される', async ()
   await expect(page.getByText(/観測済み page \(\d+ 件\)/)).toBeVisible();
   await expect(page.getByRole('cell', { name: 'http://fixture.target.test/' }).first()).toBeVisible();
   await expect(page.getByRole('cell', { name: 'クロール' }).first()).toBeVisible();
+  // A08 で登録した hint 由来の観測は「文書ヒント (未確認)」として表示される。
+  await expect(page.getByRole('cell', { name: '文書ヒント (未確認)' }).first()).toBeVisible();
   // fixture home は scope 外 origin (http://elsewhere.example/out-of-scope) へ link する
   // ため、探索中に拒否記録が残る。
   // 複数回の探索で同一拒否が重複記録されうるため first を使う。
@@ -304,13 +312,15 @@ test('A09: login flow を登録し session refresh と cookie jar 割当を行�
   await expect(page.getByLabel('秘密値: vault://admin-user')).toHaveValue('');
 
   // 認証付き探索 (design/f09): A08 で role を指定すると認証後のみ見える頁が観測できる。
+  // menu.php は link を持たないが、A08 test で登録した hint (setup.php) が home へ
+  // link するため観測は 6 件 (menu・setup・home・login・xss・sqli)・候補 9 (form 3 含む)。
   await page.getByRole('button', { name: /A08 Scan plans/ }).click();
   await page.getByLabel('開始 URL (1行1件)').fill('http://fixture.target.test/authenticated/menu.php');
   await page.getByLabel('探索 session の role (任意・A09 で login 済みの role。空なら非認証)').fill('admin');
   await page.getByRole('button', { name: '探索計画を構築する' }).click();
   await page.getByRole('button', { name: '探索計画を確認する' }).click();
   await page.getByRole('button', { name: '探索を実行する' }).click();
-  await expect(page.getByText('探索完了: 観測 1 件・候補 1 件・scope 外拒否 0 件')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('探索完了: 観測 6 件・候補 9 件・scope 外拒否 1 件')).toBeVisible({ timeout: 30_000 });
 
   // A09 に戻して session 系の操作を続ける。
   await page.getByRole('button', { name: /A09 Sessions/ }).click();

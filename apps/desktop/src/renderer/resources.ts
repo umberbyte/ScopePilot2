@@ -272,6 +272,14 @@ export const strings = {
   'a11.reject': '棄却',
   'a11.generateReport': '報告書を生成する',
 
+  'a08.hintTitle': '入力文書の hint (document hints)',
+  'a08.hintIntro':
+    '文書に記載されていた URL を探索の追加開始点に登録します。許可 Origin 内の URL だけが計画へ統合され、A04 では「文書ヒント (未確認)」として表示されます (文書の記載は観測事実ではありません)。',
+  'a08.hintLabelField': '文書 label',
+  'a08.hintUrlsField': 'URL (1行1件)',
+  'a08.hintRegister': 'hint を登録する',
+  'a08.hintRegistered': '{label} の hint を登録しました (許可内 {accepted}/{total} URL・以後の探索計画に統合されます)',
+  'a08.hintList': '登録済み: {documents}',
   'a08.exploreTitle': '探索計画 (crawl)',
   'a08.seedsLabel': '開始 URL (1行1件)',
   'a08.exploreRoleLabel': '探索 session の role (任意・A09 で login 済みの role。空なら非認証)',

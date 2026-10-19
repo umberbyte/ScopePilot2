@@ -128,6 +128,44 @@ export function observedPageFromSources(sources: readonly { originType: 'crawl' 
   return { observed: sources.some((source) => source.originType === 'crawl') };
 }
 
+export interface DocumentHintSeedMerge {
+  /** 明示 seed と hint を統合した全開始点 (明示 seed を先頭に置き hint を追加)。 */
+  readonly targets: readonly string[];
+  /** hint として追加された開始点のみ (canonical)。観測の由来 (document-hint) 判定に使う。 */
+  readonly hintTargets: readonly string[];
+}
+
+/**
+ * document hint URL を探索の追加開始点へ統合する (AGENTS.md 入力ドキュメントの活用)。
+ * 許可 Origin 内の URL だけを追加し (deny 優先。実行時の scope 判定とは別の入口防御)、
+ * 明示 seed と重複する URL は明示側を優先して crawl 扱いのままにする。
+ * 不正な URL・scope 外・重複は除外され、除外数は呼出側の計数に残る。
+ */
+export function mergeDocumentHintSeeds(
+  seeds: readonly string[],
+  hintUrls: readonly string[],
+  scope: ScopeOrigins,
+): DocumentHintSeedMerge {
+  const explicit = new Set(seeds.map((url) => ScopePolicy.canonicalUrl(url)));
+  const hintTargets = new Set<string>();
+  for (const url of hintUrls) {
+    let canonical: string;
+    try {
+      canonical = ScopePolicy.canonicalUrl(url);
+    } catch {
+      continue;
+    }
+    if (!ScopePolicy.decide(scope, canonical).allowed) {
+      continue;
+    }
+    if (explicit.has(canonical)) {
+      continue;
+    }
+    hintTargets.add(canonical);
+  }
+  return { targets: [...seeds, ...hintTargets], hintTargets: [...hintTargets] };
+}
+
 /** frontier 追加前の URL 妥当性 (循環 seed 防御)。 */
 export function assertFrontierUrl(url: string): void {
   try {

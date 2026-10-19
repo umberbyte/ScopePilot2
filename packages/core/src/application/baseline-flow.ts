@@ -32,6 +32,7 @@ import {
   type ActiveScanRequest,
 } from '@scopepilot2/contracts';
 import { ScopePolicy } from '../domain/scope-policy.ts';
+import { mergeDocumentHintSeeds } from '../domain/exploration.ts';
 import { CaseAggregate } from '../domain/case-aggregate.ts';
 import { RunStateMachine } from '../domain/run-state-machine.ts';
 import { ScanMonitor } from '../domain/scan-monitor.ts';
@@ -211,6 +212,13 @@ export class BaselineFlowService {
   private readonly observationsByUrl = new Map<string, PageObservation>();
   /** scope により拒否された URL の記録 (design/02 A04 の開示用)。 */
   private readonly deniedUrlLog: readonly { url: string; reason: string }[] = [];
+  /**
+   * 入力文書由来の document hints (AGENTS.md 入力ドキュメントの活用)。
+   * URL は計画構築時に許可 Origin 内だけ追加開始点へ統合され、単独では観測を作らない。
+   */
+  private readonly documentHintDocuments: { documentLabel: string; urls: readonly string[] }[] = [];
+  /** 計画ごとの hint 由来開始点 (canonical)。観測の由来 (document-hint) 判定に使う。 */
+  private readonly explorationHintSeeds = new Map<string, ReadonlySet<string>>();
   /** runLogin で得た role session (cookie 値は service 内部のみ。API・監査へ出さない)。 */
   private readonly roleSessionCookies = new Map<string, { readonly cookies: readonly LoginSessionCookie[]; readonly createdAt: string }>();
   private exploredUrlCount = 0;
@@ -244,6 +252,41 @@ export class BaselineFlowService {
   /** 探索で scope 拒否された URL (開示用)。 */
   listDeniedUrls(): readonly { url: string; reason: string }[] {
     return [...this.deniedUrlLog];
+  }
+
+  /**
+   * 入力文書由来の document hint の登録 (AGENTS.md 入力ドキュメントの活用)。
+   * 文書の記載は観測事実ではないため、hint 単独では観測・所見を作らず、
+   * 計画構築時に許可 Origin 内の URL だけ追加開始点として統合する。
+   * acceptedUrlCount は現在の案件 scope で許可された URL 数 (監査にも記録)。
+   */
+  registerDocumentHints(
+    operator: OperatorProfile,
+    input: { readonly documentLabel: string; readonly urls: readonly string[] },
+  ): { documentLabel: string; urlCount: number; acceptedUrlCount: number } {
+    this.requirePermission(operator, 'case.manage');
+    if (input.documentLabel.trim() === '') {
+      throw domainError('ValidationFailed', 'documentLabel must not be empty');
+    }
+    if (input.urls.length === 0) {
+      throw domainError('ValidationFailed', 'document hints need at least one URL');
+    }
+    const caseRecord = this.currentCase();
+    const acceptedUrlCount = mergeDocumentHintSeeds([], input.urls, caseRecord.scope).hintTargets.length;
+    this.documentHintDocuments.push({ documentLabel: input.documentLabel, urls: [...input.urls] });
+    this.record({
+      type: 'DocumentHintsRegistered',
+      at: this.deps.clock.now().toISOString(),
+      documentLabel: input.documentLabel,
+      urlCount: input.urls.length,
+      acceptedUrlCount,
+    });
+    return { documentLabel: input.documentLabel, urlCount: input.urls.length, acceptedUrlCount };
+  }
+
+  /** 登録済み document hints (文書 label と URL の一覧)。 */
+  listDocumentHints(): readonly { documentLabel: string; urls: readonly string[] }[] {
+    return [...this.documentHintDocuments];
   }
 
   /** 観測通信の記録 (traffic log と endpoint 集約の両方に入れる)。 */
@@ -868,9 +911,17 @@ export class BaselineFlowService {
       this.requirePositiveLimits(limitsRequest, 'plan.explore');
     }
     const limits = this.planLimits({ ...DEFAULT_EXPLORE_LIMITS, ...limitsRequest }, caseRecord.scope.limits);
-    const inputEvidenceHash = hashStable('scopepilot2.plan.input', seeds.map((url) => ScopePolicy.canonicalUrl(url)).sort());
+    // document hint は許可 Origin 内の URL だけ追加開始点へ統合する (AGENTS.md)。
+    // 計画の target snapshot に含まれるため、hint 由来の送信も確認画面の対象になる。
+    const merged = mergeDocumentHintSeeds(
+      seeds,
+      this.documentHintDocuments.flatMap((document) => document.urls),
+      caseRecord.scope,
+    );
+    const inputEvidenceHash = hashStable('scopepilot2.plan.input', merged.targets.map((url) => ScopePolicy.canonicalUrl(url)).sort());
+    const planId = this.deps.ids.next('plan');
     const plan = buildPlan({
-      planId: this.deps.ids.next('plan'),
+      planId,
       caseId: caseRecord.caseId,
       authorizationId: authorization.authorizationId,
       operatorId: operator.operatorId,
@@ -879,7 +930,7 @@ export class BaselineFlowService {
         {
           kind: 'explore',
           operationClass: 'Browse',
-          targets: seeds,
+          targets: merged.targets,
           engineKind: 'playwright',
           guarantee: 'Enforced',
           limits,
@@ -890,6 +941,7 @@ export class BaselineFlowService {
       inputEvidenceHash,
       createdAt: this.deps.clock.now().toISOString(),
     });
+    this.explorationHintSeeds.set(planId, new Set(merged.hintTargets));
     return { plan, planHash: planHashOf(plan) };
   }
 
@@ -1028,10 +1080,13 @@ export class BaselineFlowService {
     const observations: PageObservation[] = [];
     const deniedUrls: { url: string; reason: string }[] = [];
     const visited = new Set<string>();
-    const frontier: { url: string; depth: number; discoveredFrom: string | null }[] = step.targetSnapshot.map((url) => ({
+    // hint 由来の開始点は観測の由来を document-hint として残す (F08・AGENTS.md: 未確認表示)。
+    const hintSeeds = this.explorationHintSeeds.get(plan.planId);
+    const frontier: { url: string; depth: number; discoveredFrom: string | null; origin: 'crawl' | 'document-hint' }[] = step.targetSnapshot.map((url) => ({
       url,
       depth: 0,
       discoveredFrom: null,
+      origin: hintSeeds?.has(url) === true ? 'document-hint' : 'crawl',
     }));
 
     let stopReason: StopReason = 'completed';
@@ -1069,8 +1124,8 @@ export class BaselineFlowService {
       if (observed === null) {
         continue;
       }
-      // 探索の追跡情報 (depth・発見元) は core 側の値で上書きして記録する。
-      const observation: PageObservation = { ...observed, url: canonical, depth: entry.depth, discoveredFrom: entry.discoveredFrom };
+      // 探索の追跡情報 (depth・発見元・由来) は core 側の値で上書きして記録する。
+      const observation: PageObservation = { ...observed, url: canonical, depth: entry.depth, discoveredFrom: entry.discoveredFrom, originType: entry.origin };
       observations.push(observation);
       this.recordObservedExchange({ url: canonical, method: 'GET', status: observation.status, contentType: observation.contentType }, this.deps.clock.now().toISOString(), 'explore');
 
@@ -1078,7 +1133,7 @@ export class BaselineFlowService {
         for (const link of observation.links) {
           const linkCanonical = ScopePolicy.canonicalUrl(link);
           if (!visited.has(linkCanonical)) {
-            frontier.push({ url: linkCanonical, depth: entry.depth + 1, discoveredFrom: canonical });
+            frontier.push({ url: linkCanonical, depth: entry.depth + 1, discoveredFrom: canonical, origin: 'crawl' });
           }
         }
       }

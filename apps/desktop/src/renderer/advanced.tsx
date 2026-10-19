@@ -410,6 +410,10 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const styles = useStyles();
   const [seeds, setSeeds] = useState('http://fixture.target.test/');
   const [exploreRole, setExploreRole] = useState('');
+  const [hintLabel, setHintLabel] = useState('');
+  const [hintUrls, setHintUrls] = useState('');
+  const [hints, setHints] = useState<readonly { documentLabel: string; urls: readonly string[] }[]>([]);
+  const [hintNotice, setHintNotice] = useState('');
   const [exploreLimits, setExploreLimits] = useState({ maxRequests: '', maxPages: '', maxDurationMinutes: '' });
   const [explorePlan, setExplorePlan] = useState<{ plan: { steps: readonly PlanStepView[] }; planHash: string; steps: readonly PlanStepView[] } | null>(null);
   const [exploreConfirmation, setExploreConfirmation] = useState<{ confirmationId: string } | null>(null);
@@ -436,6 +440,33 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
       }
     },
     [],
+  );
+
+  const loadHints = useCallback(async () => {
+    try {
+      const body = await callJson<{ hints: readonly { documentLabel: string; urls: readonly string[] }[] }>(apiBase, 'GET', '/api/documents/hints');
+      setHints(body.hints);
+    } catch (cause) {
+      setError(String(cause));
+    }
+  }, [apiBase]);
+
+  useEffect(() => {
+    void loadHints();
+  }, [loadHints]);
+
+  const registerHints = useCallback(
+    () =>
+      run(async () => {
+        const urls = hintUrls.split('\n').map((line) => line.trim()).filter((line) => line !== '');
+        const result = await callJson<{ documentLabel: string; urlCount: number; acceptedUrlCount: number }>(apiBase, 'POST', '/api/documents/hints', {
+          documentLabel: hintLabel,
+          urls,
+        });
+        setHintNotice(t('a08.hintRegistered', { label: result.documentLabel, accepted: result.acceptedUrlCount, total: result.urlCount }));
+        await loadHints();
+      }),
+    [apiBase, hintLabel, hintUrls, loadHints, run],
   );
 
   const buildExplore = useCallback(() =>
@@ -510,6 +541,21 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
 
   return (
     <div className={styles.section}>
+      <Text weight="semibold">{t('a08.hintTitle')}</Text>
+      <Text className={styles.muted}>{t('a08.hintIntro')}</Text>
+      <Field label={t('a08.hintLabelField')}>
+        <Input value={hintLabel} onChange={(_, data) => setHintLabel(data.value)} />
+      </Field>
+      <Field label={t('a08.hintUrlsField')}>
+        <Textarea value={hintUrls} onChange={(_, data) => setHintUrls(data.value)} rows={3} />
+      </Field>
+      <Button disabled={busy} onClick={() => void registerHints()}>
+        {t('a08.hintRegister')}
+      </Button>
+      {hintNotice !== '' && <Text role="status">{hintNotice}</Text>}
+      {hints.length > 0 && (
+        <Text className={styles.muted}>{t('a08.hintList', { documents: hints.map((hint) => `${hint.documentLabel} (${hint.urls.length} URL)`).join('・') })}</Text>
+      )}
       <Text weight="semibold">{t('a08.exploreTitle')}</Text>
       {error !== '' && (
         <MessageBar intent="error">

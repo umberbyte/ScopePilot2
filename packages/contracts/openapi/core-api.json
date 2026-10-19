@@ -1477,6 +1477,120 @@
         }
       }
     },
+    "/api/documents/hints": {
+      "get": {
+        "operationId": "listDocumentHints",
+        "summary": "登録済み document hints (入力文書の label と URL。観測事実ではなく未確認)",
+        "responses": {
+          "200": {
+            "description": "document hints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "hints"
+                  ],
+                  "properties": {
+                    "hints": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "documentLabel",
+                          "urls"
+                        ],
+                        "properties": {
+                          "documentLabel": {
+                            "type": "string"
+                          },
+                          "urls": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "registerDocumentHints",
+        "summary": "入力文書由来の hint 登録 (AGENTS.md 入力ドキュメントの活用)。許可 Origin 内の URL だけ探索の追加開始点へ統合される",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "documentLabel",
+                  "urls"
+                ],
+                "properties": {
+                  "documentLabel": {
+                    "type": "string"
+                  },
+                  "urls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "登録結果 (acceptedUrlCount は現在の案件 scope で許可された URL 数)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "documentLabel",
+                    "urlCount",
+                    "acceptedUrlCount"
+                  ],
+                  "properties": {
+                    "documentLabel": {
+                      "type": "string"
+                    },
+                    "urlCount": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "acceptedUrlCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/business-logic/checks": {
       "get": {
         "operationId": "listBusinessLogicChecks",
@@ -3302,6 +3416,9 @@
             "$ref": "#/components/schemas/LoginCompletedEvent"
           },
           {
+            "$ref": "#/components/schemas/DocumentHintsRegisteredEvent"
+          },
+          {
             "$ref": "#/components/schemas/ReportGeneratedEvent"
           }
         ]
@@ -3739,6 +3856,36 @@
               "type": "string"
             },
             "description": "参照名のみ (値は出さない — F09-UT-006)"
+          }
+        }
+      },
+      "DocumentHintsRegisteredEvent": {
+        "type": "object",
+        "required": [
+          "type",
+          "at",
+          "documentLabel",
+          "urlCount",
+          "acceptedUrlCount"
+        ],
+        "properties": {
+          "type": {
+            "const": "DocumentHintsRegistered"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "documentLabel": {
+            "type": "string"
+          },
+          "urlCount": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "acceptedUrlCount": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },

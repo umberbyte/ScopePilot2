@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 import {
   classifyAction,
   formRequiresConfirmation,
+  mergeDocumentHintSeeds,
   observedPageFromSources,
   runBudgetedActions,
   seedHints,
@@ -81,5 +82,32 @@ describe('exploration budget / observation', () => {
   test('[F08-UT-008] document hint のみでは observed page を生成しない', () => {
     assert.deepEqual(observedPageFromSources([{ originType: 'document-hint' }]), { observed: false });
     assert.deepEqual(observedPageFromSources([{ originType: 'document-hint' }, { originType: 'crawl' }]), { observed: true });
+  });
+});
+
+describe('mergeDocumentHintSeeds (document hint の追加開始点統合)', () => {
+  test('許可 Origin 内の URL だけ追加し、deny・不正 URL・明示 seed と重複は除外する', () => {
+    const merged = mergeDocumentHintSeeds(
+      ['http://fixture.target.test/'],
+      [
+        'http://fixture.target.test/setup.php',        // 許可内 → 追加
+        'http://fixture.target.test/setup.php#frag',   // canonical で重複 → 除外
+        'http://elsewhere.example/admin',              // 許可外 → 除外
+        'not a url',                                   // 不正 → 除外
+        'http://fixture.target.test/',                 // 明示 seed と重複 → 明示側優先
+      ],
+      scope,
+    );
+    assert.deepEqual(merged.targets, ['http://fixture.target.test/', 'http://fixture.target.test/setup.php']);
+    assert.deepEqual(merged.hintTargets, ['http://fixture.target.test/setup.php']);
+  });
+
+  test('deny 済み origin は許可内でも除外する (deny は allow より優先)', () => {
+    const merged = mergeDocumentHintSeeds(
+      [],
+      ['http://denied.test/panel', 'http://fixture.target.test/login.php'],
+      { allowedOrigins: ['http://fixture.target.test', 'http://denied.test'], deniedOrigins: ['http://denied.test'] },
+    );
+    assert.deepEqual(merged.hintTargets, ['http://fixture.target.test/login.php']);
   });
 });

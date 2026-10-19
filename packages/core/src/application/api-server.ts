@@ -249,6 +249,24 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       // site map の素材 (design/02 A04)。観測 URL と scope 拒否を開示する。
       return respondJson(response, 200, { observations: service.listObservations(), deniedUrls: service.listDeniedUrls() });
     }
+    if (route === 'GET /api/documents/hints') {
+      return respondJson(response, 200, { hints: service.listDocumentHints() });
+    }
+    if (route === 'POST /api/documents/hints') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.registerDocumentHints(operator, {
+          documentLabel: stringField(body, 'documentLabel'),
+          urls: stringArrayField(body, 'urls'),
+        });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
     if (route === 'POST /api/findings/status') {
       const body = await readJsonBody(request, response);
       if (body === undefined) {

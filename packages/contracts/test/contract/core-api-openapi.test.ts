@@ -51,6 +51,7 @@ const EXPECTED_EVENT_TYPES = [
   'FuzzRunCompleted',
   'BusinessLogicCheckCompleted',
   'LoginCompleted',
+  'DocumentHintsRegistered',
   'ReportGenerated',
 ];
 

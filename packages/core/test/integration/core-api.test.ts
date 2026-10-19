@@ -1010,6 +1010,59 @@ describe('Core API server (node:http)', () => {
     }
   });
 
+  test('documents/hints は hint を登録し、探索計画と観測の由来へ統合する (AGENTS.md)', async () => {
+    const post = async (path: string, body: unknown): Promise<Response> =>
+      fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    // 他 test と同様、この test 用の案件と認可を用意する。
+    await post('/api/case', {
+      name: 'doc-hints-it',
+      allowedOrigins: ['http://fixture.target.test'],
+      deniedOrigins: [],
+      limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+    });
+    await post('/api/authorization', {
+      allowedOperationClasses: ['Browse', 'ActiveScan'],
+      targetRoles: ['unauthenticated'],
+      validFrom: '2026-10-18T00:00:00.000Z',
+      validUntil: '2026-10-19T00:00:00.000Z',
+      evidenceLabel: '認可(IT)',
+      evidenceContent: 'it authorization evidence',
+    });
+
+    // 許可外 URL を混ぜて登録 — acceptedUrlCount は許可内のみ計上。
+    const registered = await post('/api/documents/hints', {
+      documentLabel: 'API 仕様書 (IT)',
+      urls: ['http://fixture.target.test/setup.php', 'http://elsewhere.example/admin'],
+    });
+    assert.equal(registered.status, 201);
+    const registration = (await registered.json()) as { documentLabel: string; urlCount: number; acceptedUrlCount: number };
+    assert.deepEqual(registration, { documentLabel: 'API 仕様書 (IT)', urlCount: 2, acceptedUrlCount: 1 });
+
+    const empty = await post('/api/documents/hints', { documentLabel: 'x', urls: [] });
+    assert.equal(empty.status, 400);
+
+    const list = (await (await fetch(`${baseUrl}/api/documents/hints`)).json()) as { hints: readonly { documentLabel: string; urls: readonly string[] }[] };
+    assert.equal(list.hints[0]?.documentLabel, 'API 仕様書 (IT)');
+
+    // 計画の target snapshot に許可内 hint だけ統合される。
+    const planResponse = await post('/api/plan/explore', { seeds: ['http://fixture.target.test/'] });
+    const { plan } = (await planResponse.json()) as { plan: { steps: readonly { targetSnapshot: readonly string[] }[] } };
+    assert.deepEqual(plan.steps[0]?.targetSnapshot, ['http://fixture.target.test/', 'http://fixture.target.test/setup.php']);
+    const confirmResponse = await post('/api/plan/confirm', { plan });
+    const confirmation = (await confirmResponse.json()) as { confirmationId: string };
+    const runResponse = await post('/api/run/explore', { plan, confirmation, maxDepth: 1 });
+    assert.equal(runResponse.status, 200);
+
+    // 観測の由来は文書ヒント (未確認) として残る。
+    const observations = (await (await fetch(`${baseUrl}/api/observations`)).json()) as { observations: readonly { url: string; originType: string }[] };
+    assert.equal(observations.observations.find((observation) => observation.url === 'http://fixture.target.test/setup.php')?.originType, 'document-hint');
+    assert.equal(observations.observations.find((observation) => observation.url === 'http://fixture.target.test/')?.originType, 'crawl');
+
+    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+    assert.match(eventsText, /DocumentHintsRegistered/);
+  });
+
   test('business-logic check は role 差分検証を inconclusive/pass/fail で返す (design/f17)', async () => {
     const post = async (path: string, body: unknown): Promise<Response> =>
       fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
