@@ -187,7 +187,7 @@ function ScopeAuthorizationScreen({ apiBase }: { apiBase: string }): React.React
         </Field>
       </div>
       <div className={styles.section}>
-        {savedNote !== '' && <Text>{savedNote}</Text>}
+        {savedNote !== '' && <Text role="status">{savedNote}</Text>}
         {conflict !== '' && (
           <Text role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
             {conflict}

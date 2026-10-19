@@ -21,8 +21,9 @@ test.afterAll(async () => {
 test('S01: 案件を開くまで次へは無効', async () => {
   const next = page.getByRole('button', { name: /次へ/ });
   await expect(next).toBeDisabled();
-  await page.getByRole('button', { name: /案件を開く/ }).click();
-  await expect(page.getByText(/案件「ScopePilot2 案件」を開きました/)).toBeVisible();
+  await page.getByRole('button', { name: '案件を開く' }).click();
+  const openNotice = page.getByRole('status').filter({ hasText: /案件「ScopePilot2 案件」を開きました/ });
+  await expect(openNotice).toBeVisible();
   await expect(next).toBeEnabled();
   await next.click();
 });

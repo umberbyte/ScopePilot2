@@ -127,7 +127,7 @@ export function ProxyInterceptScreen({ apiBase }: { apiBase: string }): React.Re
           {`Error: ${error}`}
         </Text>
       )}
-      {notice !== '' && <Text>{notice}</Text>}
+      {notice !== '' && <Text role="status">{notice}</Text>}
       <Text weight="semibold">{`break queue (${queue.items.length} 件・保持中 ${held.length} 件)`}</Text>
       <Field label="方向">
         <Input value={direction} onChange={(_, data) => setDirection(data.value === 'response' ? 'response' : 'request')} />

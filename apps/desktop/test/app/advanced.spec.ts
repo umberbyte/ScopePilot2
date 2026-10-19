@@ -331,6 +331,22 @@ test('A09: login flow を登録し session refresh と cookie jar 割当を行�
   await expect(page.getByText(/観測: admin=business-response:admin・guest=business-response:guest/)).toBeVisible();
 });
 
+test('キーボードだけでモードと画面ナビを操作できる (design/02 §6)', async () => {
+  // Simple へ戻し、モード切替を keyboard だけで行う。
+  await page.getByRole('button', { name: 'シンプル' }).click();
+  await expect(page.getByText('S01 案件を開く').first()).toBeVisible();
+  const advancedButton = page.getByRole('button', { name: 'アドバンスド' });
+  await advancedButton.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('navigation', { name: 'Advanced 画面ナビ' })).toBeVisible();
+
+  // ナビも keyboard で画面切替できる。
+  const a02 = page.getByRole('button', { name: /A02 Scope & Authorization/ });
+  await a02.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText(/Scope \(現在 revision \d+\)/)).toBeVisible();
+});
+
 test('未実装プレースホルダはもう残っていない (全 Advanced 画面が実装済み)', async () => {
   await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toHaveCount(0);
 });

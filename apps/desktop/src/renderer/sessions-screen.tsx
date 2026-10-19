@@ -139,7 +139,7 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
           {`Error: ${error}`}
         </Text>
       )}
-      {notice !== '' && <Text>{notice}</Text>}
+      {notice !== '' && <Text role="status">{notice}</Text>}
       <Text className={styles.muted}>
         secret 値は画面・API のどちらにも入れません。flow は参照 (secretReference) のみ持ち、step は最大 10・種別は allowlist (navigate/fill/click/wait/extract/assert) です。
       </Text>
@@ -213,7 +213,7 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
       </Button>
       {bizResult !== null && (
         <div className={styles.section}>
-          <Text>{`結果: ${bizResult.status} (比較 ${bizResult.comparison.outcome}・restore ${bizResult.restore.outcome}・証拠分離 ${bizResult.matrix.evidenceSeparated ? 'あり' : 'なし'})`}</Text>
+          <Text role="status">{`結果: ${bizResult.status} (比較 ${bizResult.comparison.outcome}・restore ${bizResult.restore.outcome}・証拠分離 ${bizResult.matrix.evidenceSeparated ? 'あり' : 'なし'})`}</Text>
           <Text className={styles.muted}>{`観測: ${bizResult.observations.map((observation) => `${observation.role}=${observation.observation ?? '(欠落)'}`).join('・')}`}</Text>
         </div>
       )}

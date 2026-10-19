@@ -210,7 +210,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
         <>
           <Text size={400}>S01 案件を開く</Text>
           {data.caseOpened ? (
-            <Text>案件「{caseName}」を開きました。</Text>
+            <Text role="status">案件「{caseName}」を開きました。</Text>
           ) : (
             <Button appearance="primary" disabled={busy} onClick={() => void openCase()}>
               案件を開く (fixture)
@@ -246,7 +246,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
           <Text size={400}>S03 認証準備・探索開始</Text>
           <Text className={styles.hint}>{DEFAULT_EXPLORE_LIMITS}</Text>
           {data.explorationDone ? (
-            <Text>{exploreSummary}</Text>
+            <Text role="status">{exploreSummary}</Text>
           ) : (
             <Button appearance="primary" disabled={busy} onClick={() => void runExploration()}>
               探索を開始する
@@ -308,7 +308,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
           <Text size={400}>S06 実行状況</Text>
           {data.runFinished ? (
             <>
-              <Text>{runSummary}</Text>
+              <Text role="status">{runSummary}</Text>
               {findings.map((finding) => (
                 <Text key={finding.findingId} className={styles.hint}>
                   [{finding.severity}] {finding.title} — {finding.url} (観測 {finding.occurrences} 回)

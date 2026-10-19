@@ -156,7 +156,7 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
       </Button>
       {result !== null && (
         <div className={styles.section}>
-          <Text>{`${result.runId}: 組合せ ${result.total} 件中 ${result.sent} 件送信 → ${result.clusters.length} cluster`}</Text>
+          <Text role="status">{`${result.runId}: 組合せ ${result.total} 件中 ${result.sent} 件送信 → ${result.clusters.length} cluster`}</Text>
           <Table size="small" aria-label="応答 cluster">
             <TableHeader>
               <TableRow>

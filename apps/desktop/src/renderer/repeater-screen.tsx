@@ -180,7 +180,7 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
             <div className={styles.section}>
               {sendResult.sent ? (
                 <>
-                  <Text>{`送信しました (${sendResult.attempt?.outcome})。応答: ${sendResult.response?.status} ${sendResult.response?.contentType} (${sendResult.response?.bodyBytes} bytes)`}</Text>
+                  <Text role="status">{`送信しました (${sendResult.attempt?.outcome})。応答: ${sendResult.response?.status} ${sendResult.response?.contentType} (${sendResult.response?.bodyBytes} bytes)`}</Text>
                   {sendResult.response?.bodyPreview !== undefined && (
                     <Text block style={{ whiteSpace: 'pre-wrap' }}>
                       {sendResult.response.bodyPreview}
