@@ -8,6 +8,7 @@ import { MessageBar, Button, Checkbox, Field, Input, makeStyles, ProgressBar, Se
 import { t } from './resources.ts';
 
 const CODECS = ['base64', 'url', 'hex', 'html-entity', 'gzip', 'deflate-raw'] as const;
+type SequencerTokenSource = 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom';
 
 interface DecodeResult {
   readonly outputText?: string;
@@ -41,9 +42,11 @@ interface TransportResult {
 }
 
 interface SequencerResult {
-  readonly tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer';
+  readonly tokenSource: SequencerTokenSource;
   readonly tokenCookieName?: string;
   readonly tokenFieldName?: string;
+  readonly tokenStartDelimiter?: string;
+  readonly tokenEndDelimiter?: string;
   readonly verdict: string;
   readonly sampleCount: number;
   readonly duplicates: number;
@@ -87,9 +90,11 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
   const [sequencerTarget, setSequencerTarget] = useState('http://fixture.target.test/session-token');
   const [sequencerSamples, setSequencerSamples] = useState('100');
-  const [sequencerTokenSource, setSequencerTokenSource] = useState<'body' | 'cookie' | 'hidden' | 'bearer'>('body');
+  const [sequencerTokenSource, setSequencerTokenSource] = useState<SequencerTokenSource>('body');
   const [sequencerTokenCookieName, setSequencerTokenCookieName] = useState('SEQ_TOKEN');
   const [sequencerTokenFieldName, setSequencerTokenFieldName] = useState('csrf_token');
+  const [sequencerTokenStartDelimiter, setSequencerTokenStartDelimiter] = useState('token="');
+  const [sequencerTokenEndDelimiter, setSequencerTokenEndDelimiter] = useState('"');
   const [sequencerRole, setSequencerRole] = useState('');
   const [sequencerResult, setSequencerResult] = useState<SequencerResult | null>(null);
   const [sequencerRunning, setSequencerRunning] = useState(false);
@@ -163,6 +168,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         tokenSource: sequencerTokenSource,
         ...(sequencerTokenSource === 'cookie' ? { tokenCookieName: sequencerTokenCookieName } : {}),
         ...(sequencerTokenSource === 'hidden' ? { tokenFieldName: sequencerTokenFieldName } : {}),
+        ...(sequencerTokenSource === 'custom' ? { tokenStartDelimiter: sequencerTokenStartDelimiter, tokenEndDelimiter: sequencerTokenEndDelimiter } : {}),
         ...(sequencerRole.trim() === '' ? {} : { role: sequencerRole.trim() }),
       }, 'POST', controller.signal));
     } catch (cause) {
@@ -178,7 +184,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         setBusy(false);
       }
     }
-  }, [apiBase, sequencerRole, sequencerSamples, sequencerTarget, sequencerTokenCookieName, sequencerTokenFieldName, sequencerTokenSource]);
+  }, [apiBase, sequencerRole, sequencerSamples, sequencerTarget, sequencerTokenCookieName, sequencerTokenEndDelimiter, sequencerTokenFieldName, sequencerTokenSource, sequencerTokenStartDelimiter]);
 
   const stopSequencer = useCallback(() => {
     const controller = sequencerAbort.current;
@@ -433,11 +439,12 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         <Input value={sequencerSamples} onChange={(_, data) => setSequencerSamples(data.value)} />
       </Field>
       <Field label={t('a10.sequencerTokenSourceLabel')}>
-        <Select value={sequencerTokenSource} onChange={(_, data) => setSequencerTokenSource(data.value as 'body' | 'cookie' | 'hidden' | 'bearer')}>
+        <Select value={sequencerTokenSource} onChange={(_, data) => setSequencerTokenSource(data.value as SequencerTokenSource)}>
           <option value="body">{t('a10.sequencerTokenSource.body')}</option>
           <option value="cookie">{t('a10.sequencerTokenSource.cookie')}</option>
           <option value="hidden">{t('a10.sequencerTokenSource.hidden')}</option>
           <option value="bearer">{t('a10.sequencerTokenSource.bearer')}</option>
+          <option value="custom">{t('a10.sequencerTokenSource.custom')}</option>
         </Select>
       </Field>
       {sequencerTokenSource === 'cookie' && (
@@ -449,6 +456,16 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         <Field label={t('a10.sequencerTokenFieldNameLabel')}>
           <Input value={sequencerTokenFieldName} onChange={(_, data) => setSequencerTokenFieldName(data.value)} />
         </Field>
+      )}
+      {sequencerTokenSource === 'custom' && (
+        <>
+          <Field label={t('a10.sequencerTokenStartDelimiterLabel')}>
+            <Input value={sequencerTokenStartDelimiter} onChange={(_, data) => setSequencerTokenStartDelimiter(data.value)} />
+          </Field>
+          <Field label={t('a10.sequencerTokenEndDelimiterLabel')}>
+            <Input value={sequencerTokenEndDelimiter} onChange={(_, data) => setSequencerTokenEndDelimiter(data.value)} />
+          </Field>
+        </>
       )}
       <Field label={t('a10.sequencerRoleLabel')}>
         <Input value={sequencerRole} onChange={(_, data) => setSequencerRole(data.value)} />
@@ -472,7 +489,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
                 ? `${t('a10.sequencerTokenSource.cookie')} (${sequencerResult.tokenCookieName ?? '—'})`
                 : sequencerResult.tokenSource === 'hidden'
                   ? `${t('a10.sequencerTokenSource.hidden')} (${sequencerResult.tokenFieldName ?? '—'})`
-                  : t('a10.sequencerTokenSource.bearer'),
+                  : sequencerResult.tokenSource === 'bearer'
+                    ? t('a10.sequencerTokenSource.bearer')
+                    : `${t('a10.sequencerTokenSource.custom')} (${sequencerResult.tokenStartDelimiter ?? '—'} … ${sequencerResult.tokenEndDelimiter ?? '—'})`,
           })}</Text>
           {sequencerResult.sessionCookieNames !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerSessionApplied', { cookies: sequencerResult.sessionCookieNames.join(', ') || '—' })}</Text>

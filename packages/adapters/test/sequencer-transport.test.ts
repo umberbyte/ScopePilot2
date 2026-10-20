@@ -105,6 +105,19 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
       assert.equal(result.missing, 0);
       assert.equal(result.tokenSource, 'hidden');
       assert.equal(result.tokenFieldName, 'csrf_token');
+
+      const custom = await service.runSequencerSession(OPERATOR, {
+        targetUrl: `${base}/token`,
+        samples: 30,
+        tokenSource: 'custom',
+        tokenStartDelimiter: 'token=',
+        tokenEndDelimiter: '<input',
+      });
+      assert.equal(custom.verdict, 'assessed');
+      assert.equal(custom.sampleCount, 30);
+      assert.equal(custom.tokenSource, 'custom');
+      assert.equal(custom.tokenStartDelimiter, 'token=');
+      assert.equal(custom.tokenEndDelimiter, '<input');
       assert.equal(JSON.stringify(result).includes('secret-token'), false, '結果に token 原文を出さない');
       assert.equal(JSON.stringify(result).includes('cookie-secret'), false, '結果に cookie token 原文を出さない');
       assert.equal(JSON.stringify(result).includes('hidden-secret'), false, '結果に hidden token 原文を出さない');
@@ -118,7 +131,7 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
       assert.equal(JSON.stringify(service.listSequencerSessions()).includes('hidden-secret'), false, '台帳に hidden token 原文を出さない');
       assert.equal(JSON.stringify(service.listSequencerSessions()).includes('bearer-secret'), false, '台帳に bearer token 原文を出さない');
       const traffic = service.listTraffic(100);
-      assert.equal(traffic.total, 30);
+      assert.equal(traffic.total, 60);
       assert.ok(traffic.entries?.every((entry) => entry.source === 'sequencer' && entry.status === 200));
       assert.equal(JSON.stringify(traffic).includes('secret-token'), false, '通信 log に token 原文を出さない');
       assert.equal(JSON.stringify(traffic).includes('bearer-secret'), false, '通信 log に bearer token 原文を出さない');

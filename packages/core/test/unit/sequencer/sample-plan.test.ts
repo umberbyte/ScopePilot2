@@ -7,6 +7,7 @@ import {
   createSequencerExtractor,
   extractBearerToken,
   extractCookieToken,
+  extractDelimitedToken,
   extractHiddenInputToken,
   extractSequencerToken,
   extractToken,
@@ -86,6 +87,22 @@ describe('Sequencer', () => {
     assert.equal(extractBearerToken({ authorizationHeader: 'Bearer abc def' }).kind, 'missing');
     assert.throws(() => createSequencerExtractor('bearer', 'unused'), /not supported/);
     assert.throws(() => createSequencerExtractor('bearer', undefined, 'unused'), /not supported/);
+  });
+
+  test('[F07-UT-012] custom delimiter extractor はregexなしで上限付き抽出を行う', () => {
+    const extractor = createSequencerExtractor('custom', undefined, undefined, '<token>', '</token>');
+    const response = { body: '<token>first-value</token><token>ignored</token>' };
+    assert.deepEqual(extractDelimitedToken(response, '<token>', '</token>'), { kind: 'collected', token: 'first-value' });
+    assert.deepEqual(extractSequencerToken(response, extractor, /unused/g), { kind: 'collected', token: 'first-value' });
+    assert.equal(extractDelimitedToken({ body: '<token></token>' }, '<token>', '</token>').kind, 'missing');
+    assert.equal(extractDelimitedToken({ body: 'no delimiters' }, '<token>', '</token>').kind, 'missing');
+
+    assert.throws(() => createSequencerExtractor('custom', undefined, undefined, '', '</token>'), /tokenStartDelimiter/);
+    assert.throws(() => createSequencerExtractor('custom', undefined, undefined, '<token>\n', '</token>'), /control characters/);
+    assert.throws(() => createSequencerExtractor('custom', undefined, undefined, 'é'.repeat(65), '</token>'), /128 UTF-8 bytes/);
+    assert.throws(() => createSequencerExtractor('custom', 'unused', undefined, '<token>', '</token>'), /not supported/);
+    assert.throws(() => extractDelimitedToken({ body: 'x'.repeat(1024 * 1024 + 1) }, '<token>', '</token>'), /scan exceeds/);
+    assert.throws(() => extractDelimitedToken({ body: `<token>${'x'.repeat(4097)}</token>` }, '<token>', '</token>'), /token exceeds/);
   });
 
   test('[F07-UT-003] duplicate token も sample として保持し重複数を数える', () => {

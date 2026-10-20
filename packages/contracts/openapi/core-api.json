@@ -1693,7 +1693,8 @@
                               "body",
                               "cookie",
                               "hidden",
-                              "bearer"
+                              "bearer",
+                              "custom"
                             ],
                             "description": "token の抽出元。token 値は保持しない"
                           },
@@ -1704,6 +1705,14 @@
                           "tokenFieldName": {
                             "type": "string",
                             "description": "tokenSource が hidden の場合に使用した input field 名"
+                          },
+                          "tokenStartDelimiter": {
+                            "type": "string",
+                            "description": "tokenSource が custom の場合に使用した開始delimiter。token値は含めない"
+                          },
+                          "tokenEndDelimiter": {
+                            "type": "string",
+                            "description": "tokenSource が custom の場合に使用した終了delimiter。token値は含めない"
                           },
                           "verdict": {
                             "type": "string",
@@ -1801,7 +1810,8 @@
                       "body",
                       "cookie",
                       "hidden",
-                      "bearer"
+                      "bearer",
+                      "custom"
                     ],
                     "default": "body",
                     "description": "token の抽出元"
@@ -1817,6 +1827,18 @@
                     "maxLength": 128,
                     "pattern": "^[0-9A-Za-z_.:\\[\\]\\-]+$",
                     "description": "tokenSource が hidden の場合に抽出する input field 名"
+                  },
+                  "tokenStartDelimiter": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "tokenSource が custom の場合の開始delimiter。Coreはcontrol文字を拒否しUTF-8で128 bytes以下に制限する"
+                  },
+                  "tokenEndDelimiter": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "tokenSource が custom の場合の終了delimiter。Coreはcontrol文字を拒否しUTF-8で128 bytes以下に制限する"
                   },
                   "role": {
                     "type": "string",
@@ -1848,7 +1870,8 @@
                         "body",
                         "cookie",
                         "hidden",
-                        "bearer"
+                        "bearer",
+                        "custom"
                       ],
                       "description": "token の抽出元。token 値は返さない"
                     },
@@ -1859,6 +1882,14 @@
                     "tokenFieldName": {
                       "type": "string",
                       "description": "tokenSource が hidden の場合に使用した input field 名"
+                    },
+                    "tokenStartDelimiter": {
+                      "type": "string",
+                      "description": "tokenSource が custom の場合に使用した開始delimiter。token値は含めない"
+                    },
+                    "tokenEndDelimiter": {
+                      "type": "string",
+                      "description": "tokenSource が custom の場合に使用した終了delimiter。token値は含めない"
                     },
                     "verdict": {
                       "type": "string",

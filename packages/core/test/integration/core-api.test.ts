@@ -1378,6 +1378,26 @@ describe('Core API server (node:http)', () => {
     assert.equal(bearerResult.sampleCount, 30);
     assert.equal(JSON.stringify(bearerResult).includes('sample-'), false, 'bearer token 原文は応答に出ない');
 
+    const customRun = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30, tokenSource: 'custom', tokenStartDelimiter: 'token="', tokenEndDelimiter: '"' }),
+    });
+    assert.equal(customRun.status, 200);
+    const customResult = (await customRun.json()) as { tokenSource: string; tokenStartDelimiter?: string; tokenEndDelimiter?: string; sampleCount: number };
+    assert.equal(customResult.tokenSource, 'custom');
+    assert.equal(customResult.tokenStartDelimiter, 'token="');
+    assert.equal(customResult.tokenEndDelimiter, '"');
+    assert.equal(customResult.sampleCount, 30);
+    assert.equal(JSON.stringify(customResult).includes('sample-'), false, 'custom token 原文は応答に出ない');
+
+    const invalidCustom = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30, tokenSource: 'custom', tokenStartDelimiter: '', tokenEndDelimiter: '"' }),
+    });
+    assert.equal(invalidCustom.status, 400);
+
     const invalidCookieName = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1420,11 +1440,12 @@ describe('Core API server (node:http)', () => {
     });
     assert.equal(missingRole.status, 400, 'role field is forwarded and requires a completed login session');
 
-    const list = (await (await fetch(`${baseUrl}/api/tools/sequencer/runs`)).json()) as { sessions: readonly { sessionId: string; tokenSource: string; tokenCookieName?: string; tokenFieldName?: string }[] };
+    const list = (await (await fetch(`${baseUrl}/api/tools/sequencer/runs`)).json()) as { sessions: readonly { sessionId: string; tokenSource: string; tokenCookieName?: string; tokenFieldName?: string; tokenStartDelimiter?: string; tokenEndDelimiter?: string }[] };
     assert.ok(list.sessions.length >= 1);
     assert.ok(list.sessions.some((session) => session.tokenSource === 'cookie' && session.tokenCookieName === 'SEQ_TOKEN'));
     assert.ok(list.sessions.some((session) => session.tokenSource === 'hidden' && session.tokenFieldName === 'csrf_token'));
     assert.ok(list.sessions.some((session) => session.tokenSource === 'bearer'));
+    assert.ok(list.sessions.some((session) => session.tokenSource === 'custom' && session.tokenStartDelimiter === 'token="' && session.tokenEndDelimiter === '"'));
     const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
     assert.match(eventsText, /SequencerSessionCompleted/);
   });

@@ -41,12 +41,13 @@ token sample の収集、品質統計、可視化、再現可能な判定を提�
 | F07-UT-009 | `sample-plan.test.ts` | HTML hidden input | 指定field名のdecode済み値だけを抽出 |
 | F07-UT-010 | `sample-plan.test.ts` | 応答 Authorization | Bearer b64tokenだけを抽出 |
 | F07-UT-011 | `sample-plan.test.ts` | UTF-8 byte頻度 | 0x00–0xFFを固定16区間へ集約し、正しいbyte数でentropyを算出 |
+| F07-UT-012 | `sample-plan.test.ts` | custom delimiter | regexを実行せず、1 MiB走査・4 KiB token上限内で最初のdelimiter対から抽出 |
 
 ## 8. 非単体テスト
 
 既知分布 fixture による algorithm CT に加え、`NodeSequencerTransport` と所有 HTTP server
 を結合し、実 request の既定 2 RPS、30 sample 収集、本文・Set-Cookie・hidden input・Bearer token 抽出、通信 log、token
-原文の非保存、cancel後の追加送信防止、API client切断からのcancel伝播を常時 IT で確認する。固定16区間のbyte頻度はCore/API ITとA10 app testで確認する。任意 extractorは後続 test とする。
+原文の非保存、cancel後の追加送信防止、API client切断からのcancel伝播を常時 IT で確認する。固定16区間のbyte頻度とcustom delimiter抽出はCore/API ITとA10 app testで確認する。
 
 ## 9. 現行の認証session適用
 
@@ -54,9 +55,10 @@ token sample の収集、品質統計、可視化、再現可能な判定を提�
   適用可能なcookieを選び、`NodeSequencerTransport`へ渡す。未login roleは送信前に拒否する。
 - transportは各逐次GETへCookie headerを付けるが、値を応答・session台帳・監査・通信logへ返さない。
   結果と台帳には取得条件としてcookie名だけを残す。roleなしの非認証収集も維持する。
-- 現行extractorは本文 `token=...`、名前を明示した応答 `Set-Cookie`、HTMLの`hidden` input、応答 `Authorization` のBearer tokenを選択できる。cookie名はRFC token文字、
+- 現行extractorは本文 `token=...`、名前を明示した応答 `Set-Cookie`、HTMLの`hidden` input、応答 `Authorization` のBearer token、または本文のcustom delimiter対を選択できる。cookie名はRFC token文字、
   field名は安全な文字と各128文字以下に限定する。hidden inputは最大1,024個・1 tag 8 KiBの属性走査とし、属性順・引用符・HTML entityを扱う。Bearerはschemeを大小文字非依存で照合し、RFC 6750のb64token構文に一致する単一値だけを抽出する。
-- token値は収集中だけ扱って結果・session台帳・監査・通信logへ残さない。結果には抽出元とcookie名またはfield名だけを残す。
+- custom delimiterは開始・終了を各UTF-8 128 bytes以下、control文字なしに制限し、本文1 MiB・抽出token 4 KiBを上限とする。ReDoSを持ち込む任意regexは受け付けず、超過時は部分統計を成功扱いしない。
+- token値は収集中だけ扱って結果・session台帳・監査・通信logへ残さない。結果には抽出元と、該当するcookie名・field名・delimiter対だけを残す。
 - A10の停止操作は実行中のfetchをabortする。API serverはclient切断をCore・transportの`AbortSignal`へ伝播し、進行中のHTTP要求を破棄して次のrequestを送らない。中断した採取は結果・完了session・完了監査eventを作らない。
 - 解析済み結果は0x00–0xFFを上位nibbleごとの固定16区間へ集約し、A10で相対頻度barとして表示する。bucket件数だけを返し、token原文や個々のbyte列は返さない。
-- 任意規則を含む完全な採取専用再送計画とは区別する。
+- custom delimiterは本文抽出規則だけを差し替える。method/header/bodyを任意化する完全な採取専用再送計画とは区別する。

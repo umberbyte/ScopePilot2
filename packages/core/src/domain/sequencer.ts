@@ -25,22 +25,35 @@ export type SequencerExtractor =
   | { readonly source: 'body' }
   | { readonly source: 'cookie'; readonly cookieName: string }
   | { readonly source: 'hidden'; readonly fieldName: string }
-  | { readonly source: 'bearer' };
+  | { readonly source: 'bearer' }
+  | { readonly source: 'custom'; readonly startDelimiter: string; readonly endDelimiter: string };
 
 const COOKIE_NAME_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const HIDDEN_FIELD_NAME = /^[0-9A-Za-z_.:[\]-]+$/;
 const MAX_HIDDEN_INPUTS = 1024;
 const MAX_INPUT_TAG_LENGTH = 8192;
+const MAX_CUSTOM_DELIMITER_BYTES = 128;
+const MAX_CUSTOM_SCAN_BYTES = 1024 * 1024;
+const MAX_CUSTOM_TOKEN_BYTES = 4096;
+
+function validateCustomDelimiter(value: string | undefined, field: 'tokenStartDelimiter' | 'tokenEndDelimiter'): string {
+  if (value === undefined || value.length === 0 || Buffer.byteLength(value, 'utf8') > MAX_CUSTOM_DELIMITER_BYTES || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw domainError('ValidationFailed', `${field} must be 1..${MAX_CUSTOM_DELIMITER_BYTES} UTF-8 bytes without control characters`);
+  }
+  return value;
+}
 
 /** 抽出条件をboundedに固定し、未使用fieldを暗黙に無視しない。 */
 export function createSequencerExtractor(
-  source: 'body' | 'cookie' | 'hidden' | 'bearer',
+  source: 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom',
   cookieName?: string,
   fieldName?: string,
+  startDelimiter?: string,
+  endDelimiter?: string,
 ): SequencerExtractor {
   if (source === 'body' || source === 'bearer') {
-    if (cookieName !== undefined || fieldName !== undefined) {
-      throw domainError('ValidationFailed', `tokenCookieName and tokenFieldName are not supported when tokenSource is ${source}`);
+    if (cookieName !== undefined || fieldName !== undefined || startDelimiter !== undefined || endDelimiter !== undefined) {
+      throw domainError('ValidationFailed', `extractor configuration fields are not supported when tokenSource is ${source}`);
     }
     return { source };
   }
@@ -48,18 +61,34 @@ export function createSequencerExtractor(
     if (fieldName !== undefined) {
       throw domainError('ValidationFailed', 'tokenFieldName is only supported when tokenSource is hidden');
     }
+    if (startDelimiter !== undefined || endDelimiter !== undefined) {
+      throw domainError('ValidationFailed', 'token delimiters are only supported when tokenSource is custom');
+    }
     if (cookieName === undefined || cookieName.length === 0 || cookieName.length > 128 || !COOKIE_NAME_TOKEN.test(cookieName)) {
       throw domainError('ValidationFailed', 'tokenCookieName must be a valid cookie name of at most 128 characters');
     }
     return { source, cookieName };
   }
-  if (cookieName !== undefined) {
-    throw domainError('ValidationFailed', 'tokenCookieName is only supported when tokenSource is cookie');
+  if (source === 'hidden') {
+    if (cookieName !== undefined) {
+      throw domainError('ValidationFailed', 'tokenCookieName is only supported when tokenSource is cookie');
+    }
+    if (startDelimiter !== undefined || endDelimiter !== undefined) {
+      throw domainError('ValidationFailed', 'token delimiters are only supported when tokenSource is custom');
+    }
+    if (fieldName === undefined || fieldName.length === 0 || fieldName.length > 128 || !HIDDEN_FIELD_NAME.test(fieldName)) {
+      throw domainError('ValidationFailed', 'tokenFieldName must be a valid form field name of at most 128 characters');
+    }
+    return { source, fieldName };
   }
-  if (fieldName === undefined || fieldName.length === 0 || fieldName.length > 128 || !HIDDEN_FIELD_NAME.test(fieldName)) {
-    throw domainError('ValidationFailed', 'tokenFieldName must be a valid form field name of at most 128 characters');
+  if (cookieName !== undefined || fieldName !== undefined) {
+    throw domainError('ValidationFailed', 'tokenCookieName and tokenFieldName are not supported when tokenSource is custom');
   }
-  return { source, fieldName };
+  return {
+    source,
+    startDelimiter: validateCustomDelimiter(startDelimiter, 'tokenStartDelimiter'),
+    endDelimiter: validateCustomDelimiter(endDelimiter, 'tokenEndDelimiter'),
+  };
 }
 
 /** token 欠落は missing outcome として数える (F07-UT-002)。 */
@@ -171,6 +200,34 @@ export function extractBearerToken(response: { readonly authorizationHeader?: st
   return { kind: 'collected', token: match[1] };
 }
 
+/** 正規表現を実行せず、上限付き本文から最初のdelimiter対に挟まれたtokenだけを抽出する。 */
+export function extractDelimitedToken(
+  response: { readonly body: string },
+  startDelimiter: string,
+  endDelimiter: string,
+): SampleOutcome {
+  const boundedStartDelimiter = validateCustomDelimiter(startDelimiter, 'tokenStartDelimiter');
+  const boundedEndDelimiter = validateCustomDelimiter(endDelimiter, 'tokenEndDelimiter');
+  const scanBytes = Buffer.byteLength(response.body, 'utf8');
+  if (scanBytes > MAX_CUSTOM_SCAN_BYTES) {
+    throw domainError('ValidationFailed', `custom extractor scan exceeds ${MAX_CUSTOM_SCAN_BYTES} bytes`);
+  }
+  const tokenStart = response.body.indexOf(boundedStartDelimiter);
+  if (tokenStart === -1) {
+    return { kind: 'missing', reason: 'custom start delimiter not found in response body' };
+  }
+  const valueStart = tokenStart + boundedStartDelimiter.length;
+  const tokenEnd = response.body.indexOf(boundedEndDelimiter, valueStart);
+  if (tokenEnd === -1 || tokenEnd === valueStart) {
+    return { kind: 'missing', reason: 'custom end delimiter or non-empty token not found in response body' };
+  }
+  const token = response.body.slice(valueStart, tokenEnd);
+  if (Buffer.byteLength(token, 'utf8') > MAX_CUSTOM_TOKEN_BYTES) {
+    throw domainError('ValidationFailed', `custom extractor token exceeds ${MAX_CUSTOM_TOKEN_BYTES} bytes`);
+  }
+  return { kind: 'collected', token };
+}
+
 export function extractSequencerToken(
   response: { readonly body: string; readonly setCookieHeaders?: readonly string[]; readonly authorizationHeader?: string },
   extractor: SequencerExtractor,
@@ -185,6 +242,8 @@ export function extractSequencerToken(
       return extractHiddenInputToken(response, extractor.fieldName);
     case 'bearer':
       return extractBearerToken(response);
+    case 'custom':
+      return extractDelimitedToken(response, extractor.startDelimiter, extractor.endDelimiter);
   }
 }
 

@@ -269,8 +269,8 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       response.once('close', cancelOnDisconnect);
       try {
         const tokenSource = body.tokenSource ?? 'body';
-        if (tokenSource !== 'body' && tokenSource !== 'cookie' && tokenSource !== 'hidden' && tokenSource !== 'bearer') {
-          throw new DomainError('ValidationFailed', 'tokenSource must be body, cookie, hidden, or bearer');
+        if (tokenSource !== 'body' && tokenSource !== 'cookie' && tokenSource !== 'hidden' && tokenSource !== 'bearer' && tokenSource !== 'custom') {
+          throw new DomainError('ValidationFailed', 'tokenSource must be body, cookie, hidden, bearer, or custom');
         }
         const result = await service.runSequencerSession(operator, {
           targetUrl: stringField(body, 'targetUrl'),
@@ -279,6 +279,8 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           tokenSource,
           ...(body.tokenCookieName === undefined ? {} : { tokenCookieName: stringField(body, 'tokenCookieName') }),
           ...(body.tokenFieldName === undefined ? {} : { tokenFieldName: stringField(body, 'tokenFieldName') }),
+          ...(body.tokenStartDelimiter === undefined ? {} : { tokenStartDelimiter: stringField(body, 'tokenStartDelimiter') }),
+          ...(body.tokenEndDelimiter === undefined ? {} : { tokenEndDelimiter: stringField(body, 'tokenEndDelimiter') }),
           signal: cancellation.signal,
         });
         return respondJson(response, 200, result);

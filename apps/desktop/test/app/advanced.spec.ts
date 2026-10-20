@@ -390,6 +390,15 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await expect(page.getByText('抽出元: 応答 HTML の hidden input (csrf_token)')).toBeVisible();
   await expect(page.getByText(/sample-[a-z0-9-]+/)).toHaveCount(0);
 
+  // 任意本文形式はregexを実行せず、開始・終了delimiterの間だけを上限付きで抽出する。
+  await page.getByLabel('token 抽出元').selectOption('custom');
+  await page.getByLabel('token 開始 delimiter (UTF-8で128 bytes以下)').fill('token="');
+  await page.getByLabel('token 終了 delimiter (UTF-8で128 bytes以下)').fill('"');
+  await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
+  await expect(page.getByText(/結果: assessed \(sample 40・重複 39・欠落 0\)/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('抽出元: 応答本文のcustom delimiter (token=" … ")')).toBeVisible();
+  await expect(page.getByText(/fixed-token-value/)).toHaveCount(0);
+
   // 応答AuthorizationのBearer tokenも抽出でき、値そのものは表示しない。
   await page.getByLabel('token 抽出元').selectOption('bearer');
   await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
