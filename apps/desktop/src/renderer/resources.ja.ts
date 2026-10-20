@@ -157,6 +157,7 @@ export const jaStrings = {
   'a10.sequencerExtractorUsed': '抽出元: {source}',
   'a10.sequencerSessionApplied': 'session cookie 適用: {cookies}',
   'a10.sequencerEntropy': 'entropy {entropy} bits/byte・出現 byte 種 {distinct}',
+  'a10.sequencerTokenEntropy': '観測token分布のentropy {entropy} bits/token（sample内の経験値）',
   'a10.sequencerByteChart': 'byte 出現頻度 (16区間・最大値に対する相対表示)',
   'a10.sequencerByteBucket': 'byte {range}: {count} / 全 {total}',
   'a10.sequencerByteLengthChart': 'token のUTF-8 byte長分布 (16区間)',

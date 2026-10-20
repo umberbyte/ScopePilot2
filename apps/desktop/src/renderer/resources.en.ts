@@ -273,6 +273,7 @@ export const enStrings: Readonly<Record<StringKey, string>> = {
   'a10.sequencerExtractorUsed': 'Source: {source}',
   'a10.sequencerSessionApplied': 'session cookies applied: {cookies}',
   'a10.sequencerEntropy': 'entropy {entropy} bits/byte・distinct byte values {distinct}',
+  'a10.sequencerTokenEntropy': 'observed token-distribution entropy {entropy} bits/token (empirical sample estimate)',
   'a10.sequencerByteChart': 'Byte frequency (16 ranges, relative to the largest count)',
   'a10.sequencerByteBucket': 'Bytes {range}: {count} of {total}',
   'a10.sequencerByteLengthChart': 'Token UTF-8 byte length distribution (16 ranges)',

@@ -16,6 +16,7 @@ describe('sequencer session (service)', () => {
     assert.equal(result.duplicates, 0);
     assert.equal(result.missing, 0);
     assert.ok((result.shannonEntropyBitsPerByte ?? 0) > 3, '変化する token は高い entropy');
+    assert.ok((result.shannonEntropyBitsPerToken ?? 0) > 0, '観測token値の分布も変化する');
     assert.ok((result.distinctByteValues ?? 0) > 10);
     assert.equal(result.byteFrequencyBuckets?.length, 16);
     assert.ok((result.byteFrequencyBuckets?.reduce((sum, count) => sum + count, 0) ?? 0) > 0);
@@ -34,6 +35,7 @@ describe('sequencer session (service)', () => {
     assert.deepEqual(service.listSequencerSessions()[0]?.tokenByteLengthBuckets, result.tokenByteLengthBuckets);
     assert.deepEqual(service.listSequencerSessions()[0]?.alphabetClassCounts, result.alphabetClassCounts);
     assert.deepEqual(service.listSequencerSessions()[0]?.positionAlphabetClassCounts, result.positionAlphabetClassCounts);
+    assert.equal(service.listSequencerSessions()[0]?.shannonEntropyBitsPerToken, result.shannonEntropyBitsPerToken);
 
     const hidden = await service.runSequencerSession(operator, {
       targetUrl: 'http://fixture.target.test/session-token',
@@ -71,12 +73,13 @@ describe('sequencer session (service)', () => {
     assert.equal(custom.tokenEndDelimiter, '"');
     assert.equal(JSON.stringify(custom).includes('sample-'), false);
 
-    // URL に fixed を含む対象は毎回同一 token — 重複が増える (entropy は byte 分布の
-    // 統計のため繰り返しでは下がらない。低 entropy 自体は F07-UT-004 の domain UT で担保)。
+    // URL に fixed を含む対象は毎回同一 token — 重複が増え、token当たりentropyは0になる。
+    // byte当たりentropyは文字構成の統計なので、繰り返しだけでは下がらない。
     const fixed = await service.runSequencerSession(operator, { targetUrl: 'http://fixture.target.test/fixed-token', samples: 40 });
     assert.equal(fixed.verdict, 'assessed');
     assert.equal(fixed.sampleCount, 40);
     assert.equal(fixed.duplicates, 39, '2 件目以降はすべて重複');
+    assert.equal(fixed.shannonEntropyBitsPerToken, 0);
 
     // URL に no-token を含む対象は欠落が混入する (F07-UT-002 の service 経路)。
     const withMissing = await service.runSequencerSession(operator, { targetUrl: 'http://fixture.target.test/no-token-page', samples: 40 });
@@ -105,6 +108,7 @@ describe('sequencer session (service)', () => {
     assert.equal(insufficient.verdict, 'insufficient');
     assert.equal(insufficient.minimum, 30);
     assert.equal(insufficient.shannonEntropyBitsPerByte, undefined);
+    assert.equal(insufficient.shannonEntropyBitsPerToken, undefined);
 
     await assert.rejects(
       service.runSequencerSession(operator, { targetUrl: 'http://elsewhere.example/x', samples: 40 }),

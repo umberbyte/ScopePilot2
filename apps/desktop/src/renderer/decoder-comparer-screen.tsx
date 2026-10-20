@@ -63,6 +63,7 @@ interface SequencerResult {
   readonly duplicates: number;
   readonly missing: number;
   readonly shannonEntropyBitsPerByte?: number;
+  readonly shannonEntropyBitsPerToken?: number;
   readonly distinctByteValues?: number;
   readonly byteFrequencyBuckets?: readonly number[];
   readonly tokenLengthBucketMinimums?: readonly number[];
@@ -528,6 +529,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
           )}
           {sequencerResult.shannonEntropyBitsPerByte !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerEntropy', { entropy: sequencerResult.shannonEntropyBitsPerByte, distinct: sequencerResult.distinctByteValues })}</Text>
+          )}
+          {sequencerResult.shannonEntropyBitsPerToken !== undefined && (
+            <Text className={styles.muted}>{t('a10.sequencerTokenEntropy', { entropy: sequencerResult.shannonEntropyBitsPerToken })}</Text>
           )}
           {sequencerResult.byteFrequencyBuckets !== undefined && (() => {
             const maximum = Math.max(1, ...sequencerResult.byteFrequencyBuckets);

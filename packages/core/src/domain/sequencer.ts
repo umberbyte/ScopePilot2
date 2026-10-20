@@ -281,6 +281,8 @@ export class SampleCollector {
 
 export interface EntropyResult {
   readonly shannonEntropyBitsPerByte: number;
+  /** 観測 token 値の経験分布から求めた Shannon entropy。sample 数を超える推定はしない。 */
+  readonly shannonEntropyBitsPerToken: number;
   readonly distinctByteValues: number;
   /** 0x00..0xff を上位 nibble ごとの 16 区間にまとめた出現数。token 原文は含まない。 */
   readonly byteFrequencyBuckets: readonly number[];
@@ -353,6 +355,7 @@ function tokenLengthBucketIndex(length: number): number {
 export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
   const bytes = Buffer.from(tokens.join(''), 'utf8');
   const counts = new Map<number, number>();
+  const tokenCounts = new Map<string, number>();
   const byteFrequencyBuckets = Array.from({ length: 16 }, () => 0);
   const tokenByteLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
   const tokenCharacterLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
@@ -361,6 +364,7 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
   const positionAlphabetClassCounts: Record<AlphabetClass, number>[] = [];
   let positionOverflowSamples = 0;
   for (const token of tokens) {
+    tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
     const symbols = Array.from(token);
     const byteBucket = tokenLengthBucketIndex(Buffer.byteLength(token, 'utf8'));
     const characterBucket = tokenLengthBucketIndex(symbols.length);
@@ -390,8 +394,14 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
     const p = count / bytes.length;
     entropy -= p * Math.log2(p);
   }
+  let tokenEntropy = 0;
+  for (const count of tokenCounts.values()) {
+    const p = count / tokens.length;
+    tokenEntropy -= p * Math.log2(p);
+  }
   return {
     shannonEntropyBitsPerByte: Number(entropy.toFixed(4)),
+    shannonEntropyBitsPerToken: Number(tokenEntropy.toFixed(4)),
     distinctByteValues: counts.size,
     byteFrequencyBuckets: Object.freeze(byteFrequencyBuckets),
     tokenLengthBucketMinimums: TOKEN_LENGTH_BUCKET_MINIMUMS,

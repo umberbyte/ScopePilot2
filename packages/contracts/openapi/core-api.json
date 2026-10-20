@@ -1738,6 +1738,11 @@
                             "type": "number",
                             "description": "assessed 時のみ。暗号学的安全性は断定しない"
                           },
+                          "shannonEntropyBitsPerToken": {
+                            "type": "number",
+                            "minimum": 0,
+                            "description": "assessed 時のみ。観測token値の経験分布から求めたbits/token。sample数に制約された補助統計で、暗号学的安全性は断定しない"
+                          },
                           "distinctByteValues": {
                             "type": "integer",
                             "minimum": 0,
@@ -1970,6 +1975,11 @@
                     "shannonEntropyBitsPerByte": {
                       "type": "number",
                       "description": "assessed 時のみ。暗号学的安全性は断定しない"
+                    },
+                    "shannonEntropyBitsPerToken": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "assessed 時のみ。観測token値の経験分布から求めたbits/token。sample数に制約された補助統計で、暗号学的安全性は断定しない"
                     },
                     "distinctByteValues": {
                       "type": "integer",

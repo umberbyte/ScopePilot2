@@ -334,6 +334,7 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
   await expect(page.getByText(/結果: assessed \(sample 40・重複 0・欠落 0\)/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/entropy [\d.]+ bits\/byte・出現 byte 種 \d+/)).toBeVisible();
+  await expect(page.getByText(/観測token分布のentropy [\d.]+ bits\/token/)).toBeVisible();
   const byteChart = page.getByRole('group', { name: 'byte 出現頻度 (16区間・最大値に対する相対表示)' });
   await expect(byteChart).toBeVisible();
   await expect(byteChart.getByRole('progressbar')).toHaveCount(16);

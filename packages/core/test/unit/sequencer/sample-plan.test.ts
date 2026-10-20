@@ -189,6 +189,20 @@ describe('Sequencer', () => {
     assert.equal(serialized.includes('Z'), false);
   });
 
+  test('[F07-UT-016] token当たりentropyは観測token値の経験分布から算出する', () => {
+    const fixed = analyzeEntropy(['same', 'same', 'same', 'same']);
+    assert.equal(fixed.shannonEntropyBitsPerToken, 0);
+
+    const balanced = analyzeEntropy([
+      'secret-value-one', 'secret-value-one',
+      'secret-value-two', 'secret-value-two',
+      'secret-value-three', 'secret-value-three',
+      'secret-value-four', 'secret-value-four',
+    ]);
+    assert.equal(balanced.shannonEntropyBitsPerToken, 2);
+    assert.equal(JSON.stringify(balanced).includes('secret-value'), false, 'token 原文は統計へ残さない');
+  });
+
   test('[F07-UT-005] sample 不足は断定せず insufficient を返す', () => {
     const result = assess(Array.from({ length: 29 }, (_, i) => `t${i}`));
     assert.deepEqual(result, { verdict: 'insufficient', collected: 29, minimum: 30 });
