@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import type { LoginExecutorPort, LoginSessionCookie, SequencerTransportPort } from '@scopepilot2/core';
 import { bootstrapFlow } from '../support/test-flow.ts';
 
 /**
@@ -60,6 +61,68 @@ describe('sequencer session (service)', () => {
         assert.equal((error as { code?: string }).code, 'OutOfScope');
         return true;
       },
+    );
+  });
+
+  test('role 指定は対象URLに適用可能なcookieだけを実transportへ渡し、値を保存しない', async () => {
+    const transportCalls: Parameters<SequencerTransportPort['collect']>[0][] = [];
+    const sequencerTransport: SequencerTransportPort = {
+      async collect(input) {
+        transportCalls.push(input);
+        for (let index = 0; index < input.samples; index += 1) {
+          input.onResponse({
+            requestUrl: input.targetUrl,
+            status: 200,
+            contentType: 'text/plain',
+            body: `token=role-sample-${index.toString(36)}`,
+          });
+        }
+      },
+    };
+    const cookies: readonly LoginSessionCookie[] = [
+      { name: 'SEQ_SESSION', value: 'sequencer-secret', domain: 'fixture.target.test', path: '/tokens' },
+      { name: 'OTHER_PATH', value: 'other-path-secret', domain: 'fixture.target.test', path: '/admin' },
+      { name: 'OTHER_ORIGIN', value: 'other-origin-secret', domain: 'elsewhere.example', path: '/' },
+    ];
+    const loginExecutor: LoginExecutorPort = {
+      engineVersion: 'fake-login-sequencer-1',
+      async execute() {
+        return { authenticated: true, finalUrl: 'http://fixture.target.test/tokens', cookies };
+      },
+    };
+    const { service, operator } = await bootstrapFlow({ loginExecutor, sequencerTransport });
+    service.registerLoginFlow(operator, {
+      role: 'analyst',
+      flowVersion: 'sequencer-flow-1',
+      steps: [
+        { kind: 'navigate', target: 'http://fixture.target.test/login' },
+        { kind: 'assert', target: 'Authenticated' },
+      ],
+    });
+    await service.runLogin(operator, {
+      role: 'analyst',
+      baseUrl: 'http://fixture.target.test',
+      secretValues: {},
+      expectedUrlPrefix: 'http://fixture.target.test/tokens',
+    });
+
+    const result = await service.runSequencerSession(operator, {
+      targetUrl: 'http://fixture.target.test/tokens/sample',
+      samples: 30,
+      role: 'analyst',
+    });
+    assert.deepEqual(transportCalls[0]?.sessionCookies, [
+      { name: 'SEQ_SESSION', value: 'sequencer-secret', domain: 'fixture.target.test', path: '/tokens' },
+    ]);
+    assert.deepEqual(result.sessionCookieNames, ['SEQ_SESSION']);
+    assert.deepEqual(service.listSequencerSessions().at(-1)?.sessionCookieNames, ['SEQ_SESSION']);
+    assert.equal(JSON.stringify(result).includes('sequencer-secret'), false);
+    assert.equal(JSON.stringify(service.listSequencerSessions()).includes('sequencer-secret'), false);
+    assert.equal(JSON.stringify(service.events()).includes('sequencer-secret'), false);
+
+    await assert.rejects(
+      service.runSequencerSession(operator, { targetUrl: 'http://fixture.target.test/tokens', samples: 30, role: 'missing' }),
+      /no session for role/,
     );
   });
 });

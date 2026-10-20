@@ -1,6 +1,7 @@
 /**
  * Sequencer の実 HTTP sample collector (design/f07)。GET を逐次送信し、各応答を
  * callback へ渡した直後に破棄する。token 原文を adapter や台帳へ保持しない。
+ * sessionCookies は Core が対象URLへ適用可能と判定済みのものだけを受け取る。
  */
 import * as http from 'node:http';
 import * as https from 'node:https';
@@ -41,13 +42,19 @@ export class NodeSequencerTransport implements SequencerTransportPort {
           setTimeout(resolve, waitMs);
         });
       }
-      input.onResponse(await this.requestOnce(target));
+      input.onResponse(await this.requestOnce(target, input.sessionCookies));
     }
   }
 
-  private async requestOnce(target: URL): Promise<SequencerTransportResponse> {
+  private async requestOnce(
+    target: URL,
+    sessionCookies: Parameters<SequencerTransportPort['collect']>[0]['sessionCookies'],
+  ): Promise<SequencerTransportResponse> {
     const requestUrl = target.toString();
     const client = target.protocol === 'https:' ? https : http;
+    const cookieHeader = sessionCookies === undefined || sessionCookies.length === 0
+      ? undefined
+      : sessionCookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
     return await new Promise<SequencerTransportResponse>((resolve, reject) => {
       const request = client.request(
         {
@@ -55,7 +62,7 @@ export class NodeSequencerTransport implements SequencerTransportPort {
           port: target.port === '' ? undefined : Number(target.port),
           method: 'GET',
           path: `${target.pathname}${target.search}`,
-          headers: { Host: target.host },
+          headers: { Host: target.host, ...(cookieHeader === undefined ? {} : { Cookie: cookieHeader }) },
           setHost: false,
         },
         (response) => {

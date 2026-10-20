@@ -263,6 +263,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         const result = await service.runSequencerSession(operator, {
           targetUrl: stringField(body, 'targetUrl'),
           samples: numberField(body, 'samples'),
+          ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
         });
         return respondJson(response, 200, result);
       } catch (cause) {

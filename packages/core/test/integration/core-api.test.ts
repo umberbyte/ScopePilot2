@@ -1328,6 +1328,13 @@ describe('Core API server (node:http)', () => {
     });
     assert.equal(boundary.status, 400);
 
+    const missingRole = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30, role: 'missing-sequencer-role' }),
+    });
+    assert.equal(missingRole.status, 400, 'role field is forwarded and requires a completed login session');
+
     const list = (await (await fetch(`${baseUrl}/api/tools/sequencer/runs`)).json()) as { sessions: readonly { sessionId: string }[] };
     assert.ok(list.sessions.length >= 1);
     const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();

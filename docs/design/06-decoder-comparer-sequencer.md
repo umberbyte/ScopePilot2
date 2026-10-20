@@ -32,8 +32,10 @@ SequencerService（新規・A3）:
 
 2026-10-20 時点の実収集経路は、許可済み `targetUrl` への逐次 GET と本文中の
 `token=...` 抽出に限定する。`NodeSequencerTransport` が既定 2 RPS、応答 1 MiB 上限、
-redirect 非追従で収集し、応答本文は抽出 callback の間だけ保持する。Cookie/hidden/bearer、
-role session、任意 extractor を含む完全な採取専用再送計画は後続とし、現行経路と区別する。
+redirect 非追従で収集し、応答本文は抽出 callback の間だけ保持する。任意の認証roleを指定すると、
+事前のlogin成功sessionから対象URLのdomain/pathへ適用可能なcookieだけを各収集requestへ付ける。
+cookie値はtransport外へ出さず、結果・台帳には適用名だけを残す。応答Cookie/hidden/bearerからの抽出、
+任意extractorを含む完全な採取専用再送計画は後続とし、現行経路と区別する。
 
 ## 4. データモデル
 

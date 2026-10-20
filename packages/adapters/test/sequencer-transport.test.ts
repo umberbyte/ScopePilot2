@@ -52,8 +52,10 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
   test('実応答から token 統計を作り、原文を保存せず通信 log と 2 RPS を維持する', { timeout: 30_000 }, async () => {
     let sequence = 0;
     const receivedAt: number[] = [];
-    const server = createServer((_request, response) => {
+    const receivedCookies: (string | undefined)[] = [];
+    const server = createServer((request, response) => {
       receivedAt.push(Date.now());
+      receivedCookies.push(request.headers.cookie);
       sequence += 1;
       response.writeHead(200, { 'Content-Type': 'text/plain' });
       response.end(`token=secret-token-${sequence.toString(36)}`);
@@ -62,9 +64,15 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
     try {
       const rateResponses: string[] = [];
       const normalRate = new NodeSequencerTransport({ timeoutMs: 5_000 });
-      await normalRate.collect({ targetUrl: `${base}/token`, samples: 2, onResponse: (response) => rateResponses.push(response.body) });
+      await normalRate.collect({
+        targetUrl: `${base}/token`,
+        samples: 2,
+        sessionCookies: [{ name: 'SEQ_SESSION', value: 'transport-secret', domain: '127.0.0.1', path: '/' }],
+        onResponse: (response) => rateResponses.push(response.body),
+      });
       assert.equal(rateResponses.length, 2);
       assert.ok((receivedAt[1] ?? 0) - (receivedAt[0] ?? 0) >= 400, '既定 2 RPS の間隔を守る');
+      assert.deepEqual(receivedCookies.slice(0, 2), ['SEQ_SESSION=transport-secret', 'SEQ_SESSION=transport-secret']);
 
       // service 結合は高速 test rate で最小30 sampleを収集する。製品配線は既定2 RPS。
       const service = serviceWith(new NodeSequencerTransport({ timeoutMs: 5_000, requestsPerSecond: 1000 }));

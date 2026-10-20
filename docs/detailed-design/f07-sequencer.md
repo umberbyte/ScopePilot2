@@ -43,3 +43,12 @@ token sample の収集、品質統計、可視化、再現可能な判定を提�
 既知分布 fixture による algorithm CT に加え、`NodeSequencerTransport` と所有 HTTP server
 を結合し、実 request の既定 2 RPS、30 sample 収集、本文 token 抽出、通信 log、token
 原文の非保存を常時 IT で確認する。stop/cancel と任意 extractor、chart 表示は後続 test とする。
+
+## 9. 現行の認証session適用
+
+- API/UIの任意 `role` は `runLogin` 成功済みsessionだけを参照する。Coreが対象URLのdomain/pathに
+  適用可能なcookieを選び、`NodeSequencerTransport`へ渡す。未login roleは送信前に拒否する。
+- transportは各逐次GETへCookie headerを付けるが、値を応答・session台帳・監査・通信logへ返さない。
+  結果と台帳には取得条件としてcookie名だけを残す。roleなしの非認証収集も維持する。
+- 現行extractorは引き続き本文 `token=...` だけである。response Cookie、hidden field、bearer、任意規則、
+  stop/cancel、chart表示を含む完全な採取専用再送計画とは区別する。

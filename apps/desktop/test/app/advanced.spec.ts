@@ -340,6 +340,37 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
   await expect(page.getByText(/結果: assessed \(sample 40・重複 39・欠落 0\)/)).toBeVisible({ timeout: 30_000 });
 
+  // login済みroleを指定すると対象URLに適用可能なcookieで収集する。
+  await page.evaluate(async () => {
+    const base = (window as { scopepilotDesktop?: { apiBase: string } }).scopepilotDesktop?.apiBase ?? '';
+    const post = async (path: string, body: unknown): Promise<void> => {
+      const response = await fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!response.ok) {
+        throw new Error(`${path}: HTTP ${response.status}`);
+      }
+    };
+    await post('/api/sessions/flows', {
+      role: 'sequencer-admin',
+      flowVersion: 'f1',
+      steps: [
+        { kind: 'navigate', target: 'http://fixture.target.test/login.php' },
+        { kind: 'fill', target: '#username', secretReference: 'vault://admin-user' },
+        { kind: 'fill', target: '#password', secretReference: 'vault://admin-pass' },
+        { kind: 'click', target: 'input[type=submit]' },
+        { kind: 'assert', target: 'Fixture Target Home' },
+      ],
+    });
+    await post('/api/sessions/login', {
+      role: 'sequencer-admin',
+      baseUrl: 'http://fixture.target.test',
+      expectedUrlPrefix: 'http://fixture.target.test/',
+      secretValues: { 'vault://admin-user': 'fixture-user', 'vault://admin-pass': 'fixture-pass' },
+    });
+  });
+  await page.getByLabel('収集 session の role (任意・A09 で login 済み。空なら非認証)').fill('sequencer-admin');
+  await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
+  await expect(page.getByText('session cookie 適用: PHPSESSID')).toBeVisible({ timeout: 30_000 });
+
   // OAST: token を発行し、callback を記録すると相関として数えられる (design/f13)。
   await page.getByRole('button', { name: 'OAST token を発行する' }).click();
   const tokenText = page.getByText(/token: oast-[0-9a-f]+/);
@@ -521,15 +552,21 @@ test('A09: login flow を登録し session refresh と cookie jar 割当を行�
   // cookie jar を割り当て、session を refresh すると revision が進む。
   await page.getByRole('button', { name: 'cookie jar を割り当てる' }).click();
   await expect(page.getByText(/admin に cookie jar を割り当てました/)).toBeVisible({ timeout: 30_000 });
-  await page.getByRole('button', { name: 'refresh' }).click();
+  const adminSessionRow = page.getByRole('row').filter({
+    has: page.getByRole('cell', { name: 'admin', exact: true }),
+  });
+  await adminSessionRow.getByRole('button', { name: 'refresh' }).click();
   await expect(page.getByText(/session を更新しました \(revision 1\)/)).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole('cell', { name: 'PHPSESSID' })).toBeVisible();
+  await expect(adminSessionRow.getByRole('cell', { name: 'PHPSESSID' })).toBeVisible();
 
   // guest flow も登録して両 role の session を揃える。
   await page.getByLabel('role').first().fill('guest');
   await page.getByRole('button', { name: 'flow を登録する' }).click();
   await expect(page.getByText(/guest の flow を登録しました/)).toBeVisible({ timeout: 30_000 });
-  await page.getByRole('button', { name: 'refresh' }).last().click();
+  const guestSessionRow = page.getByRole('row').filter({
+    has: page.getByRole('cell', { name: 'guest', exact: true }),
+  });
+  await guestSessionRow.getByRole('button', { name: 'refresh' }).click();
   await expect(page.getByText(/guest の session を更新しました/)).toBeVisible({ timeout: 30_000 });
 
   // CrossRoleTest を許可する認可に付替え、業務ロジック検証 (role 差分) を実行する。

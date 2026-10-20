@@ -256,7 +256,7 @@ export class BaselineFlowService {
   private readonly apiSpecImports: readonly { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[] = [];
 
   /** Sequencer session の台帳 (design/f07)。token 原文は保存しない (統計のみ)。 */
-  private readonly sequencerSessions: readonly { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; executedAt: string }[] = [];
+  private readonly sequencerSessions: readonly { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] = [];
 
   /** Repeater の draft 台帳 (design/f04)。tab 上限は domain (20)。 */
   private readonly repeaterDrafts = new DraftRegistry();
@@ -887,14 +887,22 @@ export class BaselineFlowService {
    */
   async runSequencerSession(
     operator: OperatorProfile,
-    input: { readonly targetUrl: string; readonly samples: number },
-  ): Promise<{ sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number }> {
+    input: { readonly targetUrl: string; readonly samples: number; readonly role?: string },
+  ): Promise<{ sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
     const decision = ScopePolicy.decide(caseRecord.scope, canonical);
     if (!decision.allowed) {
       throw domainError('OutOfScope', `sequencer target is out of scope: ${decision.reason}`);
+    }
+    let appliedCookies: readonly LoginSessionCookie[] | undefined;
+    if (input.role !== undefined) {
+      const session = this.roleSessionCookies.get(input.role);
+      if (session === undefined) {
+        throw domainError('ValidationFailed', `no session for role '${input.role}'; run login first`);
+      }
+      appliedCookies = applicableSessionCookies([...session.cookies], canonical);
     }
     const plan = createSamplePlan(input.samples);
     const collector = new SampleCollector();
@@ -915,6 +923,14 @@ export class BaselineFlowService {
       await this.deps.sequencerTransport.collect({
         targetUrl: canonical,
         samples: plan.target,
+        ...(appliedCookies === undefined ? {} : {
+          sessionCookies: appliedCookies.map((cookie) => ({
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+          })),
+        }),
         onResponse: (response) => {
           collector.record(extractToken({ body: response.body }, pattern));
           this.recordObservedExchange(
@@ -936,6 +952,7 @@ export class BaselineFlowService {
       verdict,
       ...projection,
       ...(verdict === 'assessed' ? { shannonEntropyBitsPerByte: assessment.entropy.shannonEntropyBitsPerByte, distinctByteValues: assessment.entropy.distinctByteValues } : { minimum: assessment.minimum }),
+      ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
       executedAt: this.deps.clock.now().toISOString(),
     };
     (this.sequencerSessions as typeof record[]).push(record);
@@ -953,7 +970,7 @@ export class BaselineFlowService {
     return result;
   }
 
-  listSequencerSessions(): readonly { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; executedAt: string }[] {
+  listSequencerSessions(): readonly { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] {
     return [...this.sequencerSessions];
   }
 

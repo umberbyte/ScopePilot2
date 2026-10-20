@@ -69,7 +69,8 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
   const [sequencerTarget, setSequencerTarget] = useState('http://fixture.target.test/session-token');
   const [sequencerSamples, setSequencerSamples] = useState('100');
-  const [sequencerResult, setSequencerResult] = useState<{ verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number } | null>(null);
+  const [sequencerRole, setSequencerRole] = useState('');
+  const [sequencerResult, setSequencerResult] = useState<{ verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] } | null>(null);
   const [oastTarget, setOastTarget] = useState('http://fixture.target.test/callback');
   const [oastProtocol, setOastProtocol] = useState('http');
   const [oastToken, setOastToken] = useState('');
@@ -124,13 +125,17 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     setSequencerResult(null);
     try {
       const samples = Number(sequencerSamples);
-      setSequencerResult(await callJson<{ verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number }>(apiBase, '/api/tools/sequencer/runs', { targetUrl: sequencerTarget, samples }));
+      setSequencerResult(await callJson<{ verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }>(apiBase, '/api/tools/sequencer/runs', {
+        targetUrl: sequencerTarget,
+        samples,
+        ...(sequencerRole.trim() === '' ? {} : { role: sequencerRole.trim() }),
+      }));
     } catch (cause) {
       setError(String(cause));
     } finally {
       setBusy(false);
     }
-  }, [apiBase, sequencerSamples, sequencerTarget]);
+  }, [apiBase, sequencerRole, sequencerSamples, sequencerTarget]);
 
   const analyzeDomFlowsAction = useCallback(async () => {
     setBusy(true);
@@ -360,12 +365,18 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       <Field label={t('a10.sequencerSamplesLabel')}>
         <Input value={sequencerSamples} onChange={(_, data) => setSequencerSamples(data.value)} />
       </Field>
+      <Field label={t('a10.sequencerRoleLabel')}>
+        <Input value={sequencerRole} onChange={(_, data) => setSequencerRole(data.value)} />
+      </Field>
       <Button appearance="primary" disabled={busy} onClick={() => void runSequencer()}>
         {t('a10.sequencerRun')}
       </Button>
       {sequencerResult !== null && (
         <div className={styles.section}>
           <Text role="status">{t('a10.sequencerResult', { verdict: sequencerResult.verdict, samples: sequencerResult.sampleCount, duplicates: sequencerResult.duplicates, missing: sequencerResult.missing })}</Text>
+          {sequencerResult.sessionCookieNames !== undefined && (
+            <Text className={styles.muted}>{t('a10.sequencerSessionApplied', { cookies: sequencerResult.sessionCookieNames.join(', ') || '—' })}</Text>
+          )}
           {sequencerResult.shannonEntropyBitsPerByte !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerEntropy', { entropy: sequencerResult.shannonEntropyBitsPerByte, distinct: sequencerResult.distinctByteValues })}</Text>
           )}

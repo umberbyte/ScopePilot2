@@ -135,6 +135,8 @@ export interface BootstrapOptions {
   readonly explorer?: import('../../../src/ports/engines.ts').ExplorationPort;
   /** Fuzzer 実 transport 経路の検証用 fake。 */
   readonly fuzzTransport?: import('../../../src/ports/engines.ts').FuzzTransportPort;
+  /** Sequencer 実 transport 経路の検証用 fake。 */
+  readonly sequencerTransport?: import('../../../src/ports/engines.ts').SequencerTransportPort;
   /** OAST 実 provider 経路の検証用 fake。 */
   readonly oastProvider?: import('../../../src/ports/engines.ts').OastProviderPort;
   /** WebSocket 実 transport 経路の検証用 fake。 */
@@ -152,7 +154,7 @@ export interface TestFlow {
 
 /** 案件作成前の状態から使える service を組み立てる。 */
 export function createTestService(
-  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'explorer' | 'fuzzTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver'> & {
+  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'explorer' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver'> & {
     runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
     caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
   } = {},
@@ -169,6 +171,7 @@ export function createTestService(
     runtimeBundleHash: 'test-runtime-bundle',
     ...(options.loginExecutor === undefined ? {} : { loginExecutor: options.loginExecutor }),
     ...(options.fuzzTransport === undefined ? {} : { fuzzTransport: options.fuzzTransport }),
+    ...(options.sequencerTransport === undefined ? {} : { sequencerTransport: options.sequencerTransport }),
     ...(options.oastProvider === undefined ? {} : { oastProvider: options.oastProvider }),
     ...(options.webSocketTransport === undefined ? {} : { webSocketTransport: options.webSocketTransport }),
     ...(options.advancedTransport === undefined ? {} : { advancedTransport: options.advancedTransport }),

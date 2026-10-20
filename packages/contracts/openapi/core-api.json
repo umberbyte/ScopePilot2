@@ -1720,6 +1720,13 @@
                             "minimum": 1,
                             "description": "insufficient 時のみ (必要な最小 sample 数)"
                           },
+                          "sessionCookieNames": {
+                            "type": "array",
+                            "description": "role 指定時に対象URLへ適用したcookie名。値は返さない",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
                           "executedAt": {
                             "type": "string",
                             "format": "date-time"
@@ -1758,6 +1765,10 @@
                     "minimum": 30,
                     "maximum": 10000,
                     "description": "最小 30・最大 10000 (F07-UT-001)"
+                  },
+                  "role": {
+                    "type": "string",
+                    "description": "runLogin 済みの任意role。対象URLへ適用可能なcookieだけを収集requestへ付ける"
                   }
                 },
                 "additionalProperties": false
@@ -1812,6 +1823,13 @@
                       "type": "integer",
                       "minimum": 1,
                       "description": "insufficient 時のみ (必要な最小 sample 数)"
+                    },
+                    "sessionCookieNames": {
+                      "type": "array",
+                      "description": "role 指定時に対象URLへ適用したcookie名。値は返さない",
+                      "items": {
+                        "type": "string"
+                      }
                     },
                     "executedAt": {
                       "type": "string",

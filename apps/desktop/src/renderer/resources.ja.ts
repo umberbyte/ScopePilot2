@@ -138,8 +138,10 @@ export const jaStrings = {
   'a10.sequencerIntro':
     '対象 URL から token sample を収集して乱数性の統計を返します (design/f07)。統計は観測に対するもので、暗号学的安全性は断定しません。token 原文は保持しません。fixture は URL に fixed を含めると毎回同一 token (低 entropy の実演)・no-token を含めると欠落混入になります。',
   'a10.sequencerSamplesLabel': 'sample 数 (30〜10000)',
+  'a10.sequencerRoleLabel': '収集 session の role (任意・A09 で login 済み。空なら非認証)',
   'a10.sequencerRun': 'sample を収集して解析する',
   'a10.sequencerResult': '結果: {verdict} (sample {samples}・重複 {duplicates}・欠落 {missing})',
+  'a10.sequencerSessionApplied': 'session cookie 適用: {cookies}',
   'a10.sequencerEntropy': 'entropy {entropy} bits/byte・出現 byte 種 {distinct}',
   'a10.sequencerInsufficient': 'sample 不足のため断定しません (最小 {minimum} 件が必要)。',
   'a10.oastTitle': 'OAST (out-of-band 検出)',

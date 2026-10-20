@@ -99,6 +99,8 @@ export interface SequencerTransportPort {
   collect(input: {
     readonly targetUrl: string;
     readonly samples: number;
+    /** Core-filtered role cookies for this target. Values must stay inside the transport. */
+    readonly sessionCookies?: readonly LoginSessionCookie[];
     readonly onResponse: (response: SequencerTransportResponse) => void;
   }): Promise<void>;
 }
