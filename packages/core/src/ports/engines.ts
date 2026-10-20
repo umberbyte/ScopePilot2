@@ -49,3 +49,18 @@ export interface LoginExecutorPort {
   readonly engineVersion: string;
   execute(input: LoginExecutionInput): Promise<LoginExecutionResult>;
 }
+
+/** proxy listener が傍受した通信の観測 (design/f02)。値は core へ渡す素材のみ。 */
+export interface ObservedProxyMessage {
+  readonly messageReference: string;
+  readonly method: string;
+  readonly url: string;
+  readonly direction: 'sent' | 'received';
+}
+
+/** 実 proxy listener (ZAP daemon 等)。core は判断 (scope 強制) を持ち、ここは運搬。 */
+export interface ProxyListenerPort {
+  startSession(): Promise<void>;
+  stopSession(): Promise<void>;
+  observeMessages(cursor: number, count: number): Promise<{ readonly messages: readonly ObservedProxyMessage[]; readonly nextCursor: number }>;
+}
