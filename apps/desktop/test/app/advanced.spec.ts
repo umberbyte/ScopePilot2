@@ -341,9 +341,12 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   const byteLengthChart = page.getByRole('group', { name: 'token のUTF-8 byte長分布 (16区間)' });
   const characterLengthChart = page.getByRole('group', { name: 'token の文字長分布 (Unicode code point・16区間)' });
   const characterRunLengthChart = page.getByRole('group', { name: 'token の最長同一文字連長分布 (Unicode code point・16区間)' });
+  const hammingDistanceChart = page.getByRole('group', { name: '隣接tokenのbit Hamming距離分布 (同一UTF-8 byte長・16区間)' });
   await expect(byteLengthChart.getByRole('progressbar')).toHaveCount(16);
   await expect(characterLengthChart.getByRole('progressbar')).toHaveCount(16);
   await expect(characterRunLengthChart.getByRole('progressbar')).toHaveCount(16);
+  await expect(hammingDistanceChart.getByRole('progressbar')).toHaveCount(16);
+  await expect(page.getByText(/Hamming距離を算出しない長さ不一致pair: \d+/)).toBeVisible();
   const alphabetChart = page.getByRole('group', { name: '観測alphabetの文字class構成' });
   await expect(alphabetChart.getByText(/観測alphabet: \d+ Unicode code point種/)).toBeVisible();
   await expect(alphabetChart.getByRole('progressbar')).toHaveCount(8);

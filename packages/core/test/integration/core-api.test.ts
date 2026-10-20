@@ -1335,7 +1335,7 @@ describe('Core API server (node:http)', () => {
       body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 40 }),
     });
     assert.equal(run.status, 200);
-    const result = (await run.json()) as { tokenSource: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; shannonEntropyBitsPerToken?: number; byteFrequencyBuckets?: readonly number[]; tokenLengthBucketMinimums?: readonly number[]; tokenByteLengthBuckets?: readonly number[]; tokenCharacterLengthBuckets?: readonly number[]; tokenMaximumCharacterRunLengthBuckets?: readonly number[]; observedAlphabetSize?: number; alphabetClassCounts?: Readonly<Record<string, number>>; positionAnalysisLimit?: number; positionAlphabetClassCounts?: readonly Readonly<Record<string, number>>[]; positionOverflowSamples?: number };
+    const result = (await run.json()) as { tokenSource: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; shannonEntropyBitsPerToken?: number; byteFrequencyBuckets?: readonly number[]; tokenLengthBucketMinimums?: readonly number[]; tokenByteLengthBuckets?: readonly number[]; tokenCharacterLengthBuckets?: readonly number[]; tokenMaximumCharacterRunLengthBuckets?: readonly number[]; adjacentTokenBitHammingDistanceBuckets?: readonly number[]; adjacentTokenHammingUnequalByteLengthPairs?: number; observedAlphabetSize?: number; alphabetClassCounts?: Readonly<Record<string, number>>; positionAnalysisLimit?: number; positionAlphabetClassCounts?: readonly Readonly<Record<string, number>>[]; positionOverflowSamples?: number };
     assert.equal(result.verdict, 'assessed');
     assert.equal(result.tokenSource, 'body');
     assert.equal(result.sampleCount, 40);
@@ -1346,6 +1346,11 @@ describe('Core API server (node:http)', () => {
     assert.equal(result.tokenByteLengthBuckets?.reduce((sum, count) => sum + count, 0), 40);
     assert.equal(result.tokenCharacterLengthBuckets?.reduce((sum, count) => sum + count, 0), 40);
     assert.equal(result.tokenMaximumCharacterRunLengthBuckets?.reduce((sum, count) => sum + count, 0), 40);
+    assert.equal(
+      (result.adjacentTokenBitHammingDistanceBuckets?.reduce((sum, count) => sum + count, 0) ?? 0)
+        + (result.adjacentTokenHammingUnequalByteLengthPairs ?? 0),
+      39,
+    );
     assert.ok((result.observedAlphabetSize ?? 0) > 0);
     assert.ok(Object.values(result.alphabetClassCounts ?? {}).reduce((sum, count) => sum + count, 0) > 0);
     assert.equal(result.positionAnalysisLimit, 64);

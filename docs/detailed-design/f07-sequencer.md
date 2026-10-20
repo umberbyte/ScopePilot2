@@ -47,12 +47,13 @@ token sample の収集、品質統計、可視化、再現可能な判定を提�
 | F07-UT-015 | `sample-plan.test.ts` | 文字位置別頻度 | 先頭64 Unicode code pointを位置ごとの固定文字classへ集約し、超過sample数だけを返す |
 | F07-UT-016 | `sample-plan.test.ts` | token当たりentropy | 観測token値の経験分布から算出し、固定値は0・等確率4種類は2 bits/tokenとなる |
 | F07-UT-017 | `sample-plan.test.ts` | 最長同一文字連長 | Unicode code point単位の最長連続数を固定16区間へ集約し、文字自体や個別連長を返さない |
+| F07-UT-018 | `sample-plan.test.ts` | 隣接tokenのHamming距離 | 同一UTF-8 byte長の隣接pairをbit単位で比較して固定16区間へ集約し、異長pairは件数だけを返す |
 
 ## 8. 非単体テスト
 
 既知分布 fixture による algorithm CT に加え、`NodeSequencerTransport` と所有 HTTP server
 を結合し、実 request の既定 2 RPS、30 sample 収集、本文・Set-Cookie・hidden input・Bearer token 抽出、通信 log、token
-原文の非保存、cancel後の追加送信防止、API client切断からのcancel伝播を常時 IT で確認する。固定16区間のbyte頻度、UTF-8 byte長/Unicode文字長/最長同一文字連長分布、alphabet文字class構成、先頭64文字の位置別class頻度、観測token値の経験entropy、custom delimiter抽出はCore/API ITとA10 app testで確認する。
+原文の非保存、cancel後の追加送信防止、API client切断からのcancel伝播を常時 IT で確認する。固定16区間のbyte頻度、UTF-8 byte長/Unicode文字長/最長同一文字連長/隣接tokenのbit Hamming距離分布、alphabet文字class構成、先頭64文字の位置別class頻度、観測token値の経験entropy、custom delimiter抽出はCore/API ITとA10 app testで確認する。
 
 ## 9. 現行の認証session適用
 
@@ -71,4 +72,5 @@ token sample の収集、品質統計、可視化、再現可能な判定を提�
 - 文字位置別頻度は先頭64 Unicode code pointだけを対象に、各位置を同じ固定8 classへ集約する。64文字を超えたtokenは超過sample数だけを返し、文字自体や個別sample長は返さない。A10は位置を行、classを列とするscroll可能な表で表示する。
 - token当たりentropyは観測token値の出現比率からShannon entropyを算出する。token原文や値別件数は返さず、sample数に制約された経験値として表示し、予測可能性や暗号学的安全性の断定には使わない。
 - 連長はtoken内で最も長い同一Unicode code point連続数を求め、token長と同じ固定16区間へsample数だけを集約する。空tokenは0区間とし、文字自体・位置・個別tokenの連長は返さない。A10は相対頻度barで表示する。
+- Hamming距離は収集順で隣接するtokenのUTF-8 byte列が同じ長さの場合だけbit単位で算出し、token長と同じ固定16区間へpair数を集約する。長さが異なるpairはpaddingや切捨てをせず件数だけを返す。token原文・pair別距離・比較byte列は返さず、A10は相対頻度barと異長pair数を表示する。
 - custom delimiterは本文抽出規則だけを差し替える。method/header/bodyを任意化する完全な採取専用再送計画とは区別する。

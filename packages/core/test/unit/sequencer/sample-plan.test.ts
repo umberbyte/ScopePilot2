@@ -210,6 +210,18 @@ describe('Sequencer', () => {
     assert.equal(JSON.stringify(distribution).includes('😀'), false, '連続した文字自体は統計へ残さない');
   });
 
+  test('[F07-UT-018] 同一byte長の隣接token間bit Hamming距離を固定16区間へ集約する', () => {
+    const distribution = analyzeEntropy(['\u0000', '\u0000', '\u0001', '\u0003', 'ÿ', 'é']);
+    assert.deepEqual(distribution.adjacentTokenBitHammingDistanceBuckets, [1, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert.equal(distribution.adjacentTokenHammingUnequalByteLengthPairs, 1);
+    assert.equal(
+      distribution.adjacentTokenBitHammingDistanceBuckets.reduce((sum, count) => sum + count, 0)
+        + distribution.adjacentTokenHammingUnequalByteLengthPairs,
+      5,
+    );
+    assert.equal(JSON.stringify(distribution).includes('ÿ'), false, '比較したtoken原文は統計へ残さない');
+  });
+
   test('[F07-UT-005] sample 不足は断定せず insufficient を返す', () => {
     const result = assess(Array.from({ length: 29 }, (_, i) => `t${i}`));
     assert.deepEqual(result, { verdict: 'insufficient', collected: 29, minimum: 30 });

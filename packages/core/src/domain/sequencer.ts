@@ -294,6 +294,10 @@ export interface EntropyResult {
   readonly tokenCharacterLengthBuckets: readonly number[];
   /** 各 token 内の最長同一 code point 連続数を固定16区間へまとめた sample 数。 */
   readonly tokenMaximumCharacterRunLengthBuckets: readonly number[];
+  /** 同一 UTF-8 byte 長の隣接 token 間の bit Hamming 距離を固定16区間へまとめた pair 数。 */
+  readonly adjacentTokenBitHammingDistanceBuckets: readonly number[];
+  /** UTF-8 byte 長が異なるため Hamming 距離を算出しなかった隣接 pair 数。 */
+  readonly adjacentTokenHammingUnequalByteLengthPairs: number;
   /** 観測した Unicode code point の種類数。文字そのものは返さない。 */
   readonly observedAlphabetSize: number;
   /** 文字集合を固定classへ集約した出現数。順序や個々の文字は含まない。 */
@@ -365,6 +369,18 @@ function maximumCharacterRunLength(symbols: readonly string[]): number {
   return maximum;
 }
 
+function bitHammingDistance(left: Uint8Array, right: Uint8Array): number {
+  let distance = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    let difference = (left[index] ?? 0) ^ (right[index] ?? 0);
+    while (difference > 0) {
+      distance += difference & 1;
+      difference >>>= 1;
+    }
+  }
+  return distance;
+}
+
 /** 固定 bytes には決定的な低 entropy を返す (F07-UT-007 ではなく F07-UT-004)。 */
 export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
   const bytes = Buffer.from(tokens.join(''), 'utf8');
@@ -374,6 +390,7 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
   const tokenByteLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
   const tokenCharacterLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
   const tokenMaximumCharacterRunLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
+  const adjacentTokenBitHammingDistanceBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
   const observedAlphabet = new Set<string>();
   const alphabetClassCounts = createAlphabetClassCounts();
   const positionAlphabetClassCounts: Record<AlphabetClass, number>[] = [];
@@ -406,6 +423,17 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
     const bucket = Math.floor(byte / 16);
     byteFrequencyBuckets[bucket] = (byteFrequencyBuckets[bucket] ?? 0) + 1;
   }
+  let adjacentTokenHammingUnequalByteLengthPairs = 0;
+  for (let index = 1; index < tokens.length; index += 1) {
+    const left = Buffer.from(tokens[index - 1] ?? '', 'utf8');
+    const right = Buffer.from(tokens[index] ?? '', 'utf8');
+    if (left.length !== right.length) {
+      adjacentTokenHammingUnequalByteLengthPairs += 1;
+      continue;
+    }
+    const bucket = tokenLengthBucketIndex(bitHammingDistance(left, right));
+    adjacentTokenBitHammingDistanceBuckets[bucket] = (adjacentTokenBitHammingDistanceBuckets[bucket] ?? 0) + 1;
+  }
   let entropy = 0;
   for (const count of counts.values()) {
     const p = count / bytes.length;
@@ -425,6 +453,8 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
     tokenByteLengthBuckets: Object.freeze(tokenByteLengthBuckets),
     tokenCharacterLengthBuckets: Object.freeze(tokenCharacterLengthBuckets),
     tokenMaximumCharacterRunLengthBuckets: Object.freeze(tokenMaximumCharacterRunLengthBuckets),
+    adjacentTokenBitHammingDistanceBuckets: Object.freeze(adjacentTokenBitHammingDistanceBuckets),
+    adjacentTokenHammingUnequalByteLengthPairs,
     observedAlphabetSize: observedAlphabet.size,
     alphabetClassCounts: Object.freeze(alphabetClassCounts),
     positionAnalysisLimit: SEQUENCER_POSITION_LIMIT,

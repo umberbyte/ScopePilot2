@@ -24,6 +24,11 @@ describe('sequencer session (service)', () => {
     assert.equal(result.tokenByteLengthBuckets?.reduce((sum, count) => sum + count, 0), 100);
     assert.equal(result.tokenCharacterLengthBuckets?.reduce((sum, count) => sum + count, 0), 100);
     assert.equal(result.tokenMaximumCharacterRunLengthBuckets?.reduce((sum, count) => sum + count, 0), 100);
+    assert.equal(
+      (result.adjacentTokenBitHammingDistanceBuckets?.reduce((sum, count) => sum + count, 0) ?? 0)
+        + (result.adjacentTokenHammingUnequalByteLengthPairs ?? 0),
+      99,
+    );
     assert.ok((result.observedAlphabetSize ?? 0) > 0);
     assert.ok(Object.values(result.alphabetClassCounts ?? {}).reduce((sum, count) => sum + count, 0) > 0);
     assert.equal(result.positionAnalysisLimit, 64);
@@ -35,6 +40,8 @@ describe('sequencer session (service)', () => {
     assert.deepEqual(service.listSequencerSessions()[0]?.byteFrequencyBuckets, result.byteFrequencyBuckets);
     assert.deepEqual(service.listSequencerSessions()[0]?.tokenByteLengthBuckets, result.tokenByteLengthBuckets);
     assert.deepEqual(service.listSequencerSessions()[0]?.tokenMaximumCharacterRunLengthBuckets, result.tokenMaximumCharacterRunLengthBuckets);
+    assert.deepEqual(service.listSequencerSessions()[0]?.adjacentTokenBitHammingDistanceBuckets, result.adjacentTokenBitHammingDistanceBuckets);
+    assert.equal(service.listSequencerSessions()[0]?.adjacentTokenHammingUnequalByteLengthPairs, result.adjacentTokenHammingUnequalByteLengthPairs);
     assert.deepEqual(service.listSequencerSessions()[0]?.alphabetClassCounts, result.alphabetClassCounts);
     assert.deepEqual(service.listSequencerSessions()[0]?.positionAlphabetClassCounts, result.positionAlphabetClassCounts);
     assert.equal(service.listSequencerSessions()[0]?.shannonEntropyBitsPerToken, result.shannonEntropyBitsPerToken);

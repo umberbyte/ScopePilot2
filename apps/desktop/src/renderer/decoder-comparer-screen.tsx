@@ -70,6 +70,8 @@ interface SequencerResult {
   readonly tokenByteLengthBuckets?: readonly number[];
   readonly tokenCharacterLengthBuckets?: readonly number[];
   readonly tokenMaximumCharacterRunLengthBuckets?: readonly number[];
+  readonly adjacentTokenBitHammingDistanceBuckets?: readonly number[];
+  readonly adjacentTokenHammingUnequalByteLengthPairs?: number;
   readonly observedAlphabetSize?: number;
   readonly alphabetClassCounts?: AlphabetClassCounts;
   readonly positionAnalysisLimit?: number;
@@ -562,12 +564,15 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
             && sequencerResult.tokenByteLengthBuckets !== undefined
             && sequencerResult.tokenCharacterLengthBuckets !== undefined
             && [
-              { title: t('a10.sequencerByteLengthChart'), counts: sequencerResult.tokenByteLengthBuckets },
-              { title: t('a10.sequencerCharacterLengthChart'), counts: sequencerResult.tokenCharacterLengthBuckets },
+              { title: t('a10.sequencerByteLengthChart'), counts: sequencerResult.tokenByteLengthBuckets, pairCounts: false },
+              { title: t('a10.sequencerCharacterLengthChart'), counts: sequencerResult.tokenCharacterLengthBuckets, pairCounts: false },
               ...(sequencerResult.tokenMaximumCharacterRunLengthBuckets === undefined ? [] : [
-                { title: t('a10.sequencerCharacterRunLengthChart'), counts: sequencerResult.tokenMaximumCharacterRunLengthBuckets },
+                { title: t('a10.sequencerCharacterRunLengthChart'), counts: sequencerResult.tokenMaximumCharacterRunLengthBuckets, pairCounts: false },
               ]),
-            ].map(({ title, counts }) => {
+              ...(sequencerResult.adjacentTokenBitHammingDistanceBuckets === undefined ? [] : [
+                { title: t('a10.sequencerHammingDistanceChart'), counts: sequencerResult.adjacentTokenBitHammingDistanceBuckets, pairCounts: true },
+              ]),
+            ].map(({ title, counts, pairCounts }) => {
               const maximum = Math.max(1, ...counts);
               const total = counts.reduce((sum, count) => sum + count, 0);
               return (
@@ -580,7 +585,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
                         <Text>{range}</Text>
                         <ProgressBar
                           value={count / maximum}
-                          aria-label={t('a10.sequencerLengthBucket', { kind: title, range, count, total })}
+                          aria-label={t(pairCounts ? 'a10.sequencerPairBucket' : 'a10.sequencerLengthBucket', { kind: title, range, count, total })}
                         />
                         <Text>{count}</Text>
                       </React.Fragment>
@@ -589,6 +594,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
                 </div>
               );
             })}
+          {sequencerResult.adjacentTokenHammingUnequalByteLengthPairs !== undefined && (
+            <Text className={styles.muted}>{t('a10.sequencerHammingUnequalPairs', { count: sequencerResult.adjacentTokenHammingUnequalByteLengthPairs })}</Text>
+          )}
           {sequencerResult.observedAlphabetSize !== undefined && sequencerResult.alphabetClassCounts !== undefined && (() => {
             const rows = [
               { label: t('a10.sequencerAlphabetClass.digit'), count: sequencerResult.alphabetClassCounts.digit },

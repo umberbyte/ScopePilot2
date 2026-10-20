@@ -1798,6 +1798,21 @@
                               "minimum": 0
                             }
                           },
+                          "adjacentTokenBitHammingDistanceBuckets": {
+                            "type": "array",
+                            "minItems": 16,
+                            "maxItems": 16,
+                            "description": "assessed 時のみ。同一UTF-8 byte長の隣接token間のbit Hamming距離を固定16区間へまとめたpair数。token原文やpair別距離は含まない",
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "adjacentTokenHammingUnequalByteLengthPairs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "assessed 時のみ。UTF-8 byte長が異なるためHamming距離を算出しなかった隣接pair数"
+                          },
                           "observedAlphabetSize": {
                             "type": "integer",
                             "minimum": 0,
@@ -2045,6 +2060,21 @@
                         "type": "integer",
                         "minimum": 0
                       }
+                    },
+                    "adjacentTokenBitHammingDistanceBuckets": {
+                      "type": "array",
+                      "minItems": 16,
+                      "maxItems": 16,
+                      "description": "assessed 時のみ。同一UTF-8 byte長の隣接token間のbit Hamming距離を固定16区間へまとめたpair数。token原文やpair別距離は含まない",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "adjacentTokenHammingUnequalByteLengthPairs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "assessed 時のみ。UTF-8 byte長が異なるためHamming距離を算出しなかった隣接pair数"
                     },
                     "observedAlphabetSize": {
                       "type": "integer",
