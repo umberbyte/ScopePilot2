@@ -367,7 +367,11 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       }
       try {
         const messages = stringArrayField(body, 'messages');
-        const result = await service.sendWsMessages(operator, { targetUrl: stringField(body, 'targetUrl'), messages });
+        const result = await service.sendWsMessages(operator, {
+          targetUrl: stringField(body, 'targetUrl'),
+          messages,
+          ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
+        });
         return respondJson(response, 200, result);
       } catch (cause) {
         return respondDomainError(response, cause);

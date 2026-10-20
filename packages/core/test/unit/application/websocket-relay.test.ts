@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import type { LoginExecutorPort, LoginSessionCookie, WebSocketTransportPort } from '@scopepilot2/core';
 import { bootstrapFlow } from '../support/test-flow.ts';
 
 /** WebSocket の service 経路 (design/f14)。text のみ・重複 dedupe・上限で adapter 前に拒否。 */
@@ -93,5 +94,63 @@ describe('websocket (service)', () => {
     });
     assert.equal(oversized.rejected, 'size');
     assert.equal(calls, 1, 'size 超過は接続前に拒否する');
+  });
+
+  test('role 指定は対象URLに適用可能なcookieだけをhandshakeへ渡し、値を保存しない', async () => {
+    const transportCalls: Parameters<WebSocketTransportPort['exchange']>[0][] = [];
+    const webSocketTransport: WebSocketTransportPort = {
+      async exchange(input) {
+        transportCalls.push(input);
+        for (const message of input.messages) {
+          input.onSentFrame(message);
+          input.onTextFrame(`echo:${message}`);
+        }
+        return { sent: input.messages.length };
+      },
+    };
+    const cookies: readonly LoginSessionCookie[] = [
+      { name: 'WS_SESSION', value: 'websocket-secret', domain: 'fixture.target.test', path: '/socket' },
+      { name: 'OTHER_PATH', value: 'other-path-secret', domain: 'fixture.target.test', path: '/admin' },
+      { name: 'OTHER_ORIGIN', value: 'other-origin-secret', domain: 'elsewhere.example', path: '/' },
+    ];
+    const loginExecutor: LoginExecutorPort = {
+      engineVersion: 'fake-login-websocket-1',
+      async execute() {
+        return { authenticated: true, finalUrl: 'http://fixture.target.test/socket', cookies };
+      },
+    };
+    const { service, operator } = await bootstrapFlow({ loginExecutor, webSocketTransport });
+    service.registerLoginFlow(operator, {
+      role: 'analyst',
+      flowVersion: 'websocket-flow-1',
+      steps: [
+        { kind: 'navigate', target: 'http://fixture.target.test/login' },
+        { kind: 'assert', target: 'Authenticated' },
+      ],
+    });
+    await service.runLogin(operator, {
+      role: 'analyst',
+      baseUrl: 'http://fixture.target.test',
+      secretValues: {},
+      expectedUrlPrefix: 'http://fixture.target.test/socket',
+    });
+
+    const result = await service.sendWsMessages(operator, {
+      targetUrl: 'http://fixture.target.test/socket/echo',
+      messages: ['role-message'],
+      role: 'analyst',
+    });
+    assert.deepEqual(transportCalls[0]?.sessionCookies, [
+      { name: 'WS_SESSION', value: 'websocket-secret', domain: 'fixture.target.test', path: '/socket' },
+    ]);
+    assert.deepEqual(result.sessionCookieNames, ['WS_SESSION']);
+    assert.equal(JSON.stringify(result).includes('websocket-secret'), false);
+    assert.equal(JSON.stringify(service.listWsFrames()).includes('websocket-secret'), false);
+    assert.equal(JSON.stringify(service.events()).includes('websocket-secret'), false);
+
+    await assert.rejects(
+      service.sendWsMessages(operator, { targetUrl: 'http://fixture.target.test/socket', messages: ['x'], role: 'missing' }),
+      /no session for role/,
+    );
   });
 });

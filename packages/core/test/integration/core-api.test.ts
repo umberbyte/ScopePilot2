@@ -1237,6 +1237,13 @@ describe('Core API server (node:http)', () => {
     assert.equal(sentBody.rejected, null);
     assert.match(sentBody.planHash, /^[0-9a-f]{64}$/);
 
+    const missingRole = await post('/api/websocket/send', {
+      targetUrl: 'http://fixture.target.test/ws',
+      messages: ['authenticated'],
+      role: 'missing-websocket-role',
+    });
+    assert.equal(missingRole.status, 400, 'role field is forwarded and requires a completed login session');
+
     const badDirection = await post('/api/websocket/frames', { targetUrl: 'http://fixture.target.test/ws', frames: [{ direction: 'sideways', payload: 'x' }] });
     assert.equal(badDirection.status, 400);
 

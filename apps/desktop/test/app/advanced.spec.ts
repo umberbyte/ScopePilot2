@@ -383,9 +383,11 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await page.getByLabel('取込 frame (1行1件・text)').fill('hello\nhello');
   await page.getByRole('button', { name: 'frame を取り込む' }).click();
   await expect(page.getByText('frame 取込: 1 件・重複 1 件')).toBeVisible({ timeout: 30_000 });
+  await page.getByLabel('接続 session の role (任意・A09 で login 済み。空なら非認証)').fill('sequencer-admin');
   await page.getByLabel('送信 message (1行1件・text)').fill('ping');
   await page.getByRole('button', { name: 'message を送信する' }).click();
   await expect(page.getByText('送信しました (1 件・plan hash 付き)')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('handshake cookie 適用: PHPSESSID')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('cell', { name: 'ping' })).toBeVisible();
 
   // HTTP/2 transport: 選択と header 検証 (design/f15)。

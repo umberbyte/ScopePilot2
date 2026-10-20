@@ -26,6 +26,12 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Node 24 accepts an Undici WebSocketInit with handshake headers; lib.dom exposes only the standard overload. */
+const NodeWebSocket = WebSocket as unknown as new (
+  url: string,
+  options?: { readonly headers?: Readonly<Record<string, string>> },
+) => WebSocket;
+
 export class NodeWebSocketTransport implements WebSocketTransportPort {
   private readonly connectTimeoutMs: number;
   private readonly responseWaitMs: number;
@@ -43,7 +49,13 @@ export class NodeWebSocketTransport implements WebSocketTransportPort {
   }
 
   async exchange(input: Parameters<WebSocketTransportPort['exchange']>[0]): Promise<{ readonly sent: number }> {
-    const socket = new WebSocket(websocketUrl(input.targetUrl));
+    const cookieHeader = input.sessionCookies === undefined || input.sessionCookies.length === 0
+      ? undefined
+      : input.sessionCookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
+    const socket = new NodeWebSocket(
+      websocketUrl(input.targetUrl),
+      cookieHeader === undefined ? undefined : { headers: { Cookie: cookieHeader } },
+    );
     let connectionError: Error | null = null;
     let closed = false;
     socket.binaryType = 'arraybuffer';

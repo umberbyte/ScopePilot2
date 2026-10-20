@@ -1178,8 +1178,8 @@ export class BaselineFlowService {
    */
   async sendWsMessages(
     operator: OperatorProfile,
-    input: { readonly targetUrl: string; readonly messages: readonly string[] },
-  ): Promise<{ planHash: string; sent: number; rejected: 'size' | 'rate' | null }> {
+    input: { readonly targetUrl: string; readonly messages: readonly string[]; readonly role?: string },
+  ): Promise<{ planHash: string; sent: number; rejected: 'size' | 'rate' | null; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -1189,6 +1189,14 @@ export class BaselineFlowService {
     }
     if (input.messages.length === 0) {
       throw domainError('ValidationFailed', 'websocket send needs at least one message');
+    }
+    let appliedCookies: readonly LoginSessionCookie[] | undefined;
+    if (input.role !== undefined) {
+      const session = this.roleSessionCookies.get(input.role);
+      if (session === undefined) {
+        throw domainError('ValidationFailed', `no session for role '${input.role}'; run login first`);
+      }
+      appliedCookies = applicableSessionCookies([...session.cookies], canonical);
     }
     const plan = buildWsSendPlan({
       targetUrl: canonical,
@@ -1208,11 +1216,24 @@ export class BaselineFlowService {
       const transported = await this.deps.webSocketTransport.exchange({
         targetUrl: canonical,
         messages: input.messages,
+        ...(appliedCookies === undefined ? {} : {
+          sessionCookies: appliedCookies.map((cookie) => ({
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+          })),
+        }),
         onSentFrame: (payload) => recordFrame('sent', payload),
         onTextFrame: (payload) => recordFrame('received', payload),
       });
       this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: transported.sent });
-      return { planHash: plan.planHash, sent: transported.sent, rejected: null };
+      return {
+        planHash: plan.planHash,
+        sent: transported.sent,
+        rejected: null,
+        ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
+      };
     }
     let virtualMs = 0;
     const result = await sendWithPolicy(
@@ -1233,7 +1254,12 @@ export class BaselineFlowService {
       sent: result.sent,
       ...(result.rejected === null ? {} : { rejected: result.rejected }),
     });
-    return { planHash: plan.planHash, sent: result.sent, rejected: result.rejected };
+    return {
+      planHash: plan.planHash,
+      sent: result.sent,
+      rejected: result.rejected,
+      ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
+    };
   }
 
   /**

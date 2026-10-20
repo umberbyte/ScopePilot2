@@ -49,5 +49,9 @@ text messageを逐次送信する。既定10 message/s、text 1 MiB上限、接�
 持ち、受信textをCoreのframe台帳へ返す。常時ITは所有raw WebSocket echo serverでhandshake、
 mask解除、送信間隔、echo受信を検証する。
 
-binary、fragmentation、extension、ping/pong証跡、ZAP channel paging/reuse、role cookie、
+任意role指定時はrunLogin成功済みsessionを要求し、Coreがhandshake URLのdomain/pathへ
+適用可能なcookieだけを選ぶ。transportはupgrade requestへCookie headerを付けるが、値を
+結果・frame台帳・監査へ返さない。結果には適用cookie名だけを残す。
+
+binary、fragmentation、extension、ping/pong証跡、ZAP channel paging/reuse、
 subprotocol、長寿命connection管理は後続増分である。

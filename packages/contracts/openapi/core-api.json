@@ -2423,6 +2423,10 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "role": {
+                    "type": "string",
+                    "description": "runLogin 済みの任意role。対象URLへ適用可能なcookieだけをWebSocket handshakeへ付ける"
                   }
                 },
                 "additionalProperties": false
@@ -2460,6 +2464,13 @@
                         "rate",
                         null
                       ]
+                    },
+                    "sessionCookieNames": {
+                      "type": "array",
+                      "description": "role 指定時にhandshakeへ適用したcookie名。値は返さない",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "additionalProperties": false
