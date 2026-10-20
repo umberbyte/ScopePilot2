@@ -5,3 +5,4 @@ export * from './nuclei-runner.ts';
 export * from './playwright-explorer.ts';
 export * from './repeater-transport.ts';
 export * from './fuzz-transport.ts';
+export * from './sequencer-transport.ts';

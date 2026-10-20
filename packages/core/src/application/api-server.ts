@@ -260,7 +260,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return;
       }
       try {
-        const result = service.runSequencerSession(operator, {
+        const result = await service.runSequencerSession(operator, {
           targetUrl: stringField(body, 'targetUrl'),
           samples: numberField(body, 'samples'),
         });

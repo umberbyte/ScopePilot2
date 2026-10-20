@@ -18,6 +18,7 @@ import { FixtureExplorer, FixtureZapEngine } from '@scopepilot2/simulation';
 import { NodeFuzzTransport } from './fuzz-transport.ts';
 import { PlaywrightLoginExecutor } from './login-executor.ts';
 import { NodeRepeaterTransport } from './repeater-transport.ts';
+import { NodeSequencerTransport } from './sequencer-transport.ts';
 import { ZapEngineAdapter } from './zap-engine.ts';
 import { PlaywrightExplorerAdapter } from './playwright-explorer.ts';
 
@@ -121,6 +122,8 @@ export interface ComposedEngines {
   readonly repeaterTransport?: import('@scopepilot2/core').RepeaterTransportPort;
   /** Fuzzer 実 transport (design/f05)。実 engine 時のみ構成。 */
   readonly fuzzTransport?: import('@scopepilot2/core').FuzzTransportPort;
+  /** Sequencer 実 transport (design/f07)。実 engine 時のみ構成。 */
+  readonly sequencerTransport?: import('@scopepilot2/core').SequencerTransportPort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   /** 実 engine 時の監査記録用 hash。fixture のときは呼出側の既定を使う。 */
   readonly runtimeBundleHash?: string;
@@ -165,6 +168,7 @@ export async function composeEngines(
   const repeaterTransport = new NodeRepeaterTransport();
   // Fuzzer も ZAP 不要の直接送信経路を使う。core が scope と 2 RPS を送信前に強制する。
   const fuzzTransport = new NodeFuzzTransport();
+  const sequencerTransport = new NodeSequencerTransport();
   return {
     mode: 'real',
     explorer,
@@ -172,6 +176,7 @@ export async function composeEngines(
     loginExecutor,
     repeaterTransport,
     fuzzTransport,
+    sequencerTransport,
     capabilities: createCapabilitySnapshots({
       zap: { engineVersion: scanEngine.engineVersion, real: realZap },
       explorer: { engineVersion: explorer.engineVersion, real: realExplorer },

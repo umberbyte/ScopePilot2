@@ -128,6 +128,8 @@ export interface BaselineFlowDeps {
   readonly repeaterTransport?: import('../ports/engines.ts').RepeaterTransportPort;
   /** Fuzz の実 transport (design/f05)。未構成なら fixture 応答を使う。 */
   readonly fuzzTransport?: import('../ports/engines.ts').FuzzTransportPort;
+  /** Sequencer の実収集 transport (design/f07)。未構成なら fixture 応答を使う。 */
+  readonly sequencerTransport?: import('../ports/engines.ts').SequencerTransportPort;
 
   /** login 実行器 (design/f09)。未構成の service では runLogin が ValidationFailed。 */
   readonly loginExecutor?: LoginExecutorPort;
@@ -201,7 +203,7 @@ export class BaselineFlowService {
   private readonly breakQueue = new BreakQueue(100);
 
   /** HTTP 通信 log と endpoint 集約 (design/f03)。探索・Repeater・Fuzzer の観測通信を記録する。 */
-  private readonly trafficLog: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' }[] = [];
+  private readonly trafficLog: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' }[] = [];
   private readonly siteMapProjector = new SiteMapProjector();
 
   /** 業務ロジック検証の実行履歴 (design/f17)。 */
@@ -468,8 +470,8 @@ export class BaselineFlowService {
   }
 
   /** 観測通信の記録 (traffic log と endpoint 集約の両方に入れる)。 */
-  private recordObservedExchange(summary: { url: string; method: string; status: number; contentType: string }, at: string, source: 'explore' | 'repeater' | 'fuzzer'): void {
-    (this.trafficLog as { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' }[]).push({
+  private recordObservedExchange(summary: { url: string; method: string; status: number; contentType: string }, at: string, source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer'): void {
+    (this.trafficLog as { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' }[]).push({
       exchangeId: this.deps.ids.next('exchange'),
       ...summary,
       at,
@@ -875,10 +877,10 @@ export class BaselineFlowService {
    * 含まれる場合は毎回同一 token = 低 entropy・重複の実演、no-token は欠落混入)。
    * token 原文は応答・監査・台帳のいずれにも出さない (F07-UT-006)。
    */
-  runSequencerSession(
+  async runSequencerSession(
     operator: OperatorProfile,
     input: { readonly targetUrl: string; readonly samples: number },
-  ): { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number } {
+  ): Promise<{ sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -889,16 +891,31 @@ export class BaselineFlowService {
     const plan = createSamplePlan(input.samples);
     const collector = new SampleCollector();
     const pattern = /token=([A-Za-z0-9_-]+)/;
-    for (let index = 0; index < plan.target; index += 1) {
-      let body: string;
-      if (canonical.includes('no-token') && index % 5 === 4) {
-        body = 'no token in this response';
-      } else if (canonical.includes('fixed')) {
-        body = 'token=fixed-token-value';
-      } else {
-        body = `token=sample-${index.toString(36)}-${(index * 7 + 3).toString(36)}`;
+    if (this.deps.sequencerTransport === undefined) {
+      for (let index = 0; index < plan.target; index += 1) {
+        let body: string;
+        if (canonical.includes('no-token') && index % 5 === 4) {
+          body = 'no token in this response';
+        } else if (canonical.includes('fixed')) {
+          body = 'token=fixed-token-value';
+        } else {
+          body = `token=sample-${index.toString(36)}-${(index * 7 + 3).toString(36)}`;
+        }
+        collector.record(extractToken({ body }, pattern));
       }
-      collector.record(extractToken({ body }, pattern));
+    } else {
+      await this.deps.sequencerTransport.collect({
+        targetUrl: canonical,
+        samples: plan.target,
+        onResponse: (response) => {
+          collector.record(extractToken({ body: response.body }, pattern));
+          this.recordObservedExchange(
+            { url: response.requestUrl, method: 'GET', status: response.status, contentType: response.contentType },
+            this.deps.clock.now().toISOString(),
+            'sequencer',
+          );
+        },
+      });
     }
     const collection = collector.snapshot();
     const projection = reportProjection(collection);

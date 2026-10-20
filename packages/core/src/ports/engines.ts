@@ -86,6 +86,23 @@ export interface FuzzTransportPort {
   }): Promise<FuzzTransportResponse>;
 }
 
+/** Sequencer の 1 応答。body は token 抽出 callback の間だけ保持し、保存しない。 */
+export interface SequencerTransportResponse {
+  readonly requestUrl: string;
+  readonly status: number;
+  readonly contentType: string;
+  readonly body: string;
+}
+
+/** Sequencer の実収集 transport。adapter 内で rate を守り、応答を逐次 core へ渡す。 */
+export interface SequencerTransportPort {
+  collect(input: {
+    readonly targetUrl: string;
+    readonly samples: number;
+    readonly onResponse: (response: SequencerTransportResponse) => void;
+  }): Promise<void>;
+}
+
 /** Repeater の実 transport (実 HTTP 送信)。未構成の service は fixture 応答を使う。 */
 export interface RepeaterTransportPort {
   send(input: {

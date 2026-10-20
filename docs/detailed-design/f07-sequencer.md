@@ -40,4 +40,6 @@ token sample の収集、品質統計、可視化、再現可能な判定を提�
 
 ## 8. 非単体テスト
 
-既知分布 fixture による algorithm CT、実 request の rate/stop FT、chart 表示 test を行う。
+既知分布 fixture による algorithm CT に加え、`NodeSequencerTransport` と所有 HTTP server
+を結合し、実 request の既定 2 RPS、30 sample 収集、本文 token 抽出、通信 log、token
+原文の非保存を常時 IT で確認する。stop/cancel と任意 extractor、chart 表示は後続 test とする。

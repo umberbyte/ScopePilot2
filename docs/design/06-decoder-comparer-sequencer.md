@@ -30,6 +30,11 @@ SequencerService（新規・A3）:
   「統計的に劣る」ことをもって脆弱と確定しない。標本数・制約・検定の前提を必ず表示
 ```
 
+2026-10-20 時点の実収集経路は、許可済み `targetUrl` への逐次 GET と本文中の
+`token=...` 抽出に限定する。`NodeSequencerTransport` が既定 2 RPS、応答 1 MiB 上限、
+redirect 非追従で収集し、応答本文は抽出 callback の間だけ保持する。Cookie/hidden/bearer、
+role session、任意 extractor を含む完全な採取専用再送計画は後続とし、現行経路と区別する。
+
 ## 4. データモデル
 
 - 変換・差分は証跡モデルを持たない（UI上の作業）。差分の保存が必要な場合は
