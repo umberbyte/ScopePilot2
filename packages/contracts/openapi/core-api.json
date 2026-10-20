@@ -1788,6 +1788,16 @@
                               "minimum": 0
                             }
                           },
+                          "tokenMaximumCharacterRunLengthBuckets": {
+                            "type": "array",
+                            "minItems": 16,
+                            "maxItems": 16,
+                            "description": "assessed 時のみ。各token内で最も長い同一Unicode code point連続数を固定16区間へまとめたsample数。文字自体や個別sampleの連長は含まない",
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
                           "observedAlphabetSize": {
                             "type": "integer",
                             "minimum": 0,
@@ -2021,6 +2031,16 @@
                       "minItems": 16,
                       "maxItems": 16,
                       "description": "assessed 時のみ。各tokenのUnicode code point数を固定16区間へまとめたsample数。token原文や個別sample長は含まない",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "tokenMaximumCharacterRunLengthBuckets": {
+                      "type": "array",
+                      "minItems": 16,
+                      "maxItems": 16,
+                      "description": "assessed 時のみ。各token内で最も長い同一Unicode code point連続数を固定16区間へまとめたsample数。文字自体や個別sampleの連長は含まない",
                       "items": {
                         "type": "integer",
                         "minimum": 0

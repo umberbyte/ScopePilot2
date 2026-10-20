@@ -69,6 +69,7 @@ interface SequencerResult {
   readonly tokenLengthBucketMinimums?: readonly number[];
   readonly tokenByteLengthBuckets?: readonly number[];
   readonly tokenCharacterLengthBuckets?: readonly number[];
+  readonly tokenMaximumCharacterRunLengthBuckets?: readonly number[];
   readonly observedAlphabetSize?: number;
   readonly alphabetClassCounts?: AlphabetClassCounts;
   readonly positionAnalysisLimit?: number;
@@ -563,6 +564,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
             && [
               { title: t('a10.sequencerByteLengthChart'), counts: sequencerResult.tokenByteLengthBuckets },
               { title: t('a10.sequencerCharacterLengthChart'), counts: sequencerResult.tokenCharacterLengthBuckets },
+              ...(sequencerResult.tokenMaximumCharacterRunLengthBuckets === undefined ? [] : [
+                { title: t('a10.sequencerCharacterRunLengthChart'), counts: sequencerResult.tokenMaximumCharacterRunLengthBuckets },
+              ]),
             ].map(({ title, counts }) => {
               const maximum = Math.max(1, ...counts);
               const total = counts.reduce((sum, count) => sum + count, 0);

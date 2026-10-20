@@ -162,6 +162,7 @@ export const jaStrings = {
   'a10.sequencerByteBucket': 'byte {range}: {count} / 全 {total}',
   'a10.sequencerByteLengthChart': 'token のUTF-8 byte長分布 (16区間)',
   'a10.sequencerCharacterLengthChart': 'token の文字長分布 (Unicode code point・16区間)',
+  'a10.sequencerCharacterRunLengthChart': 'token の最長同一文字連長分布 (Unicode code point・16区間)',
   'a10.sequencerLengthBucket': '{kind} {range}: {count} / sample {total}',
   'a10.sequencerAlphabetChart': '観測alphabetの文字class構成',
   'a10.sequencerAlphabetSummary': '観測alphabet: {size} Unicode code point種 (文字自体は非表示)',

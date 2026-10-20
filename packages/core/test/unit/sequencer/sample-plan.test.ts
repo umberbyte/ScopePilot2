@@ -203,6 +203,13 @@ describe('Sequencer', () => {
     assert.equal(JSON.stringify(balanced).includes('secret-value'), false, 'token 原文は統計へ残さない');
   });
 
+  test('[F07-UT-017] token内の最長同一文字連長を固定16区間へ集約する', () => {
+    const distribution = analyzeEntropy(['', 'a', 'abba', 'aaab', '😀😀😀😀😀', 'a'.repeat(9)]);
+    assert.deepEqual(distribution.tokenMaximumCharacterRunLengthBuckets, [1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert.equal(distribution.tokenMaximumCharacterRunLengthBuckets.reduce((sum, count) => sum + count, 0), 6);
+    assert.equal(JSON.stringify(distribution).includes('😀'), false, '連続した文字自体は統計へ残さない');
+  });
+
   test('[F07-UT-005] sample 不足は断定せず insufficient を返す', () => {
     const result = assess(Array.from({ length: 29 }, (_, i) => `t${i}`));
     assert.deepEqual(result, { verdict: 'insufficient', collected: 29, minimum: 30 });

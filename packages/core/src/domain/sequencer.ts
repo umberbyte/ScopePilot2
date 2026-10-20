@@ -292,6 +292,8 @@ export interface EntropyResult {
   readonly tokenByteLengthBuckets: readonly number[];
   /** 各 token の Unicode code point 数を固定16区間へまとめた sample 数。 */
   readonly tokenCharacterLengthBuckets: readonly number[];
+  /** 各 token 内の最長同一 code point 連続数を固定16区間へまとめた sample 数。 */
+  readonly tokenMaximumCharacterRunLengthBuckets: readonly number[];
   /** 観測した Unicode code point の種類数。文字そのものは返さない。 */
   readonly observedAlphabetSize: number;
   /** 文字集合を固定classへ集約した出現数。順序や個々の文字は含まない。 */
@@ -351,6 +353,18 @@ function tokenLengthBucketIndex(length: number): number {
   return 0;
 }
 
+function maximumCharacterRunLength(symbols: readonly string[]): number {
+  let maximum = 0;
+  let current = 0;
+  let previous: string | undefined;
+  for (const symbol of symbols) {
+    current = symbol === previous ? current + 1 : 1;
+    maximum = Math.max(maximum, current);
+    previous = symbol;
+  }
+  return maximum;
+}
+
 /** 固定 bytes には決定的な低 entropy を返す (F07-UT-007 ではなく F07-UT-004)。 */
 export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
   const bytes = Buffer.from(tokens.join(''), 'utf8');
@@ -359,6 +373,7 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
   const byteFrequencyBuckets = Array.from({ length: 16 }, () => 0);
   const tokenByteLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
   const tokenCharacterLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
+  const tokenMaximumCharacterRunLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
   const observedAlphabet = new Set<string>();
   const alphabetClassCounts = createAlphabetClassCounts();
   const positionAlphabetClassCounts: Record<AlphabetClass, number>[] = [];
@@ -368,8 +383,10 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
     const symbols = Array.from(token);
     const byteBucket = tokenLengthBucketIndex(Buffer.byteLength(token, 'utf8'));
     const characterBucket = tokenLengthBucketIndex(symbols.length);
+    const runLengthBucket = tokenLengthBucketIndex(maximumCharacterRunLength(symbols));
     tokenByteLengthBuckets[byteBucket] = (tokenByteLengthBuckets[byteBucket] ?? 0) + 1;
     tokenCharacterLengthBuckets[characterBucket] = (tokenCharacterLengthBuckets[characterBucket] ?? 0) + 1;
+    tokenMaximumCharacterRunLengthBuckets[runLengthBucket] = (tokenMaximumCharacterRunLengthBuckets[runLengthBucket] ?? 0) + 1;
     if (symbols.length > SEQUENCER_POSITION_LIMIT) {
       positionOverflowSamples += 1;
     }
@@ -407,6 +424,7 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
     tokenLengthBucketMinimums: TOKEN_LENGTH_BUCKET_MINIMUMS,
     tokenByteLengthBuckets: Object.freeze(tokenByteLengthBuckets),
     tokenCharacterLengthBuckets: Object.freeze(tokenCharacterLengthBuckets),
+    tokenMaximumCharacterRunLengthBuckets: Object.freeze(tokenMaximumCharacterRunLengthBuckets),
     observedAlphabetSize: observedAlphabet.size,
     alphabetClassCounts: Object.freeze(alphabetClassCounts),
     positionAnalysisLimit: SEQUENCER_POSITION_LIMIT,

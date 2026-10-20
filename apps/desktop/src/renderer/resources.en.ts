@@ -278,6 +278,7 @@ export const enStrings: Readonly<Record<StringKey, string>> = {
   'a10.sequencerByteBucket': 'Bytes {range}: {count} of {total}',
   'a10.sequencerByteLengthChart': 'Token UTF-8 byte length distribution (16 ranges)',
   'a10.sequencerCharacterLengthChart': 'Token character length distribution (Unicode code points, 16 ranges)',
+  'a10.sequencerCharacterRunLengthChart': 'Token longest repeated-character run distribution (Unicode code points, 16 ranges)',
   'a10.sequencerLengthBucket': '{kind} {range}: {count} of {total} samples',
   'a10.sequencerAlphabetChart': 'Observed alphabet character-class composition',
   'a10.sequencerAlphabetSummary': 'Observed alphabet: {size} Unicode code points (characters are not disclosed)',

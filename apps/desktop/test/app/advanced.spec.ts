@@ -340,8 +340,10 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await expect(byteChart.getByRole('progressbar')).toHaveCount(16);
   const byteLengthChart = page.getByRole('group', { name: 'token のUTF-8 byte長分布 (16区間)' });
   const characterLengthChart = page.getByRole('group', { name: 'token の文字長分布 (Unicode code point・16区間)' });
+  const characterRunLengthChart = page.getByRole('group', { name: 'token の最長同一文字連長分布 (Unicode code point・16区間)' });
   await expect(byteLengthChart.getByRole('progressbar')).toHaveCount(16);
   await expect(characterLengthChart.getByRole('progressbar')).toHaveCount(16);
+  await expect(characterRunLengthChart.getByRole('progressbar')).toHaveCount(16);
   const alphabetChart = page.getByRole('group', { name: '観測alphabetの文字class構成' });
   await expect(alphabetChart.getByText(/観測alphabet: \d+ Unicode code point種/)).toBeVisible();
   await expect(alphabetChart.getByRole('progressbar')).toHaveCount(8);
