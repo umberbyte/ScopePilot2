@@ -71,6 +71,7 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
       await normalRate.collect({
         targetUrl: `${base}/token`,
         samples: 2,
+        replayRequest: { method: 'GET', headers: [], body: '' },
         sessionCookies: [{ name: 'SEQ_SESSION', value: 'transport-secret', domain: '127.0.0.1', path: '/' }],
         onResponse: (response) => rateResponses.push({
           body: response.body,
@@ -140,6 +141,52 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
     }
   });
 
+  test('採取専用再送要求のmethod/header/bodyを各sampleへ適用する', async () => {
+    const received: {
+      method: string | undefined;
+      probe: string | undefined;
+      authorization: string | undefined;
+      cookie: string | undefined;
+      body: string;
+    }[] = [];
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => chunks.push(chunk));
+      request.on('end', () => {
+        received.push({
+          method: request.method,
+          probe: request.headers['x-probe'] as string | undefined,
+          authorization: request.headers.authorization,
+          cookie: request.headers.cookie,
+          body: Buffer.concat(chunks).toString('utf8'),
+        });
+        response.writeHead(200, { 'Content-Type': 'text/plain' });
+        response.end('token=replayed');
+      });
+    });
+    const base = await listen(server);
+    try {
+      const transport = new NodeSequencerTransport({ timeoutMs: 5_000, requestsPerSecond: 1000 });
+      await transport.collect({
+        targetUrl: `${base}/token`,
+        samples: 2,
+        replayRequest: {
+          method: 'POST',
+          headers: [['X-Probe', 'probe-secret'], ['Authorization', 'Bearer request-secret'], ['Cookie', 'manual=one']],
+          body: 'seed=request-secret',
+        },
+        sessionCookies: [{ name: 'ROLE', value: 'role-secret', domain: '127.0.0.1', path: '/' }],
+        onResponse: () => undefined,
+      });
+      assert.deepEqual(received, [
+        { method: 'POST', probe: 'probe-secret', authorization: 'Bearer request-secret', cookie: 'manual=one; ROLE=role-secret', body: 'seed=request-secret' },
+        { method: 'POST', probe: 'probe-secret', authorization: 'Bearer request-secret', cookie: 'manual=one; ROLE=role-secret', body: 'seed=request-secret' },
+      ]);
+    } finally {
+      await close(server);
+    }
+  });
+
   test('cancel は進行中の収集を止め、次のHTTP requestを送らない', async () => {
     let requests = 0;
     let markStarted: (() => void) | undefined;
@@ -156,6 +203,7 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
       const pending = transport.collect({
         targetUrl: `${base}/token`,
         samples: 30,
+        replayRequest: { method: 'GET', headers: [], body: '' },
         signal: cancellation.signal,
         onResponse: () => assert.fail('cancelled in-flight request must not produce a response'),
       });

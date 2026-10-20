@@ -2,7 +2,8 @@
  * Core API (ローカル REST) の seed。`docs/design/18-extension-api.md`、design/19 §3。
  * UI と CLI が共有するローカル契約の実体。node:http のみで実装し、依存を追加しない。
  *
- * - 変更系は JSON body を 1 MiB 上限で受け、DomainError を安定した HTTP status + code へ写す。
+ * - 変更系は原則 JSON body を 1 MiB 上限で受ける。Sequencer再送bodyを含む経路だけは、
+ *   JSON escapeの膨張を含めて8 MiBの専用envelope上限を使う。
  * - wildcard CORS は許可しない (loopback 既定・F20 §5)。
  * - /api/events は cursor (since) 以降の監査 event を NDJSON で返す (SSE 実装への土台)。
  */
@@ -13,6 +14,7 @@ import type { BaselineFlowService } from './baseline-flow.ts';
 import { CodecRegistry, compareText, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_SEQUENCER_ENVELOPE_BYTES = 8 * 1024 * 1024;
 const HTTP_STATUS_BY_CODE: Record<DomainErrorCode, number> = {
   ValidationFailed: 400,
   PermissionDenied: 403,
@@ -255,7 +257,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       return respondJson(response, 200, { sessions: service.listSequencerSessions() });
     }
     if (route === 'POST /api/tools/sequencer/runs') {
-      const body = await readJsonBody(request, response);
+      const body = await readJsonBody(request, response, MAX_SEQUENCER_ENVELOPE_BYTES);
       if (body === undefined) {
         return;
       }
@@ -281,6 +283,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           ...(body.tokenFieldName === undefined ? {} : { tokenFieldName: stringField(body, 'tokenFieldName') }),
           ...(body.tokenStartDelimiter === undefined ? {} : { tokenStartDelimiter: stringField(body, 'tokenStartDelimiter') }),
           ...(body.tokenEndDelimiter === undefined ? {} : { tokenEndDelimiter: stringField(body, 'tokenEndDelimiter') }),
+          ...(body.replayRequest === undefined ? {} : { replayRequest: sequencerReplayRequestField(body) }),
           signal: cancellation.signal,
         });
         return respondJson(response, 200, result);
@@ -1045,13 +1048,13 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
   return server;
 }
 
-async function readJsonBody(request: IncomingMessage, response: ServerResponse): Promise<Record<string, unknown> | undefined> {
+async function readJsonBody(request: IncomingMessage, response: ServerResponse, maximumBytes = MAX_BODY_BYTES): Promise<Record<string, unknown> | undefined> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY_BYTES) {
-      respondError(response, 400, 'ValidationFailed', `request body exceeds ${MAX_BODY_BYTES} bytes`, false);
+    if (size > maximumBytes) {
+      respondError(response, 400, 'ValidationFailed', `request body exceeds ${maximumBytes} bytes`, false);
       return undefined;
     }
     chunks.push(chunk as Buffer);
@@ -1109,6 +1112,15 @@ function stringBodyField(body: Record<string, unknown>): string {
     throw new DomainError('ValidationFailed', 'field body must be a string');
   }
   return value;
+}
+
+function sequencerReplayRequestField(body: Record<string, unknown>): { method?: string; headers?: readonly (readonly [string, string])[]; body?: string } {
+  const replay = structField(body, 'replayRequest');
+  const result: { method?: string; headers?: readonly (readonly [string, string])[]; body?: string } = {};
+  if (replay.method !== undefined) result.method = stringField(replay, 'method');
+  if (replay.headers !== undefined) result.headers = headerPairsField(replay);
+  if (replay.body !== undefined) result.body = stringField(replay, 'body');
+  return result;
 }
 
 function requireHash(targetUrl: string): string {

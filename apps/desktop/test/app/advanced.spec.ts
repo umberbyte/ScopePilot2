@@ -331,10 +331,15 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
 
   // Sequencer: sample を収集して統計が返る (token 原文は出ない)。
   await page.getByLabel('sample 数 (30〜10000)').fill('40');
+  await page.getByLabel('採取専用再送 method').fill('POST');
+  await page.getByLabel('採取専用再送 headers').fill('X-Probe: app-header-secret');
+  await page.getByLabel('採取専用再送 body (UTF-8で1 MiB以下)').fill('seed=app-body-secret');
   await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
   await expect(page.getByText(/結果: assessed \(sample 40・重複 0・欠落 0\)/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/entropy [\d.]+ bits\/byte・出現 byte 種 \d+/)).toBeVisible();
   await expect(page.getByText(/観測token分布のentropy [\d.]+ bits\/token/)).toBeVisible();
+  await expect(page.getByText('再送計画: POST・header名 X-Probe・body 20 bytes (値は非保存)')).toBeVisible();
+  await expect(page.getByTestId('sequencer-result').getByText(/app-(header|body)-secret/)).toHaveCount(0);
   const byteChart = page.getByRole('group', { name: 'byte 出現頻度 (16区間・最大値に対する相対表示)' });
   await expect(byteChart).toBeVisible();
   await expect(byteChart.getByRole('progressbar')).toHaveCount(16);
@@ -342,11 +347,15 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   const characterLengthChart = page.getByRole('group', { name: 'token の文字長分布 (Unicode code point・16区間)' });
   const characterRunLengthChart = page.getByRole('group', { name: 'token の最長同一文字連長分布 (Unicode code point・16区間)' });
   const hammingDistanceChart = page.getByRole('group', { name: '隣接tokenのbit Hamming距離分布 (同一UTF-8 byte長・16区間)' });
+  const numericDeltaChart = page.getByRole('group', { name: '隣接する数値tokenの絶対差分分布 (安全整数・16区間)' });
   await expect(byteLengthChart.getByRole('progressbar')).toHaveCount(16);
   await expect(characterLengthChart.getByRole('progressbar')).toHaveCount(16);
   await expect(characterRunLengthChart.getByRole('progressbar')).toHaveCount(16);
   await expect(hammingDistanceChart.getByRole('progressbar')).toHaveCount(16);
+  await expect(numericDeltaChart.getByRole('progressbar')).toHaveCount(16);
   await expect(page.getByText(/Hamming距離を算出しない長さ不一致pair: \d+/)).toBeVisible();
+  await expect(page.getByText('数値差分: 減少 0・不変 0・増加 0・対象外pair 39')).toBeVisible();
+  await expect(page.getByText('数値tokenのlag-1 Pearson相関: 算出不能 (pair 0・標本数または分散不足)')).toBeVisible();
   const alphabetChart = page.getByRole('group', { name: '観測alphabetの文字class構成' });
   await expect(alphabetChart.getByText(/観測alphabet: \d+ Unicode code point種/)).toBeVisible();
   await expect(alphabetChart.getByRole('progressbar')).toHaveCount(8);

@@ -26,16 +26,16 @@ ComparerService（新規）:
 SequencerService（新規・A3）:
   採取: ログイン応答等からトークン（Cookie/hidden/bearer）をN回採取。
   採取は「採取専用の再送計画」として認可・上限の内側で実行（採取も通信を発生させる）
-  解析: 文字別頻度・エントロピー・連長・既知乱数との比較・連続値の差分。
+  解析: 文字別頻度・エントロピー・連長・隣接値のHamming距離・数値差分・serial correlation。
   「統計的に劣る」ことをもって脆弱と確定しない。標本数・制約・検定の前提を必ず表示
 ```
 
-2026-10-20 時点の実収集経路は、許可済み `targetUrl` への逐次 GET と本文中の
-`token=...`、名前を指定した応答 `Set-Cookie`、名前を指定したHTML `hidden` input、応答 `Authorization` の Bearer token、または開始・終了delimiterを指定した本文からの抽出に限定する。`NodeSequencerTransport` が既定 2 RPS、応答 1 MiB 上限、
-redirect 非追従で収集し、応答本文は抽出 callback の間だけ保持する。任意の認証roleを指定すると、
-事前のlogin成功sessionから対象URLのdomain/pathへ適用可能なcookieだけを各収集requestへ付ける。
-認証cookie値はtransport外へ出さず、結果・台帳には適用名だけを残す。応答cookie値も抽出 callback の間だけ扱い、
-結果・台帳には抽出元と該当するcookie名・field名・delimiter対だけを残す。hidden値も上限付き属性走査の間だけ扱う。応答Authorization値も抽出 callback の間だけ扱い、Bearer schemeとRFC 6750のb64token構文に一致する単一値だけを採用する。本文custom extractorは開始・終了delimiterを各UTF-8 128 bytes以下、本文走査1 MiB、token 4 KiBに制限し、任意regexは実行しない。画面の停止またはAPI client切断は`AbortSignal`としてCoreとtransportへ伝播し、進行中の要求を破棄して以後の送信を止める。中断した採取は完了sessionとして保存しない。解析済み結果はbyte値の固定16区間に加え、各tokenのUTF-8 byte長・Unicode code point数・最長同一code point連長、および同一UTF-8 byte長の隣接token間bit Hamming距離を固定16区間（0、1、2、3–4、以降は概ね倍幅、8,193以上）へ集約した件数を返す。長さが異なる隣接pairは距離を算出せず件数だけを返す。alphabetは観測Unicode code pointの種類数と固定8文字classへ集約し、文字そのものや並びを返さない。位置別頻度は先頭64 Unicode code pointだけを同じ8 classへ集約し、上限を超えたsample数だけを別に返す。token当たりShannon entropyは観測token値の経験分布から算出し、値別件数や原文は返さない。A10では全体集約・連長・Hamming距離を相対頻度bar、位置別集約をscroll可能な表、token entropyをsample数に制約された補助統計として表示する。個別sample長・連長・pair別距離は返さない。method/header/bodyを任意化する完全な採取専用再送計画は後続とし、現行経路と区別する。
+2026-10-20 時点の実収集経路は、許可済み `targetUrl` に対する採取専用再送requestを逐次反復し、本文中の
+`token=...`、名前を指定した応答 `Set-Cookie`、名前を指定したHTML `hidden` input、応答 `Authorization` の Bearer token、または開始・終了delimiterを指定した本文から抽出する。再送requestはmethod、header名/値pair、本文からなり、既定はGET・headerなし・空本文とする。Coreはmethodを最大32文字のRFC token（CONNECTを除外）、headerを最大64件・合計32 KiB・名前最大128文字・大小文字非依存で重複なし、本文をUTF-8で1 MiB以下に検証する。Host、Content-Length、Connection、Transfer-Encoding等はtransport管理headerとして拒否する。`NodeSequencerTransport` が同一の検証済みrequestを既定 2 RPS、応答 1 MiB 上限、redirect非追従で送信し、本文・header値はtransport外へ保存しない。結果・session台帳・監査にはmethod、header名、本文byte数だけを残す。
+
+任意の認証roleを指定すると、事前のlogin成功sessionから対象URLのdomain/pathへ適用可能なcookieだけを各収集requestへ付ける。利用者指定Cookieがある場合はこれへ結合する。認証cookie値はtransport外へ出さず、結果・台帳には適用名だけを残す。応答cookie値・hidden値・応答Authorization値・応答本文も上限付き抽出 callback の間だけ扱う。BearerはRFC 6750のb64token構文に一致する単一値だけを採用する。本文custom extractorは開始・終了delimiterを各UTF-8 128 bytes以下、本文走査1 MiB、token 4 KiBに制限し、任意regexは実行しない。画面の停止またはAPI client切断は`AbortSignal`としてCoreとtransportへ伝播し、進行中の要求を破棄して以後の送信を止める。中断した採取は完了sessionとして保存しない。
+
+解析済み結果はbyte値の固定16区間に加え、各tokenのUTF-8 byte長・Unicode code point数・最長同一code point連長、および同一UTF-8 byte長の隣接token間bit Hamming距離を固定16区間（0、1、2、3–4、以降は概ね倍幅、8,193以上）へ集約した件数を返す。長さが異なる隣接pairは距離を算出せず件数だけを返す。全体が最大16桁のsafe integerである10進tokenの隣接pairは、絶対差を同じ16区間、方向を減少・不変・増加へ集約し、非数値pair数を別に返す。同じ有効pairからlag-1 Pearson serial correlationを求めるが、pairが2未満または分散0なら係数を返さない。alphabetは観測Unicode code pointの種類数と固定8文字classへ集約し、文字そのものや並びを返さない。位置別頻度は先頭64 Unicode code pointだけを同じ8 classへ集約し、上限を超えたsample数だけを別に返す。token当たりShannon entropyは観測token値の経験分布から算出し、値別件数や原文は返さない。A10では全体集約・連長・Hamming距離・数値差分を相対頻度bar、位置別集約をscroll可能な表、token entropyとserial correlationをsample/pair数に制約された補助統計として表示する。個別sample長・連長・pair別距離・数値token値・pair別差分は返さない。
 
 ## 4. データモデル
 
@@ -51,8 +51,8 @@ redirect 非追従で収集し、応答本文は抽出 callback の間だけ保�
 
 ## 6. UI
 
-- 「ツール」領域に Decoder（連続変換パネル）・Comparer（2ペイン差分）・Sequencer（採取設定、
-  統計表、byte/token当たりentropy、固定16区間のbyte頻度chart・tokenのbyte/文字長/最長同一文字連長/隣接tokenのbit Hamming距離分布chart・alphabet文字class chart・先頭64文字の位置別class表）を配置。任意の通信・任意の観測から「この要求を Decoder/Comparer へ」で直接渡せる。
+- 「ツール」領域に Decoder（連続変換パネル）・Comparer（2ペイン差分）・Sequencer（採取専用method/header/body設定、
+  統計表、byte/token当たりentropy、固定16区間のbyte頻度chart・tokenのbyte/文字長/最長同一文字連長/隣接tokenのbit Hamming距離/数値差分分布chart・serial correlation・alphabet文字class chart・先頭64文字の位置別class表）を配置。任意の通信・任意の観測から「この要求を Decoder/Comparer へ」で直接渡せる。
 
 ## 7. 確定事項
 

@@ -5,6 +5,7 @@ import {
   assess,
   createSamplePlan,
   createSequencerExtractor,
+  createSequencerReplayRequest,
   extractBearerToken,
   extractCookieToken,
   extractDelimitedToken,
@@ -220,6 +221,36 @@ describe('Sequencer', () => {
       5,
     );
     assert.equal(JSON.stringify(distribution).includes('ÿ'), false, '比較したtoken原文は統計へ残さない');
+  });
+
+  test('[F07-UT-019] 安全整数tokenの隣接差分を絶対値bucketと増減件数へ集約する', () => {
+    const distribution = analyzeEntropy(['10', '11', '13', '13', '8', 'not-a-number']);
+    assert.deepEqual(distribution.adjacentNumericAbsoluteDeltaBuckets, [1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert.deepEqual(distribution.adjacentNumericDeltaSignCounts, { decreasing: 1, unchanged: 1, increasing: 2 });
+    assert.equal(distribution.adjacentNumericIneligiblePairs, 1);
+    assert.equal(JSON.stringify(distribution).includes('not-a-number'), false);
+  });
+
+  test('[F07-UT-020] 数値token系列のlag-1 Pearson相関を返し、分散不足は未定義にする', () => {
+    const increasing = analyzeEntropy(['1', '2', '3', '4']);
+    assert.equal(increasing.adjacentNumericSerialCorrelationPairs, 3);
+    assert.equal(increasing.adjacentNumericSerialCorrelation, 1);
+    const fixed = analyzeEntropy(['7', '7', '7']);
+    assert.equal(fixed.adjacentNumericSerialCorrelationPairs, 2);
+    assert.equal(fixed.adjacentNumericSerialCorrelation, undefined);
+  });
+
+  test('[F07-UT-021] 採取専用再送要求はmethod/header/bodyをboundedに検証する', () => {
+    assert.deepEqual(createSequencerReplayRequest(), { method: 'GET', headers: [], body: '' });
+    assert.deepEqual(createSequencerReplayRequest({ method: 'post', headers: [['X-Probe', 'one:two']], body: 'seed=1' }), {
+      method: 'POST', headers: [['X-Probe', 'one:two']], body: 'seed=1',
+    });
+    assert.throws(() => createSequencerReplayRequest({ method: 'CONNECT' }), /other than CONNECT/);
+    assert.throws(() => createSequencerReplayRequest({ headers: [['Host', 'elsewhere.test']] }), /managed by the transport/);
+    assert.throws(() => createSequencerReplayRequest({ headers: [['X-Test', 'one\ntwo']] }), /field-value characters/);
+    assert.throws(() => createSequencerReplayRequest({ headers: [['X-Test', 'emoji-😀']] }), /field-value characters/);
+    assert.throws(() => createSequencerReplayRequest({ headers: [['X-Test', 'one'], ['x-test', 'two']] }), /must not be duplicated/);
+    assert.throws(() => createSequencerReplayRequest({ body: 'x'.repeat(1024 * 1024 + 1) }), /body exceeds/);
   });
 
   test('[F07-UT-005] sample 不足は断定せず insufficient を返す', () => {

@@ -1332,13 +1332,20 @@ describe('Core API server (node:http)', () => {
     const run = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 40 }),
+      body: JSON.stringify({
+        targetUrl: 'http://fixture.target.test/session-token',
+        samples: 40,
+        replayRequest: { method: 'POST', headers: [['X-Probe', 'api-header-secret']], body: 'seed=api-body-secret' },
+      }),
     });
     assert.equal(run.status, 200);
-    const result = (await run.json()) as { tokenSource: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; shannonEntropyBitsPerToken?: number; byteFrequencyBuckets?: readonly number[]; tokenLengthBucketMinimums?: readonly number[]; tokenByteLengthBuckets?: readonly number[]; tokenCharacterLengthBuckets?: readonly number[]; tokenMaximumCharacterRunLengthBuckets?: readonly number[]; adjacentTokenBitHammingDistanceBuckets?: readonly number[]; adjacentTokenHammingUnequalByteLengthPairs?: number; observedAlphabetSize?: number; alphabetClassCounts?: Readonly<Record<string, number>>; positionAnalysisLimit?: number; positionAlphabetClassCounts?: readonly Readonly<Record<string, number>>[]; positionOverflowSamples?: number };
+    const result = (await run.json()) as { tokenSource: string; requestMethod: string; requestHeaderNames: readonly string[]; requestBodyBytes: number; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; shannonEntropyBitsPerToken?: number; byteFrequencyBuckets?: readonly number[]; tokenLengthBucketMinimums?: readonly number[]; tokenByteLengthBuckets?: readonly number[]; tokenCharacterLengthBuckets?: readonly number[]; tokenMaximumCharacterRunLengthBuckets?: readonly number[]; adjacentTokenBitHammingDistanceBuckets?: readonly number[]; adjacentTokenHammingUnequalByteLengthPairs?: number; adjacentNumericAbsoluteDeltaBuckets?: readonly number[]; adjacentNumericDeltaSignCounts?: Readonly<Record<string, number>>; adjacentNumericIneligiblePairs?: number; adjacentNumericSerialCorrelationPairs?: number; adjacentNumericSerialCorrelation?: number; observedAlphabetSize?: number; alphabetClassCounts?: Readonly<Record<string, number>>; positionAnalysisLimit?: number; positionAlphabetClassCounts?: readonly Readonly<Record<string, number>>[]; positionOverflowSamples?: number };
     assert.equal(result.verdict, 'assessed');
     assert.equal(result.tokenSource, 'body');
     assert.equal(result.sampleCount, 40);
+    assert.equal(result.requestMethod, 'POST');
+    assert.deepEqual(result.requestHeaderNames, ['X-Probe']);
+    assert.equal(result.requestBodyBytes, 20);
     assert.ok((result.shannonEntropyBitsPerToken ?? 0) > 0);
     assert.equal(result.byteFrequencyBuckets?.length, 16);
     assert.ok((result.byteFrequencyBuckets?.reduce((sum, count) => sum + count, 0) ?? 0) > 0);
@@ -1351,6 +1358,10 @@ describe('Core API server (node:http)', () => {
         + (result.adjacentTokenHammingUnequalByteLengthPairs ?? 0),
       39,
     );
+    assert.equal(result.adjacentNumericAbsoluteDeltaBuckets?.reduce((sum, count) => sum + count, 0), 0);
+    assert.equal(result.adjacentNumericIneligiblePairs, 39);
+    assert.equal(result.adjacentNumericSerialCorrelationPairs, 0);
+    assert.equal(result.adjacentNumericSerialCorrelation, undefined);
     assert.ok((result.observedAlphabetSize ?? 0) > 0);
     assert.ok(Object.values(result.alphabetClassCounts ?? {}).reduce((sum, count) => sum + count, 0) > 0);
     assert.equal(result.positionAnalysisLimit, 64);
@@ -1358,6 +1369,8 @@ describe('Core API server (node:http)', () => {
     assert.ok((result.positionAlphabetClassCounts?.length ?? 0) <= 64);
     assert.equal(result.positionOverflowSamples, 0);
     assert.equal(JSON.stringify(result).includes('token=sample-'), false, 'token 原文は応答に出ない');
+    assert.equal(JSON.stringify(result).includes('api-header-secret'), false, '再送header値は応答に出ない');
+    assert.equal(JSON.stringify(result).includes('api-body-secret'), false, '再送bodyは応答に出ない');
 
     const cookieRun = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
       method: 'POST',

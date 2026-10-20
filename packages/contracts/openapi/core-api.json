@@ -1714,6 +1714,21 @@
                             "type": "string",
                             "description": "tokenSource が custom の場合に使用した終了delimiter。token値は含めない"
                           },
+                          "requestMethod": {
+                            "type": "string",
+                            "description": "検証済み採取専用再送method"
+                          },
+                          "requestHeaderNames": {
+                            "type": "array",
+                            "description": "採取専用再送で使用したheader名。値は含まない",
+                            "items": { "type": "string" }
+                          },
+                          "requestBodyBytes": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1048576,
+                            "description": "採取専用再送bodyのUTF-8 byte数。body自体は含まない"
+                          },
                           "verdict": {
                             "type": "string",
                             "enum": [
@@ -1812,6 +1827,39 @@
                             "type": "integer",
                             "minimum": 0,
                             "description": "assessed 時のみ。UTF-8 byte長が異なるためHamming距離を算出しなかった隣接pair数"
+                          },
+                          "adjacentNumericAbsoluteDeltaBuckets": {
+                            "type": "array",
+                            "minItems": 16,
+                            "maxItems": 16,
+                            "description": "assessed 時のみ。安全整数の10進tokenとして解釈できた隣接pairの絶対差分を固定16区間へまとめたpair数",
+                            "items": { "type": "integer", "minimum": 0 }
+                          },
+                          "adjacentNumericDeltaSignCounts": {
+                            "type": "object",
+                            "required": ["decreasing", "unchanged", "increasing"],
+                            "properties": {
+                              "decreasing": { "type": "integer", "minimum": 0 },
+                              "unchanged": { "type": "integer", "minimum": 0 },
+                              "increasing": { "type": "integer", "minimum": 0 }
+                            },
+                            "additionalProperties": false
+                          },
+                          "adjacentNumericIneligiblePairs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "assessed 時のみ。両tokenを安全整数の10進表記として解釈できなかった隣接pair数"
+                          },
+                          "adjacentNumericSerialCorrelationPairs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "assessed 時のみ。lag-1 Pearson相関へ使用した隣接数値pair数"
+                          },
+                          "adjacentNumericSerialCorrelation": {
+                            "type": "number",
+                            "minimum": -1,
+                            "maximum": 1,
+                            "description": "assessedかつ分散がある場合のみ。数値tokenのlag-1 Pearson相関。予測可能性を断定しない"
                           },
                           "observedAlphabetSize": {
                             "type": "integer",
@@ -1926,6 +1974,35 @@
                     "maxLength": 128,
                     "description": "tokenSource が custom の場合の終了delimiter。Coreはcontrol文字を拒否しUTF-8で128 bytes以下に制限する"
                   },
+                  "replayRequest": {
+                    "type": "object",
+                    "description": "全sampleへ同一内容を送る採取専用再送要求。値は結果・台帳・監査へ保存しない",
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 32,
+                        "default": "GET"
+                      },
+                      "headers": {
+                        "type": "array",
+                        "maxItems": 64,
+                        "items": {
+                          "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "prefixItems": [
+                            { "type": "string" },
+                            { "type": "string" }
+                          ]
+                        }
+                      },
+                      "body": {
+                        "type": "string",
+                        "description": "UTF-8で1 MiB以下。byte上限はCoreで検証する"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
                   "role": {
                     "type": "string",
                     "description": "runLogin 済みの任意role。対象URLへ適用可能なcookieだけを収集requestへ付ける"
@@ -1976,6 +2053,21 @@
                     "tokenEndDelimiter": {
                       "type": "string",
                       "description": "tokenSource が custom の場合に使用した終了delimiter。token値は含めない"
+                    },
+                    "requestMethod": {
+                      "type": "string",
+                      "description": "検証済み採取専用再送method"
+                    },
+                    "requestHeaderNames": {
+                      "type": "array",
+                      "description": "採取専用再送で使用したheader名。値は含まない",
+                      "items": { "type": "string" }
+                    },
+                    "requestBodyBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1048576,
+                      "description": "採取専用再送bodyのUTF-8 byte数。body自体は含まない"
                     },
                     "verdict": {
                       "type": "string",
@@ -2076,6 +2168,39 @@
                       "minimum": 0,
                       "description": "assessed 時のみ。UTF-8 byte長が異なるためHamming距離を算出しなかった隣接pair数"
                     },
+                    "adjacentNumericAbsoluteDeltaBuckets": {
+                      "type": "array",
+                      "minItems": 16,
+                      "maxItems": 16,
+                      "description": "assessed 時のみ。安全整数の10進tokenとして解釈できた隣接pairの絶対差分を固定16区間へまとめたpair数",
+                      "items": { "type": "integer", "minimum": 0 }
+                    },
+                    "adjacentNumericDeltaSignCounts": {
+                      "type": "object",
+                      "required": ["decreasing", "unchanged", "increasing"],
+                      "properties": {
+                        "decreasing": { "type": "integer", "minimum": 0 },
+                        "unchanged": { "type": "integer", "minimum": 0 },
+                        "increasing": { "type": "integer", "minimum": 0 }
+                      },
+                      "additionalProperties": false
+                    },
+                    "adjacentNumericIneligiblePairs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "assessed 時のみ。両tokenを安全整数の10進表記として解釈できなかった隣接pair数"
+                    },
+                    "adjacentNumericSerialCorrelationPairs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "assessed 時のみ。lag-1 Pearson相関へ使用した隣接数値pair数"
+                    },
+                    "adjacentNumericSerialCorrelation": {
+                      "type": "number",
+                      "minimum": -1,
+                      "maximum": 1,
+                      "description": "assessedかつ分散がある場合のみ。数値tokenのlag-1 Pearson相関。予測可能性を断定しない"
+                    },
                     "observedAlphabetSize": {
                       "type": "integer",
                       "minimum": 0,
@@ -2124,6 +2249,9 @@
                     "sessionId",
                     "targetUrl",
                     "tokenSource",
+                    "requestMethod",
+                    "requestHeaderNames",
+                    "requestBodyBytes",
                     "verdict",
                     "sampleCount",
                     "duplicates",

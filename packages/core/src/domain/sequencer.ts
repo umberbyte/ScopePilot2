@@ -8,6 +8,63 @@ import { domainError } from '@scopepilot2/contracts';
 export const SEQUENCER_MIN_SAMPLES = 30;
 export const SEQUENCER_DEFAULT_SAMPLES = 100;
 export const SEQUENCER_MAX_SAMPLES = 10000;
+export const SEQUENCER_MAX_REPLAY_BODY_BYTES = 1024 * 1024;
+
+export interface SequencerReplayRequest {
+  readonly method: string;
+  readonly headers: readonly (readonly [string, string])[];
+  readonly body: string;
+}
+
+const HTTP_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const FORBIDDEN_REPLAY_HEADERS = new Set([
+  'connection', 'content-length', 'host', 'proxy-connection', 'te', 'trailer', 'transfer-encoding', 'upgrade',
+]);
+
+/** 採取専用再送要求を1回だけ検証し、全sampleで同じimmutable planを使う。 */
+export function createSequencerReplayRequest(input?: {
+  readonly method?: string;
+  readonly headers?: readonly (readonly [string, string])[];
+  readonly body?: string;
+}): SequencerReplayRequest {
+  const method = (input?.method ?? 'GET').toUpperCase();
+  const headers = input?.headers ?? [];
+  const body = input?.body ?? '';
+  if (method.length === 0 || method.length > 32 || !HTTP_TOKEN.test(method) || method === 'CONNECT') {
+    throw domainError('ValidationFailed', 'sequencer replay method must be an RFC token of at most 32 characters other than CONNECT');
+  }
+  if (headers.length > 64) {
+    throw domainError('ValidationFailed', 'sequencer replay headers must contain at most 64 entries');
+  }
+  const seen = new Set<string>();
+  let headerBytes = 0;
+  const normalizedHeaders = headers.map(([rawName, value]) => {
+    const name = rawName.trim();
+    const lowerName = name.toLowerCase();
+    headerBytes += Buffer.byteLength(name, 'utf8') + Buffer.byteLength(value, 'utf8');
+    if (name.length === 0 || name.length > 128 || !HTTP_TOKEN.test(name)) {
+      throw domainError('ValidationFailed', 'sequencer replay header names must be RFC tokens of at most 128 characters');
+    }
+    if (/[^\u0009\u0020-\u007e\u0080-\u00ff]/.test(value)) {
+      throw domainError('ValidationFailed', 'sequencer replay header values must contain only HTTP/1 field-value characters');
+    }
+    if (FORBIDDEN_REPLAY_HEADERS.has(lowerName)) {
+      throw domainError('ValidationFailed', `sequencer replay header '${name}' is managed by the transport`);
+    }
+    if (seen.has(lowerName)) {
+      throw domainError('ValidationFailed', `sequencer replay header '${name}' must not be duplicated`);
+    }
+    seen.add(lowerName);
+    return Object.freeze([name, value] as const);
+  });
+  if (headerBytes > 32 * 1024) {
+    throw domainError('ValidationFailed', 'sequencer replay headers exceed 32768 UTF-8 bytes');
+  }
+  if (Buffer.byteLength(body, 'utf8') > SEQUENCER_MAX_REPLAY_BODY_BYTES) {
+    throw domainError('ValidationFailed', `sequencer replay body exceeds ${SEQUENCER_MAX_REPLAY_BODY_BYTES} UTF-8 bytes`);
+  }
+  return Object.freeze({ method, headers: Object.freeze(normalizedHeaders), body });
+}
 
 /** 29 / 10,001 sample は境界外として拒否する (F07-UT-001)。 */
 export function createSamplePlan(requested: number): { target: number } {
@@ -298,6 +355,13 @@ export interface EntropyResult {
   readonly adjacentTokenBitHammingDistanceBuckets: readonly number[];
   /** UTF-8 byte 長が異なるため Hamming 距離を算出しなかった隣接 pair 数。 */
   readonly adjacentTokenHammingUnequalByteLengthPairs: number;
+  /** 安全整数の10進tokenとして解釈できた隣接pairの絶対差分分布。 */
+  readonly adjacentNumericAbsoluteDeltaBuckets: readonly number[];
+  readonly adjacentNumericDeltaSignCounts: NumericDeltaSignCounts;
+  readonly adjacentNumericIneligiblePairs: number;
+  readonly adjacentNumericSerialCorrelationPairs: number;
+  /** lag-1 Pearson相関。分散不足時は未定義のためfield自体を返さない。 */
+  readonly adjacentNumericSerialCorrelation?: number;
   /** 観測した Unicode code point の種類数。文字そのものは返さない。 */
   readonly observedAlphabetSize: number;
   /** 文字集合を固定classへ集約した出現数。順序や個々の文字は含まない。 */
@@ -305,6 +369,12 @@ export interface EntropyResult {
   readonly positionAnalysisLimit: number;
   readonly positionAlphabetClassCounts: readonly AlphabetClassCounts[];
   readonly positionOverflowSamples: number;
+}
+
+export interface NumericDeltaSignCounts {
+  readonly decreasing: number;
+  readonly unchanged: number;
+  readonly increasing: number;
 }
 
 export interface AlphabetClassCounts {
@@ -381,6 +451,30 @@ function bitHammingDistance(left: Uint8Array, right: Uint8Array): number {
   return distance;
 }
 
+function numericTokenValue(token: string): number | undefined {
+  if (!/^[+-]?[0-9]{1,16}$/.test(token)) return undefined;
+  const value = Number(token);
+  return Number.isSafeInteger(value) ? value : undefined;
+}
+
+function serialCorrelation(pairs: readonly (readonly [number, number])[]): number | undefined {
+  if (pairs.length < 2) return undefined;
+  const leftMean = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
+  const rightMean = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
+  let covariance = 0;
+  let leftVariance = 0;
+  let rightVariance = 0;
+  for (const [left, right] of pairs) {
+    const leftOffset = left - leftMean;
+    const rightOffset = right - rightMean;
+    covariance += leftOffset * rightOffset;
+    leftVariance += leftOffset * leftOffset;
+    rightVariance += rightOffset * rightOffset;
+  }
+  const denominator = Math.sqrt(leftVariance * rightVariance);
+  return denominator === 0 ? undefined : Number((covariance / denominator).toFixed(4));
+}
+
 /** 固定 bytes には決定的な低 entropy を返す (F07-UT-007 ではなく F07-UT-004)。 */
 export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
   const bytes = Buffer.from(tokens.join(''), 'utf8');
@@ -391,6 +485,8 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
   const tokenCharacterLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
   const tokenMaximumCharacterRunLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
   const adjacentTokenBitHammingDistanceBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
+  const adjacentNumericAbsoluteDeltaBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
+  const adjacentNumericDeltaSignCounts = { decreasing: 0, unchanged: 0, increasing: 0 };
   const observedAlphabet = new Set<string>();
   const alphabetClassCounts = createAlphabetClassCounts();
   const positionAlphabetClassCounts: Record<AlphabetClass, number>[] = [];
@@ -424,16 +520,34 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
     byteFrequencyBuckets[bucket] = (byteFrequencyBuckets[bucket] ?? 0) + 1;
   }
   let adjacentTokenHammingUnequalByteLengthPairs = 0;
+  let adjacentNumericIneligiblePairs = 0;
+  const adjacentNumericPairs: [number, number][] = [];
   for (let index = 1; index < tokens.length; index += 1) {
-    const left = Buffer.from(tokens[index - 1] ?? '', 'utf8');
-    const right = Buffer.from(tokens[index] ?? '', 'utf8');
+    const leftToken = tokens[index - 1] ?? '';
+    const rightToken = tokens[index] ?? '';
+    const left = Buffer.from(leftToken, 'utf8');
+    const right = Buffer.from(rightToken, 'utf8');
     if (left.length !== right.length) {
       adjacentTokenHammingUnequalByteLengthPairs += 1;
+    } else {
+      const bucket = tokenLengthBucketIndex(bitHammingDistance(left, right));
+      adjacentTokenBitHammingDistanceBuckets[bucket] = (adjacentTokenBitHammingDistanceBuckets[bucket] ?? 0) + 1;
+    }
+    const leftNumber = numericTokenValue(leftToken);
+    const rightNumber = numericTokenValue(rightToken);
+    if (leftNumber === undefined || rightNumber === undefined) {
+      adjacentNumericIneligiblePairs += 1;
       continue;
     }
-    const bucket = tokenLengthBucketIndex(bitHammingDistance(left, right));
-    adjacentTokenBitHammingDistanceBuckets[bucket] = (adjacentTokenBitHammingDistanceBuckets[bucket] ?? 0) + 1;
+    const delta = rightNumber - leftNumber;
+    const deltaBucket = tokenLengthBucketIndex(Math.abs(delta));
+    adjacentNumericAbsoluteDeltaBuckets[deltaBucket] = (adjacentNumericAbsoluteDeltaBuckets[deltaBucket] ?? 0) + 1;
+    if (delta < 0) adjacentNumericDeltaSignCounts.decreasing += 1;
+    else if (delta > 0) adjacentNumericDeltaSignCounts.increasing += 1;
+    else adjacentNumericDeltaSignCounts.unchanged += 1;
+    adjacentNumericPairs.push([leftNumber, rightNumber]);
   }
+  const adjacentNumericSerialCorrelation = serialCorrelation(adjacentNumericPairs);
   let entropy = 0;
   for (const count of counts.values()) {
     const p = count / bytes.length;
@@ -455,6 +569,11 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
     tokenMaximumCharacterRunLengthBuckets: Object.freeze(tokenMaximumCharacterRunLengthBuckets),
     adjacentTokenBitHammingDistanceBuckets: Object.freeze(adjacentTokenBitHammingDistanceBuckets),
     adjacentTokenHammingUnequalByteLengthPairs,
+    adjacentNumericAbsoluteDeltaBuckets: Object.freeze(adjacentNumericAbsoluteDeltaBuckets),
+    adjacentNumericDeltaSignCounts: Object.freeze(adjacentNumericDeltaSignCounts),
+    adjacentNumericIneligiblePairs,
+    adjacentNumericSerialCorrelationPairs: adjacentNumericPairs.length,
+    ...(adjacentNumericSerialCorrelation === undefined ? {} : { adjacentNumericSerialCorrelation }),
     observedAlphabetSize: observedAlphabet.size,
     alphabetClassCounts: Object.freeze(alphabetClassCounts),
     positionAnalysisLimit: SEQUENCER_POSITION_LIMIT,

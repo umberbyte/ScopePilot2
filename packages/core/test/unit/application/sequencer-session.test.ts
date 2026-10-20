@@ -101,6 +101,47 @@ describe('sequencer session (service)', () => {
     assert.equal(eventsText.includes('sample-'), false);
   });
 
+  test('採取専用再送要求をtransportへ渡し、台帳には値を残さず数値系列を解析する', async () => {
+    const calls: Parameters<SequencerTransportPort['collect']>[0][] = [];
+    const sequencerTransport: SequencerTransportPort = {
+      async collect(input) {
+        calls.push(input);
+        for (let index = 0; index < input.samples; index += 1) {
+          input.onResponse({
+            requestUrl: input.targetUrl,
+            status: 200,
+            contentType: 'text/plain',
+            body: `token=${index}`,
+          });
+        }
+      },
+    };
+    const { service, operator } = await bootstrapFlow({ sequencerTransport });
+    const result = await service.runSequencerSession(operator, {
+      targetUrl: 'http://fixture.target.test/numeric-token',
+      samples: 30,
+      replayRequest: {
+        method: 'POST',
+        headers: [['X-Probe', 'header-secret'], ['Authorization', 'Bearer request-secret']],
+        body: 'seed=body-secret',
+      },
+    });
+    assert.equal(calls[0]?.replayRequest.method, 'POST');
+    assert.equal(calls[0]?.replayRequest.headers[0]?.[1], 'header-secret');
+    assert.equal(calls[0]?.replayRequest.body, 'seed=body-secret');
+    assert.equal(result.requestMethod, 'POST');
+    assert.deepEqual(result.requestHeaderNames, ['X-Probe', 'Authorization']);
+    assert.equal(result.requestBodyBytes, 16);
+    assert.deepEqual(result.adjacentNumericDeltaSignCounts, { decreasing: 0, unchanged: 0, increasing: 29 });
+    assert.equal(result.adjacentNumericAbsoluteDeltaBuckets?.reduce((sum, count) => sum + count, 0), 29);
+    assert.equal(result.adjacentNumericSerialCorrelation, 1);
+    assert.equal(result.adjacentNumericSerialCorrelationPairs, 29);
+    const serialized = JSON.stringify({ result, sessions: service.listSequencerSessions(), events: service.events() });
+    assert.equal(serialized.includes('header-secret'), false);
+    assert.equal(serialized.includes('request-secret'), false);
+    assert.equal(serialized.includes('body-secret'), false);
+  });
+
   test('sample 数は domain 境界 (30..10000) で検証される。scope 外は拒否', async () => {
     const { service, operator } = await bootstrapFlow();
     await assert.rejects(

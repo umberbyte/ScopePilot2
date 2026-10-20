@@ -103,6 +103,8 @@ export interface SequencerTransportPort {
   collect(input: {
     readonly targetUrl: string;
     readonly samples: number;
+    /** Coreで検証済みの採取専用再送要求。値はtransport外へ保存しない。 */
+    readonly replayRequest: import('../domain/sequencer.ts').SequencerReplayRequest;
     /** Stop before the next request and abort an in-flight request when signalled. */
     readonly signal?: AbortSignal;
     /** Core-filtered role cookies for this target. Values must stay inside the transport. */

@@ -1,5 +1,5 @@
 /**
- * Sequencer の実 HTTP sample collector (design/f07)。GET を逐次送信し、各応答を
+ * Sequencer の実 HTTP sample collector (design/f07)。検証済み再送要求を逐次送信し、各応答を
  * callback へ渡した直後に破棄する。token 原文を adapter や台帳へ保持しない。
  * sessionCookies は Core が対象URLへ適用可能と判定済みのものだけを受け取る。
  */
@@ -43,28 +43,37 @@ export class NodeSequencerTransport implements SequencerTransportPort {
         await delay(waitMs, undefined, input.signal === undefined ? undefined : { signal: input.signal });
       }
       input.signal?.throwIfAborted();
-      input.onResponse(await this.requestOnce(target, input.sessionCookies, input.signal));
+      input.onResponse(await this.requestOnce(target, input.replayRequest, input.sessionCookies, input.signal));
     }
   }
 
   private async requestOnce(
     target: URL,
+    replayRequest: Parameters<SequencerTransportPort['collect']>[0]['replayRequest'],
     sessionCookies: Parameters<SequencerTransportPort['collect']>[0]['sessionCookies'],
     signal: AbortSignal | undefined,
   ): Promise<SequencerTransportResponse> {
     const requestUrl = target.toString();
     const client = target.protocol === 'https:' ? https : http;
-    const cookieHeader = sessionCookies === undefined || sessionCookies.length === 0
+    const roleCookieHeader = sessionCookies === undefined || sessionCookies.length === 0
       ? undefined
       : sessionCookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
+    const headers: Record<string, string> = Object.fromEntries(replayRequest.headers);
+    const replayCookieName = Object.keys(headers).find((name) => name.toLowerCase() === 'cookie');
+    const replayCookieHeader = replayCookieName === undefined ? undefined : headers[replayCookieName];
+    if (replayCookieName !== undefined) delete headers[replayCookieName];
+    const cookieHeader = [replayCookieHeader, roleCookieHeader].filter((value): value is string => value !== undefined && value !== '').join('; ') || undefined;
+    if (replayRequest.body !== '') {
+      headers['Content-Length'] = String(Buffer.byteLength(replayRequest.body, 'utf8'));
+    }
     return await new Promise<SequencerTransportResponse>((resolve, reject) => {
       const request = client.request(
         {
           hostname: target.hostname,
           port: target.port === '' ? undefined : Number(target.port),
-          method: 'GET',
+          method: replayRequest.method,
           path: `${target.pathname}${target.search}`,
-          headers: { Host: target.host, ...(cookieHeader === undefined ? {} : { Cookie: cookieHeader }) },
+          headers: { ...headers, Host: target.host, ...(cookieHeader === undefined ? {} : { Cookie: cookieHeader }) },
           setHost: false,
           ...(signal === undefined ? {} : { signal }),
         },
@@ -105,7 +114,7 @@ export class NodeSequencerTransport implements SequencerTransportPort {
         request.destroy(new Error('sequencer transport timeout'));
       });
       request.on('error', reject);
-      request.end();
+      request.end(replayRequest.body === '' ? undefined : replayRequest.body);
     });
   }
 }

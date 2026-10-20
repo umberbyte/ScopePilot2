@@ -96,7 +96,7 @@ import {
   type SendAttemptRecord,
 } from '../domain/repeater.ts';
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
-import { assess, createSamplePlan, createSequencerExtractor, extractSequencerToken, reportProjection, SampleCollector, type AlphabetClassCounts } from '../domain/sequencer.ts';
+import { assess, createSamplePlan, createSequencerExtractor, createSequencerReplayRequest, extractSequencerToken, reportProjection, SampleCollector, type AlphabetClassCounts, type NumericDeltaSignCounts } from '../domain/sequencer.ts';
 import { parseOpenApiDocument } from '../domain/api-scanning.ts';
 import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, TokenIssuer, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
 import { buildWsSendPlan, importFrames, sendWithPolicy, validateWsSubprotocols, wsEvidence, type WsFrame } from '../domain/websocket.ts';
@@ -172,6 +172,48 @@ export interface ExploreRunResult {
   readonly candidates: readonly ScanCandidate[];
   readonly engineVersion: string;
 }
+
+type SequencerTokenSource = 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom';
+type SequencerSessionRecord = {
+  sessionId: string;
+  targetUrl: string;
+  tokenSource: SequencerTokenSource;
+  tokenCookieName?: string;
+  tokenFieldName?: string;
+  tokenStartDelimiter?: string;
+  tokenEndDelimiter?: string;
+  requestMethod: string;
+  requestHeaderNames: readonly string[];
+  requestBodyBytes: number;
+  verdict: 'assessed' | 'insufficient';
+  sampleCount: number;
+  duplicates: number;
+  missing: number;
+  shannonEntropyBitsPerByte?: number;
+  shannonEntropyBitsPerToken?: number;
+  distinctByteValues?: number;
+  byteFrequencyBuckets?: readonly number[];
+  tokenLengthBucketMinimums?: readonly number[];
+  tokenByteLengthBuckets?: readonly number[];
+  tokenCharacterLengthBuckets?: readonly number[];
+  tokenMaximumCharacterRunLengthBuckets?: readonly number[];
+  adjacentTokenBitHammingDistanceBuckets?: readonly number[];
+  adjacentTokenHammingUnequalByteLengthPairs?: number;
+  adjacentNumericAbsoluteDeltaBuckets?: readonly number[];
+  adjacentNumericDeltaSignCounts?: NumericDeltaSignCounts;
+  adjacentNumericIneligiblePairs?: number;
+  adjacentNumericSerialCorrelationPairs?: number;
+  adjacentNumericSerialCorrelation?: number;
+  observedAlphabetSize?: number;
+  alphabetClassCounts?: AlphabetClassCounts;
+  positionAnalysisLimit?: number;
+  positionAlphabetClassCounts?: readonly AlphabetClassCounts[];
+  positionOverflowSamples?: number;
+  minimum?: number;
+  sessionCookieNames?: readonly string[];
+  executedAt: string;
+};
+type SequencerSessionResult = Omit<SequencerSessionRecord, 'executedAt'>;
 
 export interface ActiveScanRunResult {
   readonly runRecord: RunRecord;
@@ -256,7 +298,7 @@ export class BaselineFlowService {
   private readonly apiSpecImports: readonly { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[] = [];
 
   /** Sequencer session の台帳 (design/f07)。token 原文は保存しない (統計のみ)。 */
-  private readonly sequencerSessions: readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom'; tokenCookieName?: string; tokenFieldName?: string; tokenStartDelimiter?: string; tokenEndDelimiter?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; shannonEntropyBitsPerToken?: number; distinctByteValues?: number; byteFrequencyBuckets?: readonly number[]; tokenLengthBucketMinimums?: readonly number[]; tokenByteLengthBuckets?: readonly number[]; tokenCharacterLengthBuckets?: readonly number[]; tokenMaximumCharacterRunLengthBuckets?: readonly number[]; adjacentTokenBitHammingDistanceBuckets?: readonly number[]; adjacentTokenHammingUnequalByteLengthPairs?: number; observedAlphabetSize?: number; alphabetClassCounts?: AlphabetClassCounts; positionAnalysisLimit?: number; positionAlphabetClassCounts?: readonly AlphabetClassCounts[]; positionOverflowSamples?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] = [];
+  private readonly sequencerSessions: readonly SequencerSessionRecord[] = [];
 
   /** Repeater の draft 台帳 (design/f04)。tab 上限は domain (20)。 */
   private readonly repeaterDrafts = new DraftRegistry();
@@ -887,8 +929,8 @@ export class BaselineFlowService {
    */
   async runSequencerSession(
     operator: OperatorProfile,
-    input: { readonly targetUrl: string; readonly samples: number; readonly role?: string; readonly tokenSource?: 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom'; readonly tokenCookieName?: string; readonly tokenFieldName?: string; readonly tokenStartDelimiter?: string; readonly tokenEndDelimiter?: string; readonly signal?: AbortSignal },
-  ): Promise<{ sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom'; tokenCookieName?: string; tokenFieldName?: string; tokenStartDelimiter?: string; tokenEndDelimiter?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; shannonEntropyBitsPerToken?: number; distinctByteValues?: number; byteFrequencyBuckets?: readonly number[]; tokenLengthBucketMinimums?: readonly number[]; tokenByteLengthBuckets?: readonly number[]; tokenCharacterLengthBuckets?: readonly number[]; tokenMaximumCharacterRunLengthBuckets?: readonly number[]; adjacentTokenBitHammingDistanceBuckets?: readonly number[]; adjacentTokenHammingUnequalByteLengthPairs?: number; observedAlphabetSize?: number; alphabetClassCounts?: AlphabetClassCounts; positionAnalysisLimit?: number; positionAlphabetClassCounts?: readonly AlphabetClassCounts[]; positionOverflowSamples?: number; minimum?: number; sessionCookieNames?: readonly string[] }> {
+    input: { readonly targetUrl: string; readonly samples: number; readonly role?: string; readonly tokenSource?: SequencerTokenSource; readonly tokenCookieName?: string; readonly tokenFieldName?: string; readonly tokenStartDelimiter?: string; readonly tokenEndDelimiter?: string; readonly replayRequest?: { readonly method?: string; readonly headers?: readonly (readonly [string, string])[]; readonly body?: string }; readonly signal?: AbortSignal },
+  ): Promise<SequencerSessionResult> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -905,6 +947,7 @@ export class BaselineFlowService {
       appliedCookies = applicableSessionCookies([...session.cookies], canonical);
     }
     const plan = createSamplePlan(input.samples);
+    const replayRequest = createSequencerReplayRequest(input.replayRequest);
     const collector = new SampleCollector();
     const extractor = createSequencerExtractor(input.tokenSource ?? 'body', input.tokenCookieName, input.tokenFieldName, input.tokenStartDelimiter, input.tokenEndDelimiter);
     const pattern = /token=([A-Za-z0-9_-]+)/;
@@ -948,6 +991,7 @@ export class BaselineFlowService {
         await this.deps.sequencerTransport.collect({
           targetUrl: canonical,
           samples: plan.target,
+          replayRequest,
           ...(input.signal === undefined ? {} : { signal: input.signal }),
           ...(appliedCookies === undefined ? {} : {
             sessionCookies: appliedCookies.map((cookie) => ({
@@ -960,7 +1004,7 @@ export class BaselineFlowService {
           onResponse: (response) => {
             collector.record(extractSequencerToken(response, extractor, pattern));
             this.recordObservedExchange(
-              { url: response.requestUrl, method: 'GET', status: response.status, contentType: response.contentType },
+              { url: response.requestUrl, method: replayRequest.method, status: response.status, contentType: response.contentType },
               this.deps.clock.now().toISOString(),
               'sequencer',
             );
@@ -986,6 +1030,9 @@ export class BaselineFlowService {
       ...(extractor.source === 'cookie' ? { tokenCookieName: extractor.cookieName } : {}),
       ...(extractor.source === 'hidden' ? { tokenFieldName: extractor.fieldName } : {}),
       ...(extractor.source === 'custom' ? { tokenStartDelimiter: extractor.startDelimiter, tokenEndDelimiter: extractor.endDelimiter } : {}),
+      requestMethod: replayRequest.method,
+      requestHeaderNames: replayRequest.headers.map(([name]) => name),
+      requestBodyBytes: Buffer.byteLength(replayRequest.body, 'utf8'),
       verdict,
       ...projection,
       ...(verdict === 'assessed' ? {
@@ -999,6 +1046,11 @@ export class BaselineFlowService {
         tokenMaximumCharacterRunLengthBuckets: assessment.entropy.tokenMaximumCharacterRunLengthBuckets,
         adjacentTokenBitHammingDistanceBuckets: assessment.entropy.adjacentTokenBitHammingDistanceBuckets,
         adjacentTokenHammingUnequalByteLengthPairs: assessment.entropy.adjacentTokenHammingUnequalByteLengthPairs,
+        adjacentNumericAbsoluteDeltaBuckets: assessment.entropy.adjacentNumericAbsoluteDeltaBuckets,
+        adjacentNumericDeltaSignCounts: assessment.entropy.adjacentNumericDeltaSignCounts,
+        adjacentNumericIneligiblePairs: assessment.entropy.adjacentNumericIneligiblePairs,
+        adjacentNumericSerialCorrelationPairs: assessment.entropy.adjacentNumericSerialCorrelationPairs,
+        ...(assessment.entropy.adjacentNumericSerialCorrelation === undefined ? {} : { adjacentNumericSerialCorrelation: assessment.entropy.adjacentNumericSerialCorrelation }),
         observedAlphabetSize: assessment.entropy.observedAlphabetSize,
         alphabetClassCounts: assessment.entropy.alphabetClassCounts,
         positionAnalysisLimit: assessment.entropy.positionAnalysisLimit,
@@ -1023,7 +1075,7 @@ export class BaselineFlowService {
     return result;
   }
 
-  listSequencerSessions(): readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom'; tokenCookieName?: string; tokenFieldName?: string; tokenStartDelimiter?: string; tokenEndDelimiter?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; shannonEntropyBitsPerToken?: number; distinctByteValues?: number; byteFrequencyBuckets?: readonly number[]; tokenLengthBucketMinimums?: readonly number[]; tokenByteLengthBuckets?: readonly number[]; tokenCharacterLengthBuckets?: readonly number[]; tokenMaximumCharacterRunLengthBuckets?: readonly number[]; adjacentTokenBitHammingDistanceBuckets?: readonly number[]; adjacentTokenHammingUnequalByteLengthPairs?: number; observedAlphabetSize?: number; alphabetClassCounts?: AlphabetClassCounts; positionAnalysisLimit?: number; positionAlphabetClassCounts?: readonly AlphabetClassCounts[]; positionOverflowSamples?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] {
+  listSequencerSessions(): readonly SequencerSessionRecord[] {
     return [...this.sequencerSessions];
   }
 

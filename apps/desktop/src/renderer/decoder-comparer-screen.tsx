@@ -54,6 +54,9 @@ interface AlphabetClassCounts {
 
 interface SequencerResult {
   readonly tokenSource: SequencerTokenSource;
+  readonly requestMethod: string;
+  readonly requestHeaderNames: readonly string[];
+  readonly requestBodyBytes: number;
   readonly tokenCookieName?: string;
   readonly tokenFieldName?: string;
   readonly tokenStartDelimiter?: string;
@@ -72,6 +75,11 @@ interface SequencerResult {
   readonly tokenMaximumCharacterRunLengthBuckets?: readonly number[];
   readonly adjacentTokenBitHammingDistanceBuckets?: readonly number[];
   readonly adjacentTokenHammingUnequalByteLengthPairs?: number;
+  readonly adjacentNumericAbsoluteDeltaBuckets?: readonly number[];
+  readonly adjacentNumericDeltaSignCounts?: Readonly<{ decreasing: number; unchanged: number; increasing: number }>;
+  readonly adjacentNumericIneligiblePairs?: number;
+  readonly adjacentNumericSerialCorrelationPairs?: number;
+  readonly adjacentNumericSerialCorrelation?: number;
   readonly observedAlphabetSize?: number;
   readonly alphabetClassCounts?: AlphabetClassCounts;
   readonly positionAnalysisLimit?: number;
@@ -129,6 +137,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [sequencerTokenFieldName, setSequencerTokenFieldName] = useState('csrf_token');
   const [sequencerTokenStartDelimiter, setSequencerTokenStartDelimiter] = useState('token="');
   const [sequencerTokenEndDelimiter, setSequencerTokenEndDelimiter] = useState('"');
+  const [sequencerRequestMethod, setSequencerRequestMethod] = useState('GET');
+  const [sequencerRequestHeaders, setSequencerRequestHeaders] = useState('');
+  const [sequencerRequestBody, setSequencerRequestBody] = useState('');
   const [sequencerRole, setSequencerRole] = useState('');
   const [sequencerResult, setSequencerResult] = useState<SequencerResult | null>(null);
   const [sequencerRunning, setSequencerRunning] = useState(false);
@@ -196,6 +207,15 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     setSequencerResult(null);
     try {
       const samples = Number(sequencerSamples);
+      const replayHeaders = sequencerRequestHeaders
+        .split('\n')
+        .map((line) => line.trimEnd())
+        .filter((line) => line.trim() !== '')
+        .map((line): readonly [string, string] => {
+          const separator = line.indexOf(':');
+          if (separator <= 0) throw new Error(t('a10.sequencerReplayHeaderFormatError'));
+          return [line.slice(0, separator).trim(), line.slice(separator + 1).trimStart()];
+        });
       setSequencerResult(await callJson<SequencerResult>(apiBase, '/api/tools/sequencer/runs', {
         targetUrl: sequencerTarget,
         samples,
@@ -204,6 +224,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         ...(sequencerTokenSource === 'hidden' ? { tokenFieldName: sequencerTokenFieldName } : {}),
         ...(sequencerTokenSource === 'custom' ? { tokenStartDelimiter: sequencerTokenStartDelimiter, tokenEndDelimiter: sequencerTokenEndDelimiter } : {}),
         ...(sequencerRole.trim() === '' ? {} : { role: sequencerRole.trim() }),
+        replayRequest: { method: sequencerRequestMethod, headers: replayHeaders, body: sequencerRequestBody },
       }, 'POST', controller.signal));
     } catch (cause) {
       if (controller.signal.aborted) {
@@ -218,7 +239,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         setBusy(false);
       }
     }
-  }, [apiBase, sequencerRole, sequencerSamples, sequencerTarget, sequencerTokenCookieName, sequencerTokenEndDelimiter, sequencerTokenFieldName, sequencerTokenSource, sequencerTokenStartDelimiter]);
+  }, [apiBase, sequencerRequestBody, sequencerRequestHeaders, sequencerRequestMethod, sequencerRole, sequencerSamples, sequencerTarget, sequencerTokenCookieName, sequencerTokenEndDelimiter, sequencerTokenFieldName, sequencerTokenSource, sequencerTokenStartDelimiter]);
 
   const stopSequencer = useCallback(() => {
     const controller = sequencerAbort.current;
@@ -501,6 +522,15 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
           </Field>
         </>
       )}
+      <Field label={t('a10.sequencerRequestMethodLabel')}>
+        <Input value={sequencerRequestMethod} onChange={(_, data) => setSequencerRequestMethod(data.value)} />
+      </Field>
+      <Field label={t('a10.sequencerRequestHeadersLabel')} hint={t('a10.sequencerRequestHeadersHint')}>
+        <Textarea value={sequencerRequestHeaders} onChange={(_, data) => setSequencerRequestHeaders(data.value)} resize="vertical" />
+      </Field>
+      <Field label={t('a10.sequencerRequestBodyLabel')}>
+        <Textarea value={sequencerRequestBody} onChange={(_, data) => setSequencerRequestBody(data.value)} resize="vertical" />
+      </Field>
       <Field label={t('a10.sequencerRoleLabel')}>
         <Input value={sequencerRole} onChange={(_, data) => setSequencerRole(data.value)} />
       </Field>
@@ -514,7 +544,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       </div>
       {sequencerNotice !== '' && <Text role="status">{sequencerNotice}</Text>}
       {sequencerResult !== null && (
-        <div className={styles.section}>
+        <div className={styles.section} data-testid="sequencer-result">
           <Text role="status">{t('a10.sequencerResult', { verdict: sequencerResult.verdict, samples: sequencerResult.sampleCount, duplicates: sequencerResult.duplicates, missing: sequencerResult.missing })}</Text>
           <Text className={styles.muted}>{t('a10.sequencerExtractorUsed', {
             source: sequencerResult.tokenSource === 'body'
@@ -526,6 +556,11 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
                   : sequencerResult.tokenSource === 'bearer'
                     ? t('a10.sequencerTokenSource.bearer')
                     : `${t('a10.sequencerTokenSource.custom')} (${sequencerResult.tokenStartDelimiter ?? '—'} … ${sequencerResult.tokenEndDelimiter ?? '—'})`,
+          })}</Text>
+          <Text className={styles.muted}>{t('a10.sequencerReplaySummary', {
+            method: sequencerResult.requestMethod,
+            headers: sequencerResult.requestHeaderNames.join(', ') || '—',
+            bytes: sequencerResult.requestBodyBytes,
           })}</Text>
           {sequencerResult.sessionCookieNames !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerSessionApplied', { cookies: sequencerResult.sessionCookieNames.join(', ') || '—' })}</Text>
@@ -572,6 +607,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
               ...(sequencerResult.adjacentTokenBitHammingDistanceBuckets === undefined ? [] : [
                 { title: t('a10.sequencerHammingDistanceChart'), counts: sequencerResult.adjacentTokenBitHammingDistanceBuckets, pairCounts: true },
               ]),
+              ...(sequencerResult.adjacentNumericAbsoluteDeltaBuckets === undefined ? [] : [
+                { title: t('a10.sequencerNumericDeltaChart'), counts: sequencerResult.adjacentNumericAbsoluteDeltaBuckets, pairCounts: true },
+              ]),
             ].map(({ title, counts, pairCounts }) => {
               const maximum = Math.max(1, ...counts);
               const total = counts.reduce((sum, count) => sum + count, 0);
@@ -596,6 +634,19 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
             })}
           {sequencerResult.adjacentTokenHammingUnequalByteLengthPairs !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerHammingUnequalPairs', { count: sequencerResult.adjacentTokenHammingUnequalByteLengthPairs })}</Text>
+          )}
+          {sequencerResult.adjacentNumericDeltaSignCounts !== undefined && sequencerResult.adjacentNumericIneligiblePairs !== undefined && (
+            <Text className={styles.muted}>{t('a10.sequencerNumericDeltaSummary', {
+              decreasing: sequencerResult.adjacentNumericDeltaSignCounts.decreasing,
+              unchanged: sequencerResult.adjacentNumericDeltaSignCounts.unchanged,
+              increasing: sequencerResult.adjacentNumericDeltaSignCounts.increasing,
+              ineligible: sequencerResult.adjacentNumericIneligiblePairs,
+            })}</Text>
+          )}
+          {sequencerResult.adjacentNumericSerialCorrelationPairs !== undefined && (
+            <Text className={styles.muted}>{sequencerResult.adjacentNumericSerialCorrelation === undefined
+              ? t('a10.sequencerSerialCorrelationUnavailable', { pairs: sequencerResult.adjacentNumericSerialCorrelationPairs })
+              : t('a10.sequencerSerialCorrelation', { correlation: sequencerResult.adjacentNumericSerialCorrelation, pairs: sequencerResult.adjacentNumericSerialCorrelationPairs })}</Text>
           )}
           {sequencerResult.observedAlphabetSize !== undefined && sequencerResult.alphabetClassCounts !== undefined && (() => {
             const rows = [
