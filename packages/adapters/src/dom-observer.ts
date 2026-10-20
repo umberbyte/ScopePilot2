@@ -7,6 +7,7 @@ const DEFAULT_SETTLE_MS = 250;
 export interface DomObservationRunnerInput {
   readonly targetUrl: string;
   readonly scope: Parameters<DomObservationPort['observe']>[0]['scope'];
+  readonly sessionCookies?: Parameters<DomObservationPort['observe']>[0]['sessionCookies'];
   readonly instrumentationScript: string;
   readonly maxEvents: number;
   readonly settleMs: number;
@@ -129,8 +130,16 @@ export const runPlaywrightDomObservation: DomObservationRunner = async (input) =
   const playwright = await import('playwright');
   const browser = await playwright.chromium.launch();
   const context = await browser.newContext();
-  const page = await context.newPage();
   try {
+    if (input.sessionCookies !== undefined && input.sessionCookies.length > 0) {
+      await context.addCookies(input.sessionCookies.map((cookie) => ({
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain,
+        path: cookie.path,
+      })));
+    }
+    const page = await context.newPage();
     await page.addInitScript({ content: input.instrumentationScript });
     await page.route('**/*', async (route) => {
       const requestUrl = route.request().url();

@@ -358,12 +358,17 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await expect(page.getByRole('cell', { name: 'ping' })).toBeVisible();
 
   // HTTP/2 transport: 選択と header 検証 (design/f15)。
-  await page.getByRole('button', { name: 'transport を選択する' }).click();
+  await page.getByRole('button', { name: 'transport を probe する' }).click();
   await expect(page.getByText('protocol h2 (downgrade なし)・ALPN h2・runtime fixture-transport')).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: 'header を検証する' }).click();
   await expect(page.getByText(/検証 OK \(pseudo header: :method, :scheme, :authority, :path・authority: fixture\.target\.test\)/)).toBeVisible({ timeout: 30_000 });
 
   // DOM 調査: source→sink 候補と PII redact (design/f16)。
+  const domRole = page.getByLabel('認証 role (任意・事前に login 実行済み)');
+  await expect(domRole).toBeDisabled();
+  await page.getByLabel('Playwright で実観測する (実 engine 構成)').check();
+  await expect(domRole).toBeEnabled();
+  await page.getByLabel('Playwright で実観測する (実 engine 構成)').uncheck();
   await page.getByLabel('観測 (1行1件・api: marker)').fill('location.search: q=1\ninnerHTML: q=1');
   await page.getByLabel('証跡 node (1行1件・pii: 接頭辞で redact)').fill('div content\npii: user@example.example');
   await page.getByRole('button', { name: 'value flow を分析する' }).click();

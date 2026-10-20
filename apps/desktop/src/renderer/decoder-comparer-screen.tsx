@@ -87,6 +87,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [headerResult, setHeaderResult] = useState('');
   const [domTarget, setDomTarget] = useState('http://fixture.target.test/app');
   const [domLive, setDomLive] = useState(false);
+  const [domRole, setDomRole] = useState('');
   const [domObservationsText, setDomObservationsText] = useState('');
   const [domNodesText, setDomNodesText] = useState('');
   const [domResult, setDomResult] = useState<{ candidates: readonly { sourceApi: string; sinkApi: string; confidence: number; marker: string }[]; evidence: readonly string[] } | null>(null);
@@ -154,13 +155,14 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         observations,
         nodes,
         live: domLive,
+        ...(!domLive || domRole.trim() === '' ? {} : { role: domRole.trim() }),
       }));
     } catch (cause) {
       setError(String(cause));
     } finally {
       setBusy(false);
     }
-  }, [apiBase, domLive, domNodesText, domObservationsText, domTarget]);
+  }, [apiBase, domLive, domNodesText, domObservationsText, domRole, domTarget]);
 
   const negotiate = useCallback(async () => {
     setBusy(true);
@@ -464,6 +466,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         <Input value={domTarget} onChange={(_, data) => setDomTarget(data.value)} />
       </Field>
       <Checkbox label={t('a10.domLiveLabel')} checked={domLive} onChange={(_, data) => setDomLive(data.checked === true)} />
+      <Field label={t('a10.domRoleLabel')}>
+        <Input disabled={!domLive} value={domRole} onChange={(_, data) => setDomRole(data.value)} />
+      </Field>
       <Field label={t('a10.domObservationsLabel')}>
         <Textarea disabled={domLive} value={domObservationsText} onChange={(_, data) => setDomObservationsText(data.value)} rows={3} />
       </Field>

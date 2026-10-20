@@ -71,5 +71,7 @@ DomReportJob: 記録したフローを診断観測（区分=DOM調査・実影�
   最大500event・初期ロード後250msの範囲で観測する。scope外requestは送信前abortし、WebSocketを遮断する。
 - source/sinkの文字列は相関中だけ保持し、返却候補ではSHA-256 fingerprintへ置換する。DOM text snapshotは
   初期経路では収集しない。CSP変更、closed shadow、cross-origin/data frame、workerは対象外である。
+- live操作では任意の認証roleを指定できる。事前のlogin成功sessionから対象URLへ適用可能なcookieだけを
+  観測専用browser contextへ渡し、cookie値は応答・監査へ残さない。roleなしの非認証観測も維持する。
 - 現行は同一文字列と部分一致の候補化までで、操作sequence、stack、selector、screenshot/HAR/trace、
-  認証session、長時間観測、変形追跡を含むDOM Invader相当のtaint engineではない。
+  session更新、長時間観測、変形追跡を含むDOM Invader相当のtaint engineではない。

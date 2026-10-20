@@ -51,7 +51,9 @@ Playwright init script と frame/shadow fixture の IT、CSP 有効ページで�
   文字列timer / `srcdoc`等のsinkを最大500event・各4096文字で一時観測する。CSPは変更しない。
 - self-test済みかつscope内のframeだけを取り込み、cross-origin frameと `about:` / `data:` frameは対象外とする。
   open shadow root内は共有prototype hookで観測できるが、closed shadow rootは対象外である。
+- 任意の `role` は `live=true` の場合だけ受理する。`runLogin` 成功済みsessionから対象URLのdomain/pathに
+  適用可能なcookieだけをCoreで選び、観測専用browser contextへ一時注入する。cookie値は結果・監査へ返さない。
 - Coreで同値相関した直後にmarkerをSHA-256 fingerprintへ置換し、実値やDOM text snapshotをAPI・証跡へ返さない。
   instrumentation/navigation失敗は `CapabilityUnavailable` とし、観測なしを安全判定にしない。
-- 現行は初期ロードと250msの限定観測であり、操作sequence、認証session、長時間event、stack/CSS selector、
+- 現行は初期ロードと250msの限定観測であり、操作sequence、session更新、長時間event、stack/CSS selector、
   screenshot/HAR/trace、worker、変形をまたぐtaint、完全なsink集合には未対応である。候補は脆弱性確定ではない。

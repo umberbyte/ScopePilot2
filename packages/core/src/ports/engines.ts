@@ -179,6 +179,8 @@ export interface DomObservationPort {
       readonly allowedOrigins: readonly string[];
       readonly deniedOrigins: readonly string[];
     };
+    /** Core-filtered role cookies for this target. Values must stay inside the browser operation. */
+    readonly sessionCookies?: readonly LoginSessionCookie[];
   }): Promise<{
     readonly observations: readonly { readonly api: string; readonly marker: string }[];
     readonly nodes: readonly { readonly text: string; readonly looksLikePii: boolean }[];

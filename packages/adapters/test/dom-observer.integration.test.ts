@@ -35,4 +35,22 @@ gated('PlaywrightDomObserver (real browser integration)', () => {
       outOfScopeServer.close();
     }
   });
+
+  test('injects a caller-provided role cookie into an isolated browser context', { timeout: 120_000 }, async () => {
+    const target = await startVulnerableTarget();
+    try {
+      const observer = new PlaywrightDomObserver({ settleMs: 25 });
+      const result = await observer.observe({
+        targetUrl: target.authenticatedUrl,
+        scope: { allowedOrigins: [target.base], deniedOrigins: [] },
+        sessionCookies: [{ name: 'AUTHTOKEN', value: 'owned-session-secret', domain: '127.0.0.1', path: '/' }],
+      });
+      assert.ok(
+        result.observations.some((event) => event.api === 'document.cookie' && event.marker.includes('AUTHTOKEN=owned-session-secret')),
+        'authenticated page remains reachable and the init script sees the context cookie',
+      );
+    } finally {
+      target.server.close();
+    }
+  });
 });

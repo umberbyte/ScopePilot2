@@ -8,6 +8,7 @@ export const SOURCE_SINK_DICTIONARY: readonly { readonly kind: 'source' | 'sink'
   { kind: 'source', api: 'location.search' },
   { kind: 'source', api: 'location.hash' },
   { kind: 'source', api: 'document.referrer' },
+  { kind: 'source', api: 'document.cookie' },
   { kind: 'source', api: 'postMessage.data' },
   { kind: 'sink', api: 'innerHTML' },
   { kind: 'sink', api: 'eval' },

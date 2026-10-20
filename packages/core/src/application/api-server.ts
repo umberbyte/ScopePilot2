@@ -441,6 +441,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           observations,
           ...(nodes === undefined ? {} : { nodes }),
           live: body.live === true,
+          ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
         });
         return respondJson(response, 200, result);
       } catch (cause) {

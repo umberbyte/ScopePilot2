@@ -2723,6 +2723,10 @@
                   "live": {
                     "type": "boolean",
                     "description": "true の場合は構成済み browser adapter で実観測し、入力 observations/nodes は使用しない"
+                  },
+                  "role": {
+                    "type": "string",
+                    "description": "live=true の場合に適用する runLogin 済み role。対象 URL に適用可能な cookie だけを一時利用し、値は応答・監査へ出さない"
                   }
                 },
                 "additionalProperties": false

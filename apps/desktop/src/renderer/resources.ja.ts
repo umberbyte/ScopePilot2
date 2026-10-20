@@ -188,6 +188,7 @@ export const jaStrings = {
     '手入力した観測、またはscope制御したPlaywright実観測から source→sink 候補を導きます (design/f16)。実観測の値はfingerprintだけを表示します。',
   'a10.domTargetLabel': '対象 URL (DOM 調査)',
   'a10.domLiveLabel': 'Playwright で実観測する (実 engine 構成)',
+  'a10.domRoleLabel': '認証 role (任意・事前に login 実行済み)',
   'a10.domObservationsLabel': '観測 (1行1件・api: marker)',
   'a10.domNodesLabel': '証跡 node (1行1件・pii: 接頭辞で redact)',
   'a10.domAnalyze': 'value flow を分析する',

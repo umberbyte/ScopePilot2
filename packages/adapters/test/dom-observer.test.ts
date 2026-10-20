@@ -20,12 +20,17 @@ describe('PlaywrightDomObserver (runner contract)', () => {
       },
     });
     const scope = { allowedOrigins: ['http://fixture.target.test'], deniedOrigins: [] };
-    const result = await observer.observe({ targetUrl: 'http://fixture.target.test/app?x=1', scope });
+    const result = await observer.observe({
+      targetUrl: 'http://fixture.target.test/app?x=1',
+      scope,
+      sessionCookies: [{ name: 'APP_SESSION', value: 'runner-secret', domain: 'fixture.target.test', path: '/app' }],
+    });
     assert.equal(result.observations.length, 2);
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.maxEvents, 25);
     assert.equal(calls[0]?.settleMs, 10);
     assert.equal(calls[0]?.instrumentationScript, DOM_INSTRUMENTATION_SCRIPT);
+    assert.deepEqual(calls[0]?.sessionCookies, [{ name: 'APP_SESSION', value: 'runner-secret', domain: 'fixture.target.test', path: '/app' }]);
     assert.match(DOM_INSTRUMENTATION_SCRIPT, /innerHTML/);
     assert.match(DOM_INSTRUMENTATION_SCRIPT, /postMessage\.data/);
 

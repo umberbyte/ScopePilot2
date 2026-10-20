@@ -1166,6 +1166,13 @@ describe('Core API server (node:http)', () => {
       body: JSON.stringify({ targetUrl: 'http://elsewhere.example/app', observations: [] }),
     });
     assert.equal(outOfScope.status, 403);
+
+    const roleWithoutLive = await fetch(`${baseUrl}/api/tools/dom-flows`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/app', observations: [], role: 'admin' }),
+    });
+    assert.equal(roleWithoutLive.status, 400, 'role is explicit and cannot be silently ignored outside live mode');
   });
 
   test('tools/transport は選択と header 検証を扱う (design/f15)', async () => {

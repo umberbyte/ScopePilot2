@@ -300,6 +300,7 @@ export const enStrings: Readonly<Record<StringKey, string>> = {
   'a10.domIntro': 'Derives source→sink candidates from imported observations or a scope-controlled live Playwright observation (design/f16). Live values are displayed only as fingerprints.',
   'a10.domTargetLabel': 'Target URL (DOM investigation)',
   'a10.domLiveLabel': 'Observe live with Playwright (real-engine mode)',
+  'a10.domRoleLabel': 'Authenticated role (optional; run login first)',
   'a10.domObservationsLabel': 'Observations (one per line・api: marker)',
   'a10.domNodesLabel': 'Evidence nodes (one per line・pii: prefix to redact)',
   'a10.domAnalyze': 'Analyze value flows',

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import type { LoginExecutorPort, LoginSessionCookie } from '@scopepilot2/core';
 import { bootstrapFlow } from '../support/test-flow.ts';
 
 /** DOM value-flow 調査の service 経路 (design/f16)。観測なしでは候補を作らない。 */
@@ -69,6 +70,73 @@ describe('dom investigation (service)', () => {
     assert.match(result.candidates[0]?.marker ?? '', /^sha256:[a-f0-9]{64}$/);
     assert.ok(!JSON.stringify(result).includes('private-marker'));
     assert.ok(!JSON.stringify(result).includes('untrusted-import'), 'live mode does not mix caller-supplied observations');
+  });
+
+  test('live role observation passes only target-applicable cookies to the browser and never returns their values', async () => {
+    const receivedCookies: (readonly LoginSessionCookie[] | undefined)[] = [];
+    const loginExecutor: LoginExecutorPort = {
+      engineVersion: 'fake-login-dom-1',
+      async execute() {
+        return {
+          authenticated: true,
+          finalUrl: 'http://fixture.target.test/app',
+          cookies: [
+            { name: 'APP_SESSION', value: 'dom-secret-value', domain: 'fixture.target.test', path: '/app' },
+            { name: 'OTHER_ORIGIN', value: 'other-origin-secret', domain: 'elsewhere.example', path: '/' },
+            { name: 'OTHER_PATH', value: 'other-path-secret', domain: 'fixture.target.test', path: '/admin' },
+          ],
+        };
+      },
+    };
+    const { service, operator } = await bootstrapFlow({
+      loginExecutor,
+      domObserver: {
+        async observe(input) {
+          receivedCookies.push(input.sessionCookies);
+          return {
+            observations: [
+              { api: 'document.cookie', marker: 'flow-marker' },
+              { api: 'innerHTML', marker: 'flow-marker' },
+            ],
+            nodes: [],
+          };
+        },
+      },
+    });
+    service.registerLoginFlow(operator, {
+      role: 'admin',
+      flowVersion: 'dom-flow-1',
+      steps: [
+        { kind: 'navigate', target: 'http://fixture.target.test/login' },
+        { kind: 'assert', target: 'Authenticated' },
+      ],
+    });
+    await service.runLogin(operator, {
+      role: 'admin',
+      baseUrl: 'http://fixture.target.test',
+      secretValues: {},
+      expectedUrlPrefix: 'http://fixture.target.test/app',
+    });
+
+    const result = await service.analyzeDomFlows(operator, {
+      targetUrl: 'http://fixture.target.test/app/page',
+      observations: [],
+      live: true,
+      role: 'admin',
+    });
+    assert.deepEqual(receivedCookies, [[{ name: 'APP_SESSION', value: 'dom-secret-value', domain: 'fixture.target.test', path: '/app' }]]);
+    assert.equal(result.candidates.length, 1);
+    assert.equal(JSON.stringify(result).includes('dom-secret-value'), false);
+    assert.equal(JSON.stringify(service.events()).includes('dom-secret-value'), false);
+
+    await assert.rejects(
+      () => service.analyzeDomFlows(operator, { targetUrl: 'http://fixture.target.test/app', observations: [], live: true, role: 'missing' }),
+      /no session for role/,
+    );
+    await assert.rejects(
+      () => service.analyzeDomFlows(operator, { targetUrl: 'http://fixture.target.test/app', observations: [], role: 'admin' }),
+      /only supported when live is true/,
+    );
   });
 
   test('live observation without an adapter is CapabilityUnavailable', async () => {

@@ -1302,6 +1302,8 @@ export class BaselineFlowService {
       readonly observations: readonly { readonly api: string; readonly marker: string }[];
       readonly nodes?: readonly { readonly text: string; readonly looksLikePii: boolean }[];
       readonly live?: boolean;
+      /** runLogin 済み role。live observation の browser context にだけ適用する。 */
+      readonly role?: string;
     },
   ): Promise<{ candidates: readonly { sourceApi: string; sinkApi: string; confidence: number; marker: string }[]; evidence: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
@@ -1311,15 +1313,37 @@ export class BaselineFlowService {
     if (!decision.allowed) {
       throw domainError('OutOfScope', `dom investigation target is out of scope: ${decision.reason}`);
     }
+    if (input.role !== undefined && input.live !== true) {
+      throw domainError('ValidationFailed', 'DOM observation role is only supported when live is true');
+    }
     let observations = input.observations;
     let nodes = input.nodes ?? [];
     if (input.live === true) {
       if (this.deps.domObserver === undefined) {
         throw domainError('CapabilityUnavailable', 'live DOM observation is not configured');
       }
+      let appliedCookies: readonly LoginSessionCookie[] | undefined;
+      if (input.role !== undefined) {
+        const session = this.roleSessionCookies.get(input.role);
+        if (session === undefined) {
+          throw domainError('ValidationFailed', `no session for role '${input.role}'; run login first`);
+        }
+        appliedCookies = applicableSessionCookies([...session.cookies], canonical);
+      }
       let observed: Awaited<ReturnType<NonNullable<BaselineFlowDeps['domObserver']>['observe']>>;
       try {
-        observed = await this.deps.domObserver.observe({ targetUrl: canonical, scope: caseRecord.scope });
+        observed = await this.deps.domObserver.observe({
+          targetUrl: canonical,
+          scope: caseRecord.scope,
+          ...(appliedCookies === undefined ? {} : {
+            sessionCookies: appliedCookies.map((cookie) => ({
+              name: cookie.name,
+              value: cookie.value,
+              domain: cookie.domain,
+              path: cookie.path,
+            })),
+          }),
+        });
       } catch {
         throw domainError('CapabilityUnavailable', 'live DOM observation failed or instrumentation was unavailable');
       }
