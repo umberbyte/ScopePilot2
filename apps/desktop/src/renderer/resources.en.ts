@@ -266,6 +266,7 @@ export const enStrings: Readonly<Record<StringKey, string>> = {
   'a10.oastStarted': 'Started attempt {attemptId} (wait limit about {waitHours} hours)',
   'a10.oastToken': 'token: {token}',
   'a10.oastRecord': 'Record callback (fixture)',
+  'a10.oastWaiting': 'Polling the self-hosted provider in the background. Callbacks are correlated automatically.',
   'a10.oastRecorded': 'Callbacks recorded: correlated {correlated}・unknown {uncorrelated}・duplicates {duplicates}',
   'a10.wsTitle': 'WebSocket relay',
   'a10.wsIntro': 'Handles text frames only (binary is out of scope・design/f14). Frame import and sending stay within rate/size limits and identical frames are counted as duplicates. Sends are recorded into the ledger by the fixture adapter.',

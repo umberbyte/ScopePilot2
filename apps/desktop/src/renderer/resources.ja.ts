@@ -151,6 +151,7 @@ export const jaStrings = {
   'a10.oastStarted': 'attempt {attemptId} を開始しました (待機上限約 {waitHours} 時間)',
   'a10.oastToken': 'token: {token}',
   'a10.oastRecord': 'callback を記録する (fixture)',
+  'a10.oastWaiting': 'self-host provider を background poll 中です。callback は自動で相関されます。',
   'a10.oastRecorded': 'callback 記録: 相関 {correlated}・未知 {uncorrelated}・重複 {duplicates}',
   'a10.wsTitle': 'WebSocket 中継',
   'a10.wsIntro':

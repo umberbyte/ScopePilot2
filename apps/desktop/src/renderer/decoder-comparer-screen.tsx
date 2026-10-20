@@ -364,9 +364,13 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       {oastToken !== '' && (
         <div className={styles.section}>
           <Text role="status">{t('a10.oastToken', { token: oastToken })}</Text>
-          <Button disabled={busy} onClick={() => void recordOastCallback()}>
-            {t('a10.oastRecord')}
-          </Button>
+          {oastToken.includes('.') ? (
+            <Text className={styles.muted}>{t('a10.oastWaiting')}</Text>
+          ) : (
+            <Button disabled={busy} onClick={() => void recordOastCallback()}>
+              {t('a10.oastRecord')}
+            </Button>
+          )}
         </div>
       )}
       {oastResult !== '' && <Text>{oastResult}</Text>}

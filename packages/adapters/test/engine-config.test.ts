@@ -4,6 +4,7 @@ import { createServer, type Server } from 'node:http';
 import { composeEngines, createCapabilitySnapshots, createExplorerEngine, createScanEngine, resolveEngineSelection } from '../src/engine-config.ts';
 import { FixtureExplorer, FixtureZapEngine } from '@scopepilot2/simulation';
 import { NodeFuzzTransport } from '../src/fuzz-transport.ts';
+import { InteractshCliProvider } from '../src/interactsh-provider.ts';
 import { PlaywrightExplorerAdapter } from '../src/playwright-explorer.ts';
 import { NodeRepeaterTransport } from '../src/repeater-transport.ts';
 import { NodeSequencerTransport } from '../src/sequencer-transport.ts';
@@ -43,6 +44,20 @@ describe('engine selection (env)', () => {
     assert.ok(explorer instanceof PlaywrightExplorerAdapter);
   });
 
+  test('OAST は self-host HTTPS origin と外部 config の両方を明示したときだけ有効', async () => {
+    assert.throws(
+      () => resolveEngineSelection({ SCOPEPILOT_OAST_SERVER_URL: 'https://oast.example' }),
+      /INTERACTSH_CONFIG/,
+    );
+    const engines = await composeEngines({
+      SCOPEPILOT_OAST_SERVER_URL: 'https://oast.example',
+      SCOPEPILOT_INTERACTSH_CONFIG: 'C:/managed/interactsh.yaml',
+    });
+    assert.equal(engines.mode, 'real');
+    assert.ok(engines.oastProvider instanceof InteractshCliProvider);
+    await engines.close();
+  });
+
   test('composeEngines: fixture 既定は fixture engine と能力表 source=fixture', async () => {
     const engines = await composeEngines({});
     assert.equal(engines.mode, 'fixture');
@@ -74,6 +89,7 @@ describe('engine selection (env)', () => {
       assert.ok(engines.repeaterTransport instanceof NodeRepeaterTransport);
       assert.ok(engines.fuzzTransport instanceof NodeFuzzTransport);
       assert.ok(engines.sequencerTransport instanceof NodeSequencerTransport);
+      assert.deepEqual(engines.oastProvider?.supportedProtocols, [], 'OAST 未設定を fixture 対応として公開しない');
       // 版が未解決のままだと runActiveScan の能力表一致検査に落ちるため、
       // compose 時点で解決済みであることを検証する。
       assert.equal(engines.scanEngine.engineVersion, 'zap 2.17.0');

@@ -62,3 +62,17 @@ OastAdapter（01のアダプター）:
 根拠: [ZAP OAST API](https://www.zaproxy.org/docs/desktop/addons/oast-support/api/)、
 [Interactsh support](https://www.zaproxy.org/docs/desktop/addons/oast-support/services/interactsh/)、
 [BOAST support](https://www.zaproxy.org/docs/desktop/addons/oast-support/services/boast/)。
+
+## 8. 現行実装の境界
+
+- 実経路は `SCOPEPILOT_OAST_SERVER_URL` に self-host Interactsh の HTTPS origin、
+  `SCOPEPILOT_INTERACTSH_CONFIG` に公式 `interactsh-client` の外部 config file を
+  明示した場合だけ有効になる。公開 provider の既定 URL は持たず、自動接続しない。
+  他の実 engine だけを有効にした構成では OAST を fixture 成功へ fallback せず
+  `CapabilityUnavailable` とする。
+- ScopePilot は公式 CLI を session ごとの外部 runtime として起動し、発行 payload と
+  JSONL callback を逐次取り込む。auth token は ScopePilot の argv・監査・応答へ写さず、
+  config file の管理は利用者側に置く。HTTP/DNS/SMTP のみを能力として公開する。
+- 現在は process 生存中の background poll と in-memory 相関までである。session/config の
+  永続化、再起動後 poll、最大7日、late interaction、provider version/health 証跡、BOAST、
+  request ID への相関は未実装であり、基準構成全体と同一視しない。

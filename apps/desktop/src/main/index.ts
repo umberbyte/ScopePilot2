@@ -59,6 +59,7 @@ async function bootstrap(): Promise<void> {
             ...(engines.repeaterTransport === undefined ? {} : { repeaterTransport: engines.repeaterTransport }),
             ...(engines.fuzzTransport === undefined ? {} : { fuzzTransport: engines.fuzzTransport }),
             ...(engines.sequencerTransport === undefined ? {} : { sequencerTransport: engines.sequencerTransport }),
+            ...(engines.oastProvider === undefined ? {} : { oastProvider: engines.oastProvider }),
             ...(engines.runtimeBundleHash === undefined ? {} : { runtimeBundleHash: engines.runtimeBundleHash }),
           },
         }),

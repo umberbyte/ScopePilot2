@@ -103,6 +103,26 @@ export interface SequencerTransportPort {
   }): Promise<void>;
 }
 
+/** OAST provider が background poll で渡す正規化済み callback。 */
+export interface OastProviderEvent {
+  readonly eventId: string;
+  readonly token: string;
+  readonly payload: string;
+}
+
+/**
+ * OAST provider session。実 adapter は明示設定された外部 runtime だけを起動し、
+ * callback を逐次 core へ渡す。token/config secret は監査へ渡さない。
+ */
+export interface OastProviderPort {
+  readonly supportedProtocols: readonly ('http' | 'dns' | 'smtp' | 'icmp')[];
+  startSession(input: {
+    readonly attemptId: string;
+    readonly protocol: 'http' | 'dns' | 'smtp' | 'icmp';
+    readonly onEvents: (events: readonly OastProviderEvent[]) => void;
+  }): Promise<{ readonly token: string }>;
+}
+
 /** Repeater の実 transport (実 HTTP 送信)。未構成の service は fixture 応答を使う。 */
 export interface RepeaterTransportPort {
   send(input: {

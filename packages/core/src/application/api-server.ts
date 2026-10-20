@@ -300,7 +300,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         if (protocol !== 'http' && protocol !== 'dns' && protocol !== 'smtp' && protocol !== 'icmp') {
           return respondError(response, 400, 'ValidationFailed', 'field protocol must be one of http/dns/smtp/icmp', false);
         }
-        const result = service.startOastAttempt(operator, { targetUrl: stringField(body, 'targetUrl'), protocol });
+        const result = await service.startOastAttempt(operator, { targetUrl: stringField(body, 'targetUrl'), protocol });
         return respondJson(response, 201, result);
       } catch (cause) {
         return respondDomainError(response, cause);

@@ -11,11 +11,14 @@
  *   http(s) origin) に明示させる — adapter 入口の送信前拒否はこの origin 集合に
  *   対して効く (core の案件 scope とは別の防御線)。
  * - SCOPEPILOT_ZAP_API_KEY: ZAP API key (adapter が直接読む)。
+ * - SCOPEPILOT_OAST_SERVER_URL: 明示登録した self-host Interactsh HTTPS origin。
+ * - SCOPEPILOT_INTERACTSH_CONFIG: auth token 等を持つ公式 client config file。
  */
 import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort } from '@scopepilot2/core';
 import type { EngineCapabilitySnapshot } from '@scopepilot2/contracts';
 import { FixtureExplorer, FixtureZapEngine } from '@scopepilot2/simulation';
 import { NodeFuzzTransport } from './fuzz-transport.ts';
+import { InteractshCliProvider } from './interactsh-provider.ts';
 import { PlaywrightLoginExecutor } from './login-executor.ts';
 import { NodeRepeaterTransport } from './repeater-transport.ts';
 import { NodeSequencerTransport } from './sequencer-transport.ts';
@@ -28,12 +31,23 @@ export interface EngineSelection {
   readonly explorer: 'fixture' | 'playwright';
   /** 実探索の許可 origin (explorer=playwright のとき必須)。 */
   readonly explorerAllowedOrigins?: readonly string[];
+  readonly oastServerUrl?: string;
+  readonly interactshConfigPath?: string;
 }
 
 /** 環境変数から engine 選択を解決する。SCOPEPILOT_ZAP_BASE_URL があるときのみ実 ZAP。 */
 export function resolveEngineSelection(env: Readonly<Record<string, string | undefined>> = process.env): EngineSelection {
   const zapBaseUrl = env['SCOPEPILOT_ZAP_BASE_URL'];
   const useZap = zapBaseUrl !== undefined && zapBaseUrl !== '';
+  const oastServerUrl = env['SCOPEPILOT_OAST_SERVER_URL'];
+  const interactshConfigPath = env['SCOPEPILOT_INTERACTSH_CONFIG'];
+  const useOast = oastServerUrl !== undefined && oastServerUrl !== '';
+  if (useOast && (interactshConfigPath === undefined || interactshConfigPath === '')) {
+    throw new Error('SCOPEPILOT_OAST_SERVER_URL requires SCOPEPILOT_INTERACTSH_CONFIG');
+  }
+  const oast = useOast && interactshConfigPath !== undefined
+    ? { oastServerUrl, interactshConfigPath }
+    : {};
   if (env['SCOPEPILOT_EXPLORER'] === 'playwright') {
     const raw = env['SCOPEPILOT_EXPLORER_ALLOWED_ORIGINS'] ?? '';
     const origins = raw.split(',').map((origin) => origin.trim()).filter((origin) => origin !== '');
@@ -46,14 +60,14 @@ export function resolveEngineSelection(env: Readonly<Record<string, string | und
       }
     }
     if (useZap && zapBaseUrl !== undefined) {
-      return { mode: 'zap', zapBaseUrl, explorer: 'playwright', explorerAllowedOrigins: origins };
+      return { mode: 'zap', zapBaseUrl, explorer: 'playwright', explorerAllowedOrigins: origins, ...oast };
     }
-    return { mode: 'fixture', explorer: 'playwright', explorerAllowedOrigins: origins };
+    return { mode: 'fixture', explorer: 'playwright', explorerAllowedOrigins: origins, ...oast };
   }
   if (useZap && zapBaseUrl !== undefined) {
-    return { mode: 'zap', zapBaseUrl, explorer: 'fixture' };
+    return { mode: 'zap', zapBaseUrl, explorer: 'fixture', ...oast };
   }
-  return { mode: 'fixture', explorer: 'fixture' };
+  return { mode: 'fixture', explorer: 'fixture', ...oast };
 }
 
 /** 選択に応じた能動診断 engine を組み立てる。fixture は simulation の固定実装。 */
@@ -124,6 +138,8 @@ export interface ComposedEngines {
   readonly fuzzTransport?: import('@scopepilot2/core').FuzzTransportPort;
   /** Sequencer 実 transport (design/f07)。実 engine 時のみ構成。 */
   readonly sequencerTransport?: import('@scopepilot2/core').SequencerTransportPort;
+  /** self-host Interactsh provider (design/f13)。明示設定時のみ構成。 */
+  readonly oastProvider?: import('@scopepilot2/core').OastProviderPort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   /** 実 engine 時の監査記録用 hash。fixture のときは呼出側の既定を使う。 */
   readonly runtimeBundleHash?: string;
@@ -142,7 +158,8 @@ export async function composeEngines(
   const selection = resolveEngineSelection(env);
   const realZap = selection.mode === 'zap';
   const realExplorer = selection.explorer === 'playwright';
-  if (!realZap && !realExplorer) {
+  const realOast = selection.oastServerUrl !== undefined && selection.interactshConfigPath !== undefined;
+  if (!realZap && !realExplorer && !realOast) {
     return {
       mode: 'fixture',
       explorer: new FixtureExplorer(),
@@ -169,6 +186,16 @@ export async function composeEngines(
   // Fuzzer も ZAP 不要の直接送信経路を使う。core が scope と 2 RPS を送信前に強制する。
   const fuzzTransport = new NodeFuzzTransport();
   const sequencerTransport = new NodeSequencerTransport();
+  const interactshProvider = realOast
+    ? new InteractshCliProvider({ serverUrl: selection.oastServerUrl!, configPath: selection.interactshConfigPath! })
+    : undefined;
+  // 一部だけ実 engine の構成でも、OAST 未設定を fixture 成功として見せない。
+  const oastProvider: import('@scopepilot2/core').OastProviderPort = interactshProvider ?? {
+    supportedProtocols: [],
+    async startSession(): Promise<never> {
+      throw new Error('OAST provider is not configured');
+    },
+  };
   return {
     mode: 'real',
     explorer,
@@ -177,6 +204,7 @@ export async function composeEngines(
     repeaterTransport,
     fuzzTransport,
     sequencerTransport,
+    oastProvider,
     capabilities: createCapabilitySnapshots({
       zap: { engineVersion: scanEngine.engineVersion, real: realZap },
       explorer: { engineVersion: explorer.engineVersion, real: realExplorer },
@@ -188,6 +216,7 @@ export async function composeEngines(
         await playwrightAdapter.close();
       }
       await loginExecutor.close();
+      await interactshProvider?.close();
     },
   };
 }

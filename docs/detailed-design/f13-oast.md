@@ -41,3 +41,14 @@ provider unavailable は active request の成功と分離して記録する。p
 ## 8. 非単体テスト
 
 Interactsh protocol CT、隔離 DNS/HTTP callback IT、clock skew と遅延 callback FT を行う。外部 provider の実 credential は CI に固定しない。
+
+### 現行 adapter
+
+`InteractshCliProvider` は利用者が明示した self-host HTTPS origin と公式 client config
+だけを使う。公式 `interactsh-client` を `-json -silent` で起動し、payload 発行後の
+JSONL callback を `OastProviderPort` から Core の共通 dedupe/correlation 経路へ逐次渡す。
+config 内の auth token は argv へ展開しない。常時 test は stub CLI で引数・payload・
+callback・終了処理を検証し、実 server は環境変数 gated IT とする。
+
+これは process 生存中の最小経路であり、永続 session、再起動後 poll、late callback、
+provider version/health、BOAST、raw hash と request ID の完全な証跡は後続増分である。

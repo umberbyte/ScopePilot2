@@ -105,7 +105,7 @@ import { buildDomCandidate, domEvidenceProjection } from '../domain/dom-investig
 import { checkCompatibility, respondToSecretRead, verifyExtensionManifest, type ExtensionManifest } from '../domain/product-api.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
-import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, LoginSessionCookie } from '../ports/engines.ts';
+import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, LoginSessionCookie, OastProviderEvent } from '../ports/engines.ts';
 
 /** 計画の並列度・rate が超えられない安全上天井 (UI 指定でも引き上げ不可)。 */
 const PLAN_SAFETY_CEILING = { maxConcurrency: 2, requestsPerSecond: 2 } as const;
@@ -130,6 +130,8 @@ export interface BaselineFlowDeps {
   readonly fuzzTransport?: import('../ports/engines.ts').FuzzTransportPort;
   /** Sequencer の実収集 transport (design/f07)。未構成なら fixture 応答を使う。 */
   readonly sequencerTransport?: import('../ports/engines.ts').SequencerTransportPort;
+  /** OAST の実 provider session (design/f13)。未構成なら fixture token を発行する。 */
+  readonly oastProvider?: import('../ports/engines.ts').OastProviderPort;
 
   /** login 実行器 (design/f09)。未構成の service では runLogin が ValidationFailed。 */
   readonly loginExecutor?: LoginExecutorPort;
@@ -992,10 +994,10 @@ export class BaselineFlowService {
    * http/dns) で検証し、非対応は CapabilityUnavailable。token はこの応答で
    * 一度だけ返し、監査・一覧には出さない (F13-UT-007)。
    */
-  startOastAttempt(
+  async startOastAttempt(
     operator: OperatorProfile,
     input: { readonly targetUrl: string; readonly protocol: OastProtocol },
-  ): { attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; waitMs: number } {
+  ): Promise<{ attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; waitMs: number }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -1003,13 +1005,32 @@ export class BaselineFlowService {
     if (!decision.allowed) {
       throw domainError('OutOfScope', `oast target is out of scope: ${decision.reason}`);
     }
-    if (providerCapability(['http', 'dns'], input.protocol) === 'Unsupported') {
+    const supportedProtocols = this.deps.oastProvider?.supportedProtocols ?? ['http', 'dns'];
+    if (providerCapability(supportedProtocols, input.protocol) === 'Unsupported') {
       throw domainError('CapabilityUnavailable', `oast provider does not support protocol ${input.protocol}`);
     }
     const attemptId = this.deps.ids.next('oast');
-    const { token } = this.oastIssuer.issue(attemptId);
+    const pendingEvents: OastProviderEvent[][] = [];
+    let attemptRegistered = false;
+    const { token } = this.deps.oastProvider === undefined
+      ? this.oastIssuer.issue(attemptId)
+      : await this.deps.oastProvider.startSession({
+          attemptId,
+          protocol: input.protocol,
+          onEvents: (events) => {
+            if (!attemptRegistered) {
+              pendingEvents.push([...events]);
+              return;
+            }
+            this.recordProviderOastCallbacks(events);
+          },
+        });
     this.oastAttempts.push({ attemptId, targetUrl: canonical, protocol: input.protocol, token, issuedAtMs: this.deps.clock.now().getTime() });
+    attemptRegistered = true;
     this.record({ type: 'OastAttemptStarted', at: this.deps.clock.now().toISOString(), attemptId, targetUrl: canonical, protocol: input.protocol });
+    for (const events of pendingEvents) {
+      this.recordProviderOastCallbacks(events);
+    }
     return { attemptId, targetUrl: canonical, protocol: input.protocol, token, waitMs: OAST_DEFAULT_WAIT_MS };
   }
 
@@ -1025,8 +1046,13 @@ export class BaselineFlowService {
     if (input.events.length === 0) {
       throw domainError('ValidationFailed', 'oast callbacks need at least one event');
     }
-    const fresh = input.events.filter((event) => !this.oastSeenEventIds.has(event.eventId));
-    const persistedDuplicates = input.events.length - fresh.length;
+    return this.recordProviderOastCallbacks(input.events);
+  }
+
+  /** provider background poll と fixture API が共有する相関・dedupe 経路。 */
+  private recordProviderOastCallbacks(events: readonly OastProviderEvent[]): { kept: number; duplicates: number; correlated: number; uncorrelated: number } {
+    const fresh = events.filter((event) => !this.oastSeenEventIds.has(event.eventId));
+    const persistedDuplicates = events.length - fresh.length;
     const { kept, duplicates: inCallDuplicates } = normalizeCallbacks(fresh);
     const duplicates = persistedDuplicates + inCallDuplicates;
     for (const event of kept) {
