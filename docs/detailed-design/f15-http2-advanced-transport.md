@@ -53,5 +53,8 @@ Node HTTP/2 adapter と TLS/ALPN server の IT、Windows/macOS runtime matrix、
 - `requested=http/1.1` の明示選択はfallbackではないため、H2 probe/prefaceを送らずbounded H1 requestを1回送る。
   この結果は `downgraded=false` とし、TLSでは実ALPN、平文では `http/1.1 (cleartext)` markerを残す。
   省略時は `requested=h2` と同じである。
+- 所有TLS fixtureは実行時生成のlocalhost証明書を明示trust anchorとしてadapterへ渡し、ALPN `h2`、
+  明示 `http/1.1`、H1-only peerのfallback許可/未許可を常時ITで検証する。trust anchor未指定時は
+  自己署名証明書を拒否し、fixtureのために証明書検証を無効化しない。
 - 現行UI/APIは capability probe に限定する。任意method/body/header、stream ID/settings/timing証跡、connect先・
-  `:authority`・SNIの独立指定、connection reuse、TLS test fixtureは未実装であり、完全なsemantic request editorとは表示しない。
+  `:authority`・SNIの独立指定、connection reuseは未実装であり、完全なsemantic request editorとは表示しない。

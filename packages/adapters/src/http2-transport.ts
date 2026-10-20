@@ -4,7 +4,7 @@ import * as http2 from 'node:http2';
 import * as https from 'node:https';
 import * as tls from 'node:tls';
 import type { ClientHttp2Session } from 'node:http2';
-import type { TLSSocket } from 'node:tls';
+import type { SecureContextOptions, TLSSocket } from 'node:tls';
 import type { AdvancedTransportPort } from '@scopepilot2/core';
 
 const DEFAULT_MAX_RESPONSE_BYTES = 1_000_000;
@@ -12,6 +12,8 @@ const DEFAULT_MAX_RESPONSE_BYTES = 1_000_000;
 export interface NodeHttp2TransportOptions {
   readonly timeoutMs?: number;
   readonly maxResponseBytes?: number;
+  /** Optional explicit trust anchor for an owned target or test fixture. Certificate checks remain enabled. */
+  readonly trustedCa?: SecureContextOptions['ca'];
 }
 
 class Http2UnavailableError extends Error {
@@ -32,10 +34,12 @@ function isProtocolUnavailable(cause: unknown): boolean {
 export class NodeHttp2Transport implements AdvancedTransportPort {
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
+  private readonly trustedCa: SecureContextOptions['ca'];
 
   constructor(options: NodeHttp2TransportOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+    this.trustedCa = options.trustedCa;
     if (!Number.isInteger(this.timeoutMs) || this.timeoutMs <= 0) {
       throw new Error('HTTP/2 timeoutMs must be a positive integer');
     }
@@ -104,6 +108,7 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
         port: target.port === '' ? 443 : Number(target.port),
         servername: target.hostname,
         ALPNProtocols: ['h2', 'http/1.1'],
+        ...(this.trustedCa === undefined ? {} : { ca: this.trustedCa }),
       });
       const timer = setTimeout(() => {
         socket.destroy(new Error(`HTTP/2 TLS negotiation timeout after ${this.timeoutMs}ms`));
@@ -187,6 +192,7 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
         method: 'GET',
         headers: { Connection: 'close' },
         ...(target.protocol === 'https:' ? { ALPNProtocols: ['http/1.1'] } : {}),
+        ...(target.protocol === 'https:' && this.trustedCa !== undefined ? { ca: this.trustedCa } : {}),
       }, (response) => {
         let total = 0;
         const alpn = target.protocol === 'https:'

@@ -87,5 +87,7 @@ channel・方向を指定したtext送信を公開する。binary送信等は文
 - HTTP/1.1 fallbackは明示許可時だけ別requestを送る。redirect非追従、response 1 MiB、timeout 30秒である。
 - HTTP/1.1を明示選択した場合はfallbackと扱わず、H2 preface/probeなしでbounded H1 requestを1回送る。
   UI/APIで選択を保持し、結果はdowngradeではなく明示選択として記録する。
+- 所有TLS fixtureでは明示したlocalhost CAを信頼して実ALPNを検証する。通常経路の証明書検証は維持し、
+  trust anchorなしの自己署名証明書は拒否する。
 - これはtransport capabilityの確認経路であり、任意のpseudo-header/body、stream metadata、settings/timing、
   connect先・authority・SNIの独立編集、connection reuse、wire表現は未対応である。
