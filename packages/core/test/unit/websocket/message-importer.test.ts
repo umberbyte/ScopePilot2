@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { buildWsSendPlan, decodeWsText, importFrames, sendWithPolicy, wsConfirmationValid, wsEvidence, type WsFrame } from '@scopepilot2/core';
+import { buildWsSendPlan, decodeWsText, importFrames, sendWithPolicy, validateWsSubprotocols, wsConfirmationValid, wsEvidence, type WsFrame } from '@scopepilot2/core';
 import type { DomainError } from '@scopepilot2/contracts';
 
 const frame = (frameId: string, payload: string): WsFrame => ({ frameId, direction: 'received', payload, receivedAtMs: 0 });
@@ -14,9 +14,18 @@ describe('WebSocket', () => {
 
   test('[F14-UT-002] text message は hash 付き plan を作る', () => {
     const plan = buildWsSendPlan({ targetUrl: 'ws://fixture.target.test/ws', messages: [{ kind: 'text', payload: 'ping' }], sessionRevision: 3 });
+    const protocolPlan = buildWsSendPlan({ targetUrl: 'ws://fixture.target.test/ws', messages: [{ kind: 'text', payload: 'ping' }], sessionRevision: 3, subprotocols: ['scopepilot.echo'] });
     assert.match(plan.planHash, /^[0-9a-f]{64}$/);
+    assert.notEqual(plan.planHash, protocolPlan.planHash, 'subprotocol offer is pinned by the plan hash');
     assert.equal(plan.messageBudget, 1);
     assert.equal(plan.sessionRevision, 3);
+  });
+
+  test('subprotocol はboundedなRFC tokenだけを順序付きで許可する', () => {
+    assert.deepEqual(validateWsSubprotocols(['scopepilot.echo', 'json-v2']), ['scopepilot.echo', 'json-v2']);
+    assert.throws(() => validateWsSubprotocols(['bad protocol']), /invalid WebSocket subprotocol/);
+    assert.throws(() => validateWsSubprotocols(['same', 'same']), /duplicate WebSocket subprotocol/);
+    assert.throws(() => validateWsSubprotocols(Array.from({ length: 17 }, (_, index) => `p${index}`)), /at most 16/);
   });
 
   test('[F14-UT-003] binary message は Unsupported とする', () => {

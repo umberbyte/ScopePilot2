@@ -99,7 +99,7 @@ import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities
 import { assess, createSamplePlan, extractToken, reportProjection, SampleCollector } from '../domain/sequencer.ts';
 import { parseOpenApiDocument } from '../domain/api-scanning.ts';
 import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, TokenIssuer, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
-import { buildWsSendPlan, importFrames, sendWithPolicy, wsEvidence, type WsFrame } from '../domain/websocket.ts';
+import { buildWsSendPlan, importFrames, sendWithPolicy, validateWsSubprotocols, wsEvidence, type WsFrame } from '../domain/websocket.ts';
 import { checkAuthorityScope, negotiateTransport, transportCapability, transportEvidence, validateHeaderValues, validatePseudoHeaders } from '../domain/advanced-transport.ts';
 import { buildDomCandidate, domEvidenceProjection } from '../domain/dom-investigation.ts';
 import { checkCompatibility, respondToSecretRead, verifyExtensionManifest, type ExtensionManifest } from '../domain/product-api.ts';
@@ -1178,8 +1178,8 @@ export class BaselineFlowService {
    */
   async sendWsMessages(
     operator: OperatorProfile,
-    input: { readonly targetUrl: string; readonly messages: readonly string[]; readonly role?: string },
-  ): Promise<{ planHash: string; sent: number; rejected: 'size' | 'rate' | null; sessionCookieNames?: readonly string[] }> {
+    input: { readonly targetUrl: string; readonly messages: readonly string[]; readonly role?: string; readonly subprotocols?: readonly string[] },
+  ): Promise<{ planHash: string; sent: number; rejected: 'size' | 'rate' | null; sessionCookieNames?: readonly string[]; negotiatedSubprotocol?: string }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -1190,6 +1190,7 @@ export class BaselineFlowService {
     if (input.messages.length === 0) {
       throw domainError('ValidationFailed', 'websocket send needs at least one message');
     }
+    const subprotocols = validateWsSubprotocols(input.subprotocols ?? []);
     let appliedCookies: readonly LoginSessionCookie[] | undefined;
     if (input.role !== undefined) {
       const session = this.roleSessionCookies.get(input.role);
@@ -1202,6 +1203,7 @@ export class BaselineFlowService {
       targetUrl: canonical,
       messages: input.messages.map((message) => ({ kind: 'text' as const, payload: message })),
       sessionRevision: this.wsSessionRevision,
+      subprotocols,
     });
     if (this.deps.webSocketTransport !== undefined) {
       if (input.messages.some((message) => Buffer.byteLength(message, 'utf8') > 1_000_000)) {
@@ -1216,6 +1218,7 @@ export class BaselineFlowService {
       const transported = await this.deps.webSocketTransport.exchange({
         targetUrl: canonical,
         messages: input.messages,
+        ...(subprotocols.length === 0 ? {} : { subprotocols }),
         ...(appliedCookies === undefined ? {} : {
           sessionCookies: appliedCookies.map((cookie) => ({
             name: cookie.name,
@@ -1232,6 +1235,7 @@ export class BaselineFlowService {
         planHash: plan.planHash,
         sent: transported.sent,
         rejected: null,
+        ...(transported.negotiatedSubprotocol === undefined ? {} : { negotiatedSubprotocol: transported.negotiatedSubprotocol }),
         ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
       };
     }

@@ -53,5 +53,8 @@ mask解除、送信間隔、echo受信を検証する。
 適用可能なcookieだけを選ぶ。transportはupgrade requestへCookie headerを付けるが、値を
 結果・frame台帳・監査へ返さない。結果には適用cookie名だけを残す。
 
+任意subprotocolは最大16個・各128文字以下のRFC tokenとしてCoreで検証し、提示順をplan hashへ
+含める。Node clientはupgrade requestで提示し、serverが選んだsubprotocolを実測結果へ返す。
+
 binary、fragmentation、extension、ping/pong証跡、ZAP channel paging/reuse、
-subprotocol、長寿命connection管理は後続増分である。
+長寿命connection管理は後続増分である。

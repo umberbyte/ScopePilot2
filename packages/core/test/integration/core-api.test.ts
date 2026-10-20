@@ -1230,12 +1230,23 @@ describe('Core API server (node:http)', () => {
     const importBody = (await imported.json()) as { imported: number; duplicates: number };
     assert.deepEqual(importBody, { imported: 1, duplicates: 1 });
 
-    const sent = await post('/api/websocket/send', { targetUrl: 'http://fixture.target.test/ws', messages: ['ping', 'pong'] });
+    const sent = await post('/api/websocket/send', {
+      targetUrl: 'http://fixture.target.test/ws',
+      messages: ['ping', 'pong'],
+      subprotocols: ['scopepilot.echo', 'json-v2'],
+    });
     assert.equal(sent.status, 200);
     const sentBody = (await sent.json()) as { sent: number; rejected: string | null; planHash: string };
     assert.equal(sentBody.sent, 2);
     assert.equal(sentBody.rejected, null);
     assert.match(sentBody.planHash, /^[0-9a-f]{64}$/);
+
+    const badSubprotocol = await post('/api/websocket/send', {
+      targetUrl: 'http://fixture.target.test/ws',
+      messages: ['invalid'],
+      subprotocols: ['bad protocol'],
+    });
+    assert.equal(badSubprotocol.status, 400);
 
     const missingRole = await post('/api/websocket/send', {
       targetUrl: 'http://fixture.target.test/ws',

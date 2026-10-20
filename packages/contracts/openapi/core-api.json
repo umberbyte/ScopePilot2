@@ -2427,6 +2427,18 @@
                   "role": {
                     "type": "string",
                     "description": "runLogin 済みの任意role。対象URLへ適用可能なcookieだけをWebSocket handshakeへ付ける"
+                  },
+                  "subprotocols": {
+                    "type": "array",
+                    "description": "Sec-WebSocket-Protocol の提示優先順。最大16個のRFC token",
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+                    }
                   }
                 },
                 "additionalProperties": false
@@ -2471,6 +2483,10 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "negotiatedSubprotocol": {
+                      "type": "string",
+                      "description": "server が選択した Sec-WebSocket-Protocol。未選択時は省略"
                     }
                   },
                   "additionalProperties": false

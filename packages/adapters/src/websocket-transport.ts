@@ -29,7 +29,7 @@ function delay(ms: number): Promise<void> {
 /** Node 24 accepts an Undici WebSocketInit with handshake headers; lib.dom exposes only the standard overload. */
 const NodeWebSocket = WebSocket as unknown as new (
   url: string,
-  options?: { readonly headers?: Readonly<Record<string, string>> },
+  options?: { readonly protocols?: string | string[]; readonly headers?: Readonly<Record<string, string>> },
 ) => WebSocket;
 
 export class NodeWebSocketTransport implements WebSocketTransportPort {
@@ -48,13 +48,18 @@ export class NodeWebSocketTransport implements WebSocketTransportPort {
     }
   }
 
-  async exchange(input: Parameters<WebSocketTransportPort['exchange']>[0]): Promise<{ readonly sent: number }> {
+  async exchange(input: Parameters<WebSocketTransportPort['exchange']>[0]): Promise<{ readonly sent: number; readonly negotiatedSubprotocol?: string }> {
     const cookieHeader = input.sessionCookies === undefined || input.sessionCookies.length === 0
       ? undefined
       : input.sessionCookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
     const socket = new NodeWebSocket(
       websocketUrl(input.targetUrl),
-      cookieHeader === undefined ? undefined : { headers: { Cookie: cookieHeader } },
+      input.subprotocols === undefined && cookieHeader === undefined
+        ? undefined
+        : {
+            ...(input.subprotocols === undefined ? {} : { protocols: [...input.subprotocols] }),
+            ...(cookieHeader === undefined ? {} : { headers: { Cookie: cookieHeader } }),
+          },
     );
     let connectionError: Error | null = null;
     let closed = false;
@@ -114,7 +119,7 @@ export class NodeWebSocketTransport implements WebSocketTransportPort {
       if (connectionError !== null) {
         throw connectionError;
       }
-      return { sent };
+      return { sent, ...(socket.protocol === '' ? {} : { negotiatedSubprotocol: socket.protocol }) };
     } finally {
       if (!closed) {
         socket.close(1000, 'complete');

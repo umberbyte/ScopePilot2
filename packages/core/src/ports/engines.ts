@@ -131,11 +131,13 @@ export interface WebSocketTransportPort {
     /** 案件 scope と同じ http(s) URL。adapter 内で ws(s) へ写像する。 */
     readonly targetUrl: string;
     readonly messages: readonly string[];
+    /** Ordered client offer for Sec-WebSocket-Protocol. */
+    readonly subprotocols?: readonly string[];
     /** Core-filtered role cookies for the handshake target. Values must stay inside the transport. */
     readonly sessionCookies?: readonly LoginSessionCookie[];
     readonly onSentFrame: (payload: string) => void;
     readonly onTextFrame: (payload: string) => void;
-  }): Promise<{ readonly sent: number }>;
+  }): Promise<{ readonly sent: number; readonly negotiatedSubprotocol?: string }>;
 }
 
 /** HTTP/2 capability probe. Scope is enforced by core before this port is called. */

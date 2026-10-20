@@ -77,10 +77,12 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [oastResult, setOastResult] = useState<string>('');
   const [wsTarget, setWsTarget] = useState('http://fixture.target.test/ws');
   const [wsRole, setWsRole] = useState('');
+  const [wsSubprotocolsText, setWsSubprotocolsText] = useState('');
   const [wsImportText, setWsImportText] = useState('');
   const [wsSendText, setWsSendText] = useState('');
   const [wsNotice, setWsNotice] = useState('');
   const [wsSessionCookieNames, setWsSessionCookieNames] = useState<readonly string[] | undefined>(undefined);
+  const [wsNegotiatedSubprotocol, setWsNegotiatedSubprotocol] = useState<string | undefined>(undefined);
   const [wsFrames, setWsFrames] = useState<readonly { frameId: string; direction: string; text: string; rawHash: string }[]>([]);
   const [transportTarget, setTransportTarget] = useState('http://fixture.target.test/api');
   const [transportRequested, setTransportRequested] = useState<'h2' | 'http/1.1'>('h2');
@@ -228,6 +230,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     setBusy(true);
     setError('');
     setWsSessionCookieNames(undefined);
+    setWsNegotiatedSubprotocol(undefined);
     try {
       const payloads = wsImportText.split('\n').map((line) => line.trim()).filter((line) => line !== '');
       const result = await callJson<{ imported: number; duplicates: number }>(apiBase, '/api/websocket/frames', {
@@ -247,22 +250,26 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     setBusy(true);
     setError('');
     setWsSessionCookieNames(undefined);
+    setWsNegotiatedSubprotocol(undefined);
     try {
       const messages = wsSendText.split('\n').map((line) => line.trim()).filter((line) => line !== '');
-      const result = await callJson<{ planHash: string; sent: number; rejected: string | null; sessionCookieNames?: readonly string[] }>(apiBase, '/api/websocket/send', {
+      const subprotocols = wsSubprotocolsText.split(',').map((value) => value.trim()).filter((value) => value !== '');
+      const result = await callJson<{ planHash: string; sent: number; rejected: string | null; sessionCookieNames?: readonly string[]; negotiatedSubprotocol?: string }>(apiBase, '/api/websocket/send', {
         targetUrl: wsTarget,
         messages,
         ...(wsRole.trim() === '' ? {} : { role: wsRole.trim() }),
+        ...(subprotocols.length === 0 ? {} : { subprotocols }),
       });
       setWsNotice(result.rejected === null ? t('a10.wsSent', { sent: result.sent }) : t('a10.wsRejected', { rejected: result.rejected, sent: result.sent }));
       setWsSessionCookieNames(result.sessionCookieNames);
+      setWsNegotiatedSubprotocol(result.negotiatedSubprotocol);
       await loadWsFrames();
     } catch (cause) {
       setError(String(cause));
     } finally {
       setBusy(false);
     }
-  }, [apiBase, loadWsFrames, wsRole, wsSendText, wsTarget]);
+  }, [apiBase, loadWsFrames, wsRole, wsSendText, wsSubprotocolsText, wsTarget]);
 
   const startOastAttempt = useCallback(async () => {
     setBusy(true);
@@ -426,6 +433,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       <Field label={t('a10.wsRoleLabel')}>
         <Input value={wsRole} onChange={(_, data) => setWsRole(data.value)} />
       </Field>
+      <Field label={t('a10.wsSubprotocolsLabel')}>
+        <Input value={wsSubprotocolsText} onChange={(_, data) => setWsSubprotocolsText(data.value)} />
+      </Field>
       <Field label={t('a10.wsImportLabel')}>
         <Textarea value={wsImportText} onChange={(_, data) => setWsImportText(data.value)} rows={2} />
       </Field>
@@ -441,6 +451,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       {wsNotice !== '' && <Text role="status">{wsNotice}</Text>}
       {wsSessionCookieNames !== undefined && (
         <Text className={styles.muted}>{t('a10.wsSessionApplied', { cookies: wsSessionCookieNames.join(', ') || '—' })}</Text>
+      )}
+      {wsNegotiatedSubprotocol !== undefined && (
+        <Text className={styles.muted}>{t('a10.wsSubprotocolNegotiated', { protocol: wsNegotiatedSubprotocol })}</Text>
       )}
       <Text weight="semibold">{t('a10.transportTitle')}</Text>
       <Text className={styles.muted}>{t('a10.transportIntro')}</Text>

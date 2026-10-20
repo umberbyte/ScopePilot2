@@ -57,9 +57,15 @@ function attachEcho(socket: Duplex, head: Buffer, receivedAt: number[]): void {
   consume();
 }
 
-async function listenEcho(server: Server, receivedAt: number[], receivedCookies: (string | undefined)[]): Promise<string> {
+async function listenEcho(
+  server: Server,
+  receivedAt: number[],
+  receivedCookies: (string | undefined)[],
+  receivedSubprotocols: (string | undefined)[],
+): Promise<string> {
   server.on('upgrade', (request, socket, head) => {
     receivedCookies.push(request.headers.cookie);
+    receivedSubprotocols.push(request.headers['sec-websocket-protocol']);
     const key = request.headers['sec-websocket-key'];
     if (typeof key !== 'string') {
       socket.destroy();
@@ -71,6 +77,7 @@ async function listenEcho(server: Server, receivedAt: number[], receivedCookies:
       'Upgrade: websocket',
       'Connection: Upgrade',
       `Sec-WebSocket-Accept: ${accept}`,
+      'Sec-WebSocket-Protocol: scopepilot.echo',
       '',
       '',
     ].join('\r\n'));
@@ -91,21 +98,25 @@ describe('NodeWebSocketTransport (実 text frame 送受信)', () => {
   test('http scope URL を ws handshake へ写像し echo を受信、既定10 message/sを守る', { timeout: 10_000 }, async () => {
     const receivedAt: number[] = [];
     const receivedCookies: (string | undefined)[] = [];
+    const receivedSubprotocols: (string | undefined)[] = [];
     const server = createServer();
-    const base = await listenEcho(server, receivedAt, receivedCookies);
+    const base = await listenEcho(server, receivedAt, receivedCookies, receivedSubprotocols);
     try {
       const frames: string[] = [];
       const transport = new NodeWebSocketTransport({ connectTimeoutMs: 2_000, responseWaitMs: 100 });
       const result = await transport.exchange({
         targetUrl: `${base}/echo`,
         messages: ['one', 'two'],
+        subprotocols: ['scopepilot.echo', 'json-v2'],
         sessionCookies: [{ name: 'WS_SESSION', value: 'transport-secret', domain: '127.0.0.1', path: '/' }],
         onSentFrame: () => {},
         onTextFrame: (payload) => frames.push(payload),
       });
       assert.equal(result.sent, 2);
+      assert.equal(result.negotiatedSubprotocol, 'scopepilot.echo');
       assert.deepEqual(frames, ['echo:one', 'echo:two']);
       assert.deepEqual(receivedCookies, ['WS_SESSION=transport-secret']);
+      assert.deepEqual(receivedSubprotocols, ['scopepilot.echo, json-v2']);
       assert.ok((receivedAt[1] ?? 0) - (receivedAt[0] ?? 0) >= 80, '既定10 message/s の間隔を守る');
     } finally {
       await close(server);

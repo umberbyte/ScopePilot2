@@ -79,8 +79,10 @@ channel・方向を指定したtext送信を公開する。binary送信等は文
 - 任意の認証roleを指定すると、事前のlogin成功sessionからhandshake URLのdomain/pathへ
   適用可能なcookieだけをupgrade requestへ付ける。cookie値はtransport外へ出さず、送信結果には
   適用したcookie名だけを残す。
+- 任意のsubprotocol提示は最大16個のRFC tokenへ制限し、順序をplan hashへ固定して
+  `Sec-WebSocket-Protocol` へ渡す。serverが選択した値は実測結果として返す。
 - binary受信はtextへ暗黙変換せず取り込まない。binary送信、fragmentation、extension、
-  ping/pong証跡、既存ZAP channelの再利用、subprotocol、切断後再送は未対応。
+  ping/pong証跡、既存ZAP channelの再利用、切断後再送は未対応。
   現行経路をZAP message paging/resendの完全実装とは表示しない。
 
 ## 9. 現行 HTTP/2 実プローブ経路

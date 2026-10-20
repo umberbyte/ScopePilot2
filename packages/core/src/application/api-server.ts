@@ -371,6 +371,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           targetUrl: stringField(body, 'targetUrl'),
           messages,
           ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
+          ...(body.subprotocols === undefined ? {} : { subprotocols: stringArrayField(body, 'subprotocols') }),
         });
         return respondJson(response, 200, result);
       } catch (cause) {

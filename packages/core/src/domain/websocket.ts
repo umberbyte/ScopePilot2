@@ -32,6 +32,7 @@ export interface WsSendPlanInput {
   readonly targetUrl: string;
   readonly messages: readonly { readonly kind: 'text' | 'binary'; readonly payload: string }[];
   readonly sessionRevision: number;
+  readonly subprotocols?: readonly string[];
 }
 
 export interface WsSendPlan {
@@ -49,10 +50,35 @@ export function buildWsSendPlan(input: WsSendPlanInput): WsSendPlan {
     }
   }
   return {
-    planHash: hashStable('scopepilot2.ws.send', { target: input.targetUrl, messages: input.messages, sessionRevision: input.sessionRevision }),
+    planHash: hashStable('scopepilot2.ws.send', {
+      target: input.targetUrl,
+      messages: input.messages,
+      sessionRevision: input.sessionRevision,
+      subprotocols: input.subprotocols ?? [],
+    }),
     messageBudget: input.messages.length,
     sessionRevision: input.sessionRevision,
   };
+}
+
+const WS_SUBPROTOCOL_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/** Handshake headerをboundedかつRFC token互換に保つ。順序はclientの提示優先順として維持する。 */
+export function validateWsSubprotocols(input: readonly string[]): readonly string[] {
+  if (input.length > 16) {
+    throw domainError('ValidationFailed', 'WebSocket subprotocols must contain at most 16 entries');
+  }
+  const seen = new Set<string>();
+  for (const protocol of input) {
+    if (protocol.length === 0 || protocol.length > 128 || !WS_SUBPROTOCOL_TOKEN.test(protocol)) {
+      throw domainError('ValidationFailed', `invalid WebSocket subprotocol: '${protocol}'`);
+    }
+    if (seen.has(protocol)) {
+      throw domainError('ValidationFailed', `duplicate WebSocket subprotocol: '${protocol}'`);
+    }
+    seen.add(protocol);
+  }
+  return [...input];
 }
 
 export function wsConfirmationValid(plan: WsSendPlan, currentSessionRevision: number): boolean {

@@ -105,7 +105,11 @@ describe('websocket (service)', () => {
           input.onSentFrame(message);
           input.onTextFrame(`echo:${message}`);
         }
-        return { sent: input.messages.length };
+        const negotiatedSubprotocol = input.subprotocols?.[0];
+        return {
+          sent: input.messages.length,
+          ...(negotiatedSubprotocol === undefined ? {} : { negotiatedSubprotocol }),
+        };
       },
     };
     const cookies: readonly LoginSessionCookie[] = [
@@ -139,11 +143,14 @@ describe('websocket (service)', () => {
       targetUrl: 'http://fixture.target.test/socket/echo',
       messages: ['role-message'],
       role: 'analyst',
+      subprotocols: ['scopepilot.echo', 'json-v2'],
     });
     assert.deepEqual(transportCalls[0]?.sessionCookies, [
       { name: 'WS_SESSION', value: 'websocket-secret', domain: 'fixture.target.test', path: '/socket' },
     ]);
     assert.deepEqual(result.sessionCookieNames, ['WS_SESSION']);
+    assert.deepEqual(transportCalls[0]?.subprotocols, ['scopepilot.echo', 'json-v2']);
+    assert.equal(result.negotiatedSubprotocol, 'scopepilot.echo');
     assert.equal(JSON.stringify(result).includes('websocket-secret'), false);
     assert.equal(JSON.stringify(service.listWsFrames()).includes('websocket-secret'), false);
     assert.equal(JSON.stringify(service.events()).includes('websocket-secret'), false);
