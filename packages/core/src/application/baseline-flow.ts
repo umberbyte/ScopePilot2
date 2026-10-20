@@ -136,6 +136,8 @@ export interface BaselineFlowDeps {
   readonly webSocketTransport?: import('../ports/engines.ts').WebSocketTransportPort;
   /** HTTP/2 negotiation/request probe (design/f15). Omitted for deterministic fixtures. */
   readonly advancedTransport?: import('../ports/engines.ts').AdvancedTransportPort;
+  /** Playwright-backed live DOM observation (design/f16). */
+  readonly domObserver?: import('../ports/engines.ts').DomObservationPort;
 
   /** login 実行器 (design/f09)。未構成の service では runLogin が ValidationFailed。 */
   readonly loginExecutor?: LoginExecutorPort;
@@ -1279,14 +1281,15 @@ export class BaselineFlowService {
    * PII と推定される node を redact する (F16-UT-006)。集計 tool のため監査 event なし
    * (decode/compare と同じ扱い)。
    */
-  analyzeDomFlows(
+  async analyzeDomFlows(
     operator: OperatorProfile,
     input: {
       readonly targetUrl: string;
       readonly observations: readonly { readonly api: string; readonly marker: string }[];
       readonly nodes?: readonly { readonly text: string; readonly looksLikePii: boolean }[];
+      readonly live?: boolean;
     },
-  ): { candidates: readonly { sourceApi: string; sinkApi: string; confidence: number; marker: string }[]; evidence: readonly string[] } {
+  ): Promise<{ candidates: readonly { sourceApi: string; sinkApi: string; confidence: number; marker: string }[]; evidence: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -1294,8 +1297,29 @@ export class BaselineFlowService {
     if (!decision.allowed) {
       throw domainError('OutOfScope', `dom investigation target is out of scope: ${decision.reason}`);
     }
-    const candidates = buildDomCandidate(input.observations);
-    const evidence = domEvidenceProjection(input.nodes ?? []);
+    let observations = input.observations;
+    let nodes = input.nodes ?? [];
+    if (input.live === true) {
+      if (this.deps.domObserver === undefined) {
+        throw domainError('CapabilityUnavailable', 'live DOM observation is not configured');
+      }
+      let observed: Awaited<ReturnType<NonNullable<BaselineFlowDeps['domObserver']>['observe']>>;
+      try {
+        observed = await this.deps.domObserver.observe({ targetUrl: canonical, scope: caseRecord.scope });
+      } catch {
+        throw domainError('CapabilityUnavailable', 'live DOM observation failed or instrumentation was unavailable');
+      }
+      observations = observed.observations;
+      nodes = observed.nodes;
+    }
+    const rawCandidates = buildDomCandidate(observations);
+    const candidates = input.live === true
+      ? rawCandidates.map((candidate) => ({
+          ...candidate,
+          marker: `sha256:${hashStable('scopepilot2.dom.marker', candidate.marker)}`,
+        }))
+      : rawCandidates;
+    const evidence = domEvidenceProjection(nodes);
     return { candidates, evidence };
   }
 

@@ -67,6 +67,8 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [transportResult, setTransportResult] = useState<{ protocol: string; downgraded: boolean; alpn: string; runtime: string } | null>(null);
   const [headerText, setHeaderText] = useState(':method: GET\n:scheme: http\n:authority: fixture.target.test\n:path: /');
   const [headerResult, setHeaderResult] = useState('');
+  const [domTarget, setDomTarget] = useState('http://fixture.target.test/app');
+  const [domLive, setDomLive] = useState(false);
   const [domObservationsText, setDomObservationsText] = useState('');
   const [domNodesText, setDomNodesText] = useState('');
   const [domResult, setDomResult] = useState<{ candidates: readonly { sourceApi: string; sinkApi: string; confidence: number; marker: string }[]; evidence: readonly string[] } | null>(null);
@@ -130,16 +132,17 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         .filter((line) => line !== '')
         .map((line) => ({ text: line.replace(/^pii:\s*/, ''), looksLikePii: line.startsWith('pii:') }));
       setDomResult(await callJson<{ candidates: readonly { sourceApi: string; sinkApi: string; confidence: number; marker: string }[]; evidence: readonly string[] }>(apiBase, '/api/tools/dom-flows', {
-        targetUrl: 'http://fixture.target.test/app',
+        targetUrl: domTarget,
         observations,
         nodes,
+        live: domLive,
       }));
     } catch (cause) {
       setError(String(cause));
     } finally {
       setBusy(false);
     }
-  }, [apiBase, domNodesText, domObservationsText]);
+  }, [apiBase, domLive, domNodesText, domObservationsText, domTarget]);
 
   const negotiate = useCallback(async () => {
     setBusy(true);
@@ -413,11 +416,15 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       {headerResult !== '' && <Text role="status">{headerResult}</Text>}
       <Text weight="semibold">{t('a10.domTitle')}</Text>
       <Text className={styles.muted}>{t('a10.domIntro')}</Text>
+      <Field label={t('a10.domTargetLabel')}>
+        <Input value={domTarget} onChange={(_, data) => setDomTarget(data.value)} />
+      </Field>
+      <Checkbox label={t('a10.domLiveLabel')} checked={domLive} onChange={(_, data) => setDomLive(data.checked === true)} />
       <Field label={t('a10.domObservationsLabel')}>
-        <Textarea value={domObservationsText} onChange={(_, data) => setDomObservationsText(data.value)} rows={3} />
+        <Textarea disabled={domLive} value={domObservationsText} onChange={(_, data) => setDomObservationsText(data.value)} rows={3} />
       </Field>
       <Field label={t('a10.domNodesLabel')}>
-        <Textarea value={domNodesText} onChange={(_, data) => setDomNodesText(data.value)} rows={2} />
+        <Textarea disabled={domLive} value={domNodesText} onChange={(_, data) => setDomNodesText(data.value)} rows={2} />
       </Field>
       <Button appearance="primary" disabled={busy} onClick={() => void analyzeDomFlowsAction()}>
         {t('a10.domAnalyze')}

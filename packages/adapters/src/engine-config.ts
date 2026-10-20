@@ -24,6 +24,7 @@ import { NodeRepeaterTransport } from './repeater-transport.ts';
 import { NodeSequencerTransport } from './sequencer-transport.ts';
 import { NodeWebSocketTransport } from './websocket-transport.ts';
 import { NodeHttp2Transport } from './http2-transport.ts';
+import { PlaywrightDomObserver } from './dom-observer.ts';
 import { ZapEngineAdapter } from './zap-engine.ts';
 import { PlaywrightExplorerAdapter } from './playwright-explorer.ts';
 
@@ -146,6 +147,8 @@ export interface ComposedEngines {
   readonly webSocketTransport?: import('@scopepilot2/core').WebSocketTransportPort;
   /** HTTP/2 negotiation/request probe (design/f15). */
   readonly advancedTransport?: import('@scopepilot2/core').AdvancedTransportPort;
+  /** Playwright init-script DOM observer (design/f16). */
+  readonly domObserver?: import('@scopepilot2/core').DomObservationPort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   /** 実 engine 時の監査記録用 hash。fixture のときは呼出側の既定を使う。 */
   readonly runtimeBundleHash?: string;
@@ -194,6 +197,7 @@ export async function composeEngines(
   const sequencerTransport = new NodeSequencerTransport();
   const webSocketTransport = new NodeWebSocketTransport();
   const advancedTransport = new NodeHttp2Transport();
+  const domObserver = new PlaywrightDomObserver();
   const interactshProvider = realOast
     ? new InteractshCliProvider({ serverUrl: selection.oastServerUrl!, configPath: selection.interactshConfigPath! })
     : undefined;
@@ -214,6 +218,7 @@ export async function composeEngines(
     sequencerTransport,
     webSocketTransport,
     advancedTransport,
+    domObserver,
     oastProvider,
     capabilities: createCapabilitySnapshots({
       zap: { engineVersion: scanEngine.engineVersion, real: realZap },

@@ -436,10 +436,11 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           const record = node as Record<string, unknown>;
           return { text: stringField(record, 'text'), looksLikePii: record.looksLikePii === true };
         });
-        const result = service.analyzeDomFlows(operator, {
+        const result = await service.analyzeDomFlows(operator, {
           targetUrl: stringField(body, 'targetUrl'),
           observations,
           ...(nodes === undefined ? {} : { nodes }),
+          live: body.live === true,
         });
         return respondJson(response, 200, result);
       } catch (cause) {

@@ -41,3 +41,17 @@ page navigation で stale になった handle は再利用しない。相関が�
 ## 8. 非単体テスト
 
 Playwright init script と frame/shadow fixture の IT、CSP 有効ページで非迂回を FT、browser version ごとの capability probe を実施する。
+
+## 9. 現行の実観測経路
+
+- `live=true` を明示したAPI/UI操作だけが `PlaywrightDomObserver` を起動する。Coreで対象URLを案件scopeに
+  照合した後、adapterもnavigation・redirect・subresourceを同じscopeで送信前検査する。WebSocketは遮断する。
+- context init scriptをpage scriptより前に登録し、query/hash/referrer/cookie/input/storage/postMessageの
+  文字列sourceと、`innerHTML` / `outerHTML` / `insertAdjacentHTML` / `document.write` / `eval` /
+  文字列timer / `srcdoc`等のsinkを最大500event・各4096文字で一時観測する。CSPは変更しない。
+- self-test済みかつscope内のframeだけを取り込み、cross-origin frameと `about:` / `data:` frameは対象外とする。
+  open shadow root内は共有prototype hookで観測できるが、closed shadow rootは対象外である。
+- Coreで同値相関した直後にmarkerをSHA-256 fingerprintへ置換し、実値やDOM text snapshotをAPI・証跡へ返さない。
+  instrumentation/navigation失敗は `CapabilityUnavailable` とし、観測なしを安全判定にしない。
+- 現行は初期ロードと250msの限定観測であり、操作sequence、認証session、長時間event、stack/CSS selector、
+  screenshot/HAR/trace、worker、変形をまたぐtaint、完全なsink集合には未対応である。候補は脆弱性確定ではない。

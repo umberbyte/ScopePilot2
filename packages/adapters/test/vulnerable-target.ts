@@ -20,6 +20,7 @@ export interface VulnerableTarget {
   readonly plainUrl: string;
   readonly loginUrl: string;
   readonly authenticatedUrl: string;
+  readonly domUrl: string;
 }
 
 const INDEX_HTML = [
@@ -64,6 +65,18 @@ export function startVulnerableTarget(): Promise<VulnerableTarget> {
     }
     if (url.pathname === '/plain') {
       send('<!doctype html><html><body>plain page</body></html>');
+      return;
+    }
+    if (url.pathname === '/dom-flow') {
+      const external = url.searchParams.get('external');
+      send([
+        '<!doctype html><html><body><div id="output"></div>',
+        external === null ? '' : `<img src="${external}">`,
+        '<script>',
+        "const marker = new URLSearchParams(location.search).get('marker') || '';",
+        "document.getElementById('output').innerHTML = marker;",
+        '</script></body></html>',
+      ].join(''));
       return;
     }
     if (url.pathname === '/login' && request.method === 'GET') {
@@ -117,6 +130,7 @@ export function startVulnerableTarget(): Promise<VulnerableTarget> {
         plainUrl: `${base}/plain`,
         loginUrl: `${base}/login`,
         authenticatedUrl: `${base}/authenticated/page`,
+        domUrl: `${base}/dom-flow?marker=scopepilot-dom-marker`,
       });
     });
   });

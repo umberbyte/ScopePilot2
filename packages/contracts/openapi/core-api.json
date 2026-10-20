@@ -2628,7 +2628,7 @@
     "/api/tools/dom-flows": {
       "post": {
         "operationId": "analyzeDomFlows",
-        "summary": "観測済み DOM API 呼び出しから source→sink 候補を導く (design/f16)。観測なしでは候補を作らない。PII と推定される node は redact",
+        "summary": "入力済み、またはlive browser観測のDOM API呼び出しからsource→sink候補を導く (design/f16)。live値はfingerprint化する",
         "requestBody": {
           "required": true,
           "content": {
@@ -2682,6 +2682,10 @@
                       },
                       "additionalProperties": false
                     }
+                  },
+                  "live": {
+                    "type": "boolean",
+                    "description": "true の場合は構成済み browser adapter で実観測し、入力 observations/nodes は使用しない"
                   }
                 },
                 "additionalProperties": false
@@ -2723,7 +2727,8 @@
                             "description": "同一 marker は 0.9・部分一致は 0.3"
                           },
                           "marker": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "import解析では入力marker、live観測ではsha256 fingerprint"
                           }
                         },
                         "additionalProperties": false
@@ -2745,6 +2750,9 @@
             "$ref": "#/components/responses/Error"
           },
           "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
             "$ref": "#/components/responses/Error"
           }
         }

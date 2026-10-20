@@ -6,7 +6,7 @@ import { bootstrapFlow } from '../support/test-flow.ts';
 describe('dom investigation (service)', () => {
   test('同一 marker の source→sink を候補として返し、PII node は redact する', async () => {
     const { service, operator } = await bootstrapFlow();
-    const result = service.analyzeDomFlows(operator, {
+    const result = await service.analyzeDomFlows(operator, {
       targetUrl: 'http://fixture.target.test/app',
       observations: [
         { api: 'location.search', marker: 'q=<script>' },
@@ -30,13 +30,69 @@ describe('dom investigation (service)', () => {
 
   test('観測なしは候補なし。scope 外は拒否', async () => {
     const { service, operator } = await bootstrapFlow();
-    const empty = service.analyzeDomFlows(operator, { targetUrl: 'http://fixture.target.test/app', observations: [] });
+    const empty = await service.analyzeDomFlows(operator, { targetUrl: 'http://fixture.target.test/app', observations: [] });
     assert.deepEqual(empty, { candidates: [], evidence: [] });
 
-    assert.throws(
+    await assert.rejects(
       () => service.analyzeDomFlows(operator, { targetUrl: 'http://elsewhere.example/app', observations: [{ api: 'location.search', marker: 'x' }] }),
       (error: unknown) => {
         assert.equal((error as { code?: string }).code, 'OutOfScope');
+        return true;
+      },
+    );
+  });
+
+  test('live observation uses the scoped browser port and fingerprints marker values', async () => {
+    const calls: { targetUrl: string; allowedOrigins: readonly string[] }[] = [];
+    const { service, operator } = await bootstrapFlow({
+      domObserver: {
+        async observe(input) {
+          calls.push({ targetUrl: input.targetUrl, allowedOrigins: input.scope.allowedOrigins });
+          return {
+            observations: [
+              { api: 'location.search', marker: 'private-marker' },
+              { api: 'innerHTML', marker: 'private-marker' },
+            ],
+            nodes: [],
+          };
+        },
+      },
+    });
+
+    const result = await service.analyzeDomFlows(operator, {
+      targetUrl: 'HTTP://FIXTURE.TARGET.TEST:80/app?q=private-marker',
+      observations: [{ api: 'location.search', marker: 'untrusted-import' }],
+      live: true,
+    });
+    assert.deepEqual(calls, [{ targetUrl: 'http://fixture.target.test/app?q=private-marker', allowedOrigins: ['http://fixture.target.test'] }]);
+    assert.equal(result.candidates.length, 1);
+    assert.match(result.candidates[0]?.marker ?? '', /^sha256:[a-f0-9]{64}$/);
+    assert.ok(!JSON.stringify(result).includes('private-marker'));
+    assert.ok(!JSON.stringify(result).includes('untrusted-import'), 'live mode does not mix caller-supplied observations');
+  });
+
+  test('live observation without an adapter is CapabilityUnavailable', async () => {
+    const { service, operator } = await bootstrapFlow();
+    await assert.rejects(
+      () => service.analyzeDomFlows(operator, { targetUrl: 'http://fixture.target.test/app', observations: [], live: true }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, 'CapabilityUnavailable');
+        return true;
+      },
+    );
+
+    const failing = await bootstrapFlow({
+      domObserver: {
+        async observe() {
+          throw new Error('browser self-test failed');
+        },
+      },
+    });
+    await assert.rejects(
+      () => failing.service.analyzeDomFlows(failing.operator, { targetUrl: 'http://fixture.target.test/app', observations: [], live: true }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, 'CapabilityUnavailable');
+        assert.ok(!String(error).includes('browser self-test failed'), 'adapter details are not exposed as a successful/diagnostic result');
         return true;
       },
     );

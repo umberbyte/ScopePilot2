@@ -149,6 +149,21 @@ export interface AdvancedTransportPort {
   }>;
 }
 
+/** Browser-backed DOM source/sink observation. Core still owns permission and target scope. */
+export interface DomObservationPort {
+  observe(input: {
+    readonly targetUrl: string;
+    /** Passed through so the browser adapter can enforce scope for every subrequest/frame. */
+    readonly scope: {
+      readonly allowedOrigins: readonly string[];
+      readonly deniedOrigins: readonly string[];
+    };
+  }): Promise<{
+    readonly observations: readonly { readonly api: string; readonly marker: string }[];
+    readonly nodes: readonly { readonly text: string; readonly looksLikePii: boolean }[];
+  }>;
+}
+
 /** Repeater の実 transport (実 HTTP 送信)。未構成の service は fixture 応答を使う。 */
 export interface RepeaterTransportPort {
   send(input: {
