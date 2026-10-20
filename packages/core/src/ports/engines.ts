@@ -138,7 +138,9 @@ export interface WebSocketTransportPort {
 export interface AdvancedTransportPort {
   probe(input: {
     readonly targetUrl: string;
-    /** An HTTP/1.1 request may only be sent when this flag is true. */
+    /** Protocol selected by the caller. HTTP/3 is rejected by core before this port is called. */
+    readonly requested: 'h2' | 'http/1.1';
+    /** When h2 is requested, an HTTP/1.1 fallback request may only be sent when this flag is true. */
     readonly allowFallback: boolean;
   }): Promise<{
     /** Protocols usable by the completed probe, or detected during negotiation. */

@@ -1177,6 +1177,19 @@ describe('Core API server (node:http)', () => {
     const result = (await negotiated.json()) as { protocol: string; downgraded: boolean; alpn: string };
     assert.deepEqual(result, { protocol: 'h2', downgraded: false, alpn: 'h2', runtime: 'fixture-transport' });
 
+    const explicitH1 = await post('/api/tools/transport/negotiate', {
+      targetUrl: 'http://fixture.target.test/api',
+      requested: 'http/1.1',
+      allowFallback: false,
+    });
+    assert.equal(explicitH1.status, 200);
+    assert.deepEqual(await explicitH1.json(), {
+      protocol: 'http/1.1',
+      downgraded: false,
+      alpn: 'http/1.1 (explicit)',
+      runtime: 'fixture-transport',
+    });
+
     const noFallback = await post('/api/tools/transport/negotiate', { targetUrl: 'http://fixture.target.test/h1-only', allowFallback: false });
     assert.equal(noFallback.status, 503);
 

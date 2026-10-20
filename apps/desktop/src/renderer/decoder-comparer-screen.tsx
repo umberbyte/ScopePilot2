@@ -4,7 +4,7 @@
 
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { MessageBar, Button, Checkbox, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { MessageBar, Button, Checkbox, Field, Input, makeStyles, Select, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 import { t } from './resources.ts';
 
 const CODECS = ['base64', 'url', 'hex', 'html-entity', 'gzip', 'deflate-raw'] as const;
@@ -63,6 +63,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [wsNotice, setWsNotice] = useState('');
   const [wsFrames, setWsFrames] = useState<readonly { frameId: string; direction: string; text: string; rawHash: string }[]>([]);
   const [transportTarget, setTransportTarget] = useState('http://fixture.target.test/api');
+  const [transportRequested, setTransportRequested] = useState<'h2' | 'http/1.1'>('h2');
   const [transportAllowFallback, setTransportAllowFallback] = useState(true);
   const [transportResult, setTransportResult] = useState<{ protocol: string; downgraded: boolean; alpn: string; runtime: string } | null>(null);
   const [headerText, setHeaderText] = useState(':method: GET\n:scheme: http\n:authority: fixture.target.test\n:path: /');
@@ -151,6 +152,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     try {
       setTransportResult(await callJson<{ protocol: string; downgraded: boolean; alpn: string; runtime: string }>(apiBase, '/api/tools/transport/negotiate', {
         targetUrl: transportTarget,
+        requested: transportRequested,
         allowFallback: transportAllowFallback,
       }));
     } catch (cause) {
@@ -158,7 +160,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     } finally {
       setBusy(false);
     }
-  }, [apiBase, transportAllowFallback, transportTarget]);
+  }, [apiBase, transportAllowFallback, transportRequested, transportTarget]);
 
   const validateHeaders = useCallback(async () => {
     setBusy(true);
@@ -400,7 +402,18 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       <Field label={t('a10.transportTargetLabel')}>
         <Input value={transportTarget} onChange={(_, data) => setTransportTarget(data.value)} />
       </Field>
-      <Checkbox label={t('a10.transportFallbackLabel')} checked={transportAllowFallback} onChange={(_, data) => setTransportAllowFallback(data.checked === true)} />
+      <Field label={t('a10.transportRequestedLabel')}>
+        <Select value={transportRequested} onChange={(_, data) => setTransportRequested(data.value as 'h2' | 'http/1.1')}>
+          <option value="h2">HTTP/2</option>
+          <option value="http/1.1">HTTP/1.1</option>
+        </Select>
+      </Field>
+      <Checkbox
+        label={t('a10.transportFallbackLabel')}
+        checked={transportAllowFallback}
+        disabled={transportRequested === 'http/1.1'}
+        onChange={(_, data) => setTransportAllowFallback(data.checked === true)}
+      />
       <Button appearance="primary" disabled={busy} onClick={() => void negotiate()}>
         {t('a10.transportNegotiate')}
       </Button>

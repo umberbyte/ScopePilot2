@@ -2461,7 +2461,7 @@
     "/api/tools/transport/negotiate": {
       "post": {
         "operationId": "negotiateTransportFor",
-        "summary": "transport を選択する (design/f15)。HTTP/3 は Unsupported・fallback 未許可での H1 downgrade は CapabilityUnavailable",
+        "summary": "transport を選択する (design/f15)。明示した HTTP/1.1 は H2 probe を行わず、HTTP/3 は Unsupported・fallback 未許可での H1 downgrade は CapabilityUnavailable",
         "requestBody": {
           "required": true,
           "content": {
@@ -2478,7 +2478,7 @@
                   },
                   "allowFallback": {
                     "type": "boolean",
-                    "description": "false の場合、peer が h2 を offer しなければ失敗する (F15-UT-004)"
+                    "description": "h2要求時にfalseなら、peerがh2をofferしなければ失敗しH1 requestを送らない (F15-UT-004)。明示H1では使用しない"
                   },
                   "requested": {
                     "type": "string",
@@ -2487,7 +2487,7 @@
                       "http/1.1",
                       "h3"
                     ],
-                    "description": "h3 は能力表で Unsupported (F15-UT-006)"
+                    "description": "省略時は h2。http/1.1 は H2 probe を行わず直接 H1 request を送る。h3 は能力表で Unsupported (F15-UT-006)"
                   }
                 },
                 "additionalProperties": false

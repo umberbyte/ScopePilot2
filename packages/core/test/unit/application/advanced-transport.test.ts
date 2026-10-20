@@ -12,6 +12,18 @@ describe('advanced transport (service)', () => {
     assert.equal(h2.alpn, 'h2');
     assert.equal(h2.runtime, 'fixture-transport');
 
+    const explicitH1 = await service.negotiateTransportFor(operator, {
+      targetUrl: 'http://fixture.target.test/api',
+      requested: 'http/1.1',
+      allowFallback: false,
+    });
+    assert.deepEqual(explicitH1, {
+      protocol: 'http/1.1',
+      downgraded: false,
+      alpn: 'http/1.1 (explicit)',
+      runtime: 'fixture-transport',
+    });
+
     const downgraded = await service.negotiateTransportFor(operator, { targetUrl: 'http://fixture.target.test/h1-only-api', allowFallback: true });
     assert.equal(downgraded.protocol, 'http/1.1');
     assert.equal(downgraded.downgraded, true);
@@ -26,7 +38,7 @@ describe('advanced transport (service)', () => {
 
     // HTTP/3 は能力表で Unsupported (F15-UT-006)。
     await assert.rejects(
-      () => service.negotiateTransportFor(operator, { targetUrl: 'http://fixture.target.test/api', allowFallback: true, requested: 'h3' as never }),
+      () => service.negotiateTransportFor(operator, { targetUrl: 'http://fixture.target.test/api', allowFallback: true, requested: 'h3' }),
       (error: unknown) => {
         assert.equal((error as { code?: string }).code, 'CapabilityUnavailable');
         return true;
@@ -36,7 +48,7 @@ describe('advanced transport (service)', () => {
   });
 
   test('configured probe receives the canonical in-scope target and preserves measured evidence', async () => {
-    const calls: { targetUrl: string; allowFallback: boolean }[] = [];
+    const calls: { targetUrl: string; requested: 'h2' | 'http/1.1'; allowFallback: boolean }[] = [];
     const { service, operator } = await bootstrapFlow({
       advancedTransport: {
         async probe(input) {
@@ -50,7 +62,7 @@ describe('advanced transport (service)', () => {
       targetUrl: 'HTTP://FIXTURE.TARGET.TEST:80/real-h2?x=1',
       allowFallback: false,
     });
-    assert.deepEqual(calls, [{ targetUrl: 'http://fixture.target.test/real-h2?x=1', allowFallback: false }]);
+    assert.deepEqual(calls, [{ targetUrl: 'http://fixture.target.test/real-h2?x=1', requested: 'h2', allowFallback: false }]);
     assert.deepEqual(result, { protocol: 'h2', downgraded: false, alpn: 'h2', runtime: 'node-test-runtime' });
   });
 

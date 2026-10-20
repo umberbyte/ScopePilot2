@@ -1225,7 +1225,7 @@ export class BaselineFlowService {
    * 実 port 構成時は bounded request probe を行い、未構成時は URL に h1-only を含む
    * fixture peer だけが h2 を offer しない。結果は ALPN/runtime を保持する (F15-UT-007)。
    */
-  async negotiateTransportFor(operator: OperatorProfile, input: { readonly targetUrl: string; readonly allowFallback: boolean; readonly requested?: 'h2' | 'http/1.1' }): Promise<{ protocol: 'h2' | 'http/1.1'; downgraded: boolean; alpn: string; runtime: string }> {
+  async negotiateTransportFor(operator: OperatorProfile, input: { readonly targetUrl: string; readonly allowFallback: boolean; readonly requested?: 'h2' | 'http/1.1' | 'h3' }): Promise<{ protocol: 'h2' | 'http/1.1'; downgraded: boolean; alpn: string; runtime: string }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -1233,17 +1233,26 @@ export class BaselineFlowService {
     if (!decision.allowed) {
       throw domainError('OutOfScope', `transport target is out of scope: ${decision.reason}`);
     }
-    if (input.requested !== undefined && transportCapability(input.requested) === 'Unsupported') {
-      throw domainError('CapabilityUnavailable', `transport ${input.requested} is Unsupported`);
+    const requested = input.requested ?? 'h2';
+    if (requested === 'h3' || transportCapability(requested) === 'Unsupported') {
+      throw domainError('CapabilityUnavailable', `transport ${requested} is Unsupported`);
     }
     const probe = this.deps.advancedTransport === undefined
-      ? {
+      ? requested === 'http/1.1'
+        ? {
+            offered: ['http/1.1'] as const,
+            alpn: 'http/1.1 (explicit)',
+            runtime: 'fixture-transport',
+          }
+        : {
           offered: canonical.includes('h1-only') ? ['http/1.1'] as const : ['h2'] as const,
           alpn: canonical.includes('h1-only') ? 'http/1.1' : 'h2',
           runtime: 'fixture-transport',
         }
-      : await this.deps.advancedTransport.probe({ targetUrl: canonical, allowFallback: input.allowFallback });
-    const negotiated = negotiateTransport({ offered: probe.offered, allowFallback: input.allowFallback });
+      : await this.deps.advancedTransport.probe({ targetUrl: canonical, requested, allowFallback: input.allowFallback });
+    const negotiated = requested === 'http/1.1'
+      ? { protocol: 'http/1.1' as const, downgraded: false }
+      : negotiateTransport({ offered: probe.offered, allowFallback: input.allowFallback });
     const evidence = transportEvidence({ alpn: probe.alpn, runtime: probe.runtime });
     this.record({
       type: 'TransportNegotiated',

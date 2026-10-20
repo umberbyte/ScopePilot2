@@ -51,6 +51,10 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
     }
 
     const runtime = `node ${process.versions.node} (node:http2)`;
+    if (input.requested === 'http/1.1') {
+      const alpn = await this.requestHttp1(target);
+      return { offered: ['http/1.1'], alpn, runtime };
+    }
     const h2 = target.protocol === 'https:'
       ? await this.tryTlsHttp2(target)
       : await this.tryCleartextHttp2(target);
@@ -176,18 +180,25 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
     });
   }
 
-  private async requestHttp1(target: URL): Promise<void> {
+  private async requestHttp1(target: URL): Promise<string> {
     const client = target.protocol === 'https:' ? https : http;
-    await new Promise<void>((resolve, reject) => {
-      const request = client.request(target, { method: 'GET', headers: { Connection: 'close' } }, (response) => {
+    return await new Promise<string>((resolve, reject) => {
+      const request = client.request(target, {
+        method: 'GET',
+        headers: { Connection: 'close' },
+        ...(target.protocol === 'https:' ? { ALPNProtocols: ['http/1.1'] } : {}),
+      }, (response) => {
         let total = 0;
+        const alpn = target.protocol === 'https:'
+          ? (response.socket as TLSSocket).alpnProtocol || 'none'
+          : 'http/1.1 (cleartext)';
         response.on('data', (chunk: Buffer) => {
           total += chunk.length;
           if (total > this.maxResponseBytes) {
             request.destroy(new Error(`HTTP/1.1 response exceeds ${this.maxResponseBytes} bytes`));
           }
         });
-        response.once('end', resolve);
+        response.once('end', () => resolve(alpn));
         response.once('error', reject);
       });
       request.setTimeout(this.timeoutMs, () => request.destroy(new Error(`HTTP/1.1 request timeout after ${this.timeoutMs}ms`)));

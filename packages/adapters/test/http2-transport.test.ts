@@ -32,7 +32,7 @@ describe('NodeHttp2Transport', () => {
     const port = await listen(server);
     try {
       const transport = new NodeHttp2Transport({ timeoutMs: 2_000 });
-      const result = await transport.probe({ targetUrl: `http://127.0.0.1:${port}/probe?x=1`, allowFallback: false });
+      const result = await transport.probe({ targetUrl: `http://127.0.0.1:${port}/probe?x=1`, requested: 'h2', allowFallback: false });
       assert.deepEqual(result.offered, ['h2']);
       assert.equal(result.alpn, 'h2c');
       assert.match(result.runtime, /^node \S+ \(node:http2\)$/);
@@ -54,13 +54,42 @@ describe('NodeHttp2Transport', () => {
     const port = await listen(server);
     try {
       const transport = new NodeHttp2Transport({ timeoutMs: 2_000 });
-      const unavailable = await transport.probe({ targetUrl: `http://127.0.0.1:${port}/probe`, allowFallback: false });
+      const unavailable = await transport.probe({ targetUrl: `http://127.0.0.1:${port}/probe`, requested: 'h2', allowFallback: false });
       assert.deepEqual(unavailable.offered, ['http/1.1']);
       assert.equal(requests, 0);
 
-      const fallback = await transport.probe({ targetUrl: `http://127.0.0.1:${port}/probe`, allowFallback: true });
+      const fallback = await transport.probe({ targetUrl: `http://127.0.0.1:${port}/probe`, requested: 'h2', allowFallback: true });
       assert.deepEqual(fallback.offered, ['http/1.1']);
       assert.equal(requests, 1);
+    } finally {
+      await close(server);
+    }
+  });
+
+  test('explicit HTTP/1.1 sends exactly one H1 request without an H2 preface', async () => {
+    let requests = 0;
+    let clientErrors = 0;
+    const server = createHttp1Server((_request, response) => {
+      requests += 1;
+      response.writeHead(204);
+      response.end();
+    });
+    server.on('clientError', (_error, socket) => {
+      clientErrors += 1;
+      socket.destroy();
+    });
+    const port = await listen(server);
+    try {
+      const transport = new NodeHttp2Transport({ timeoutMs: 2_000 });
+      const result = await transport.probe({
+        targetUrl: `http://127.0.0.1:${port}/probe`,
+        requested: 'http/1.1',
+        allowFallback: false,
+      });
+      assert.deepEqual(result.offered, ['http/1.1']);
+      assert.equal(result.alpn, 'http/1.1 (cleartext)');
+      assert.equal(requests, 1);
+      assert.equal(clientErrors, 0);
     } finally {
       await close(server);
     }

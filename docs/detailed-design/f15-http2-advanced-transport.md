@@ -50,5 +50,8 @@ Node HTTP/2 adapter と TLS/ALPN server の IT、Windows/macOS runtime matrix、
   redirect は追従しない。GOAWAY、stream/session error、timeout、接続失敗を成功として補完しない。
 - HTTP/1.1 request は利用者が fallback を明示許可した場合だけ別requestとして送る。未許可時はh2不成立を
   `CapabilityUnavailable` とし、H1へ暗黙再送しない。結果にはNode runtimeと実測ALPN（平文は `h2c` marker）を残す。
+- `requested=http/1.1` の明示選択はfallbackではないため、H2 probe/prefaceを送らずbounded H1 requestを1回送る。
+  この結果は `downgraded=false` とし、TLSでは実ALPN、平文では `http/1.1 (cleartext)` markerを残す。
+  省略時は `requested=h2` と同じである。
 - 現行UI/APIは capability probe に限定する。任意method/body/header、stream ID/settings/timing証跡、connect先・
   `:authority`・SNIの独立指定、connection reuse、TLS test fixtureは未実装であり、完全なsemantic request editorとは表示しない。
