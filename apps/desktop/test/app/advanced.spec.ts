@@ -337,6 +337,10 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   const byteChart = page.getByRole('group', { name: 'byte 出現頻度 (16区間・最大値に対する相対表示)' });
   await expect(byteChart).toBeVisible();
   await expect(byteChart.getByRole('progressbar')).toHaveCount(16);
+  const byteLengthChart = page.getByRole('group', { name: 'token のUTF-8 byte長分布 (16区間)' });
+  const characterLengthChart = page.getByRole('group', { name: 'token の文字長分布 (Unicode code point・16区間)' });
+  await expect(byteLengthChart.getByRole('progressbar')).toHaveCount(16);
+  await expect(characterLengthChart.getByRole('progressbar')).toHaveCount(16);
 
   // 固定 token の対象は重複が増える。
   await page.getByLabel('対象 URL (scope 内)').fill('http://fixture.target.test/fixed-token');

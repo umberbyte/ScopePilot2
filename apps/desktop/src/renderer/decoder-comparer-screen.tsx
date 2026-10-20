@@ -54,6 +54,9 @@ interface SequencerResult {
   readonly shannonEntropyBitsPerByte?: number;
   readonly distinctByteValues?: number;
   readonly byteFrequencyBuckets?: readonly number[];
+  readonly tokenLengthBucketMinimums?: readonly number[];
+  readonly tokenByteLengthBuckets?: readonly number[];
+  readonly tokenCharacterLengthBuckets?: readonly number[];
   readonly minimum?: number;
   readonly sessionCookieNames?: readonly string[];
 }
@@ -77,6 +80,16 @@ async function callJson<T>(apiBase: string, path: string, body?: unknown, method
     throw new Error(errorBody?.message ?? `HTTP ${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+function lengthBucketRange(minimums: readonly number[], index: number): string {
+  const minimum = minimums[index] ?? 0;
+  const nextMinimum = minimums[index + 1];
+  if (nextMinimum === undefined) {
+    return `${minimum}+`;
+  }
+  const maximum = nextMinimum - 1;
+  return minimum === maximum ? `${minimum}` : `${minimum}–${maximum}`;
 }
 
 export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.ReactElement {
@@ -523,6 +536,34 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
               </div>
             );
           })()}
+          {sequencerResult.tokenLengthBucketMinimums !== undefined
+            && sequencerResult.tokenByteLengthBuckets !== undefined
+            && sequencerResult.tokenCharacterLengthBuckets !== undefined
+            && [
+              { title: t('a10.sequencerByteLengthChart'), counts: sequencerResult.tokenByteLengthBuckets },
+              { title: t('a10.sequencerCharacterLengthChart'), counts: sequencerResult.tokenCharacterLengthBuckets },
+            ].map(({ title, counts }) => {
+              const maximum = Math.max(1, ...counts);
+              const total = counts.reduce((sum, count) => sum + count, 0);
+              return (
+                <div key={title} className={styles.byteChart} role="group" aria-label={title}>
+                  <Text weight="semibold" className={styles.byteChartTitle}>{title}</Text>
+                  {counts.map((count, index) => {
+                    const range = lengthBucketRange(sequencerResult.tokenLengthBucketMinimums ?? [], index);
+                    return (
+                      <React.Fragment key={range}>
+                        <Text>{range}</Text>
+                        <ProgressBar
+                          value={count / maximum}
+                          aria-label={t('a10.sequencerLengthBucket', { kind: title, range, count, total })}
+                        />
+                        <Text>{count}</Text>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              );
+            })}
           {sequencerResult.minimum !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerInsufficient', { minimum: sequencerResult.minimum })}</Text>
           )}

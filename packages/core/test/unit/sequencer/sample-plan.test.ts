@@ -137,6 +137,15 @@ describe('Sequencer', () => {
     assert.equal(utf8.byteFrequencyBuckets.reduce((sum, count) => sum + count, 0), 2);
   });
 
+  test('[F07-UT-013] token のUTF-8 byte長とUnicode文字長を固定16区間へ集約する', () => {
+    const distribution = analyzeEntropy(['', 'a', 'é', 'abc', 'abcdefghij']);
+    assert.deepEqual(distribution.tokenLengthBucketMinimums, [0, 1, 2, 3, 5, 9, 17, 33, 65, 129, 257, 513, 1025, 2049, 4097, 8193]);
+    assert.deepEqual(distribution.tokenByteLengthBuckets, [1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert.deepEqual(distribution.tokenCharacterLengthBuckets, [1, 2, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert.equal(distribution.tokenByteLengthBuckets.reduce((sum, count) => sum + count, 0), 5);
+    assert.equal(distribution.tokenCharacterLengthBuckets.reduce((sum, count) => sum + count, 0), 5);
+  });
+
   test('[F07-UT-005] sample 不足は断定せず insufficient を返す', () => {
     const result = assess(Array.from({ length: 29 }, (_, i) => `t${i}`));
     assert.deepEqual(result, { verdict: 'insufficient', collected: 29, minimum: 30 });

@@ -19,9 +19,13 @@ describe('sequencer session (service)', () => {
     assert.ok((result.distinctByteValues ?? 0) > 10);
     assert.equal(result.byteFrequencyBuckets?.length, 16);
     assert.ok((result.byteFrequencyBuckets?.reduce((sum, count) => sum + count, 0) ?? 0) > 0);
+    assert.equal(result.tokenLengthBucketMinimums?.length, 16);
+    assert.equal(result.tokenByteLengthBuckets?.reduce((sum, count) => sum + count, 0), 100);
+    assert.equal(result.tokenCharacterLengthBuckets?.reduce((sum, count) => sum + count, 0), 100);
     assert.equal(JSON.stringify(result).includes('sample-'), false, 'token 原文は応答に出ない');
     assert.equal(service.listSequencerSessions().length, 1);
     assert.deepEqual(service.listSequencerSessions()[0]?.byteFrequencyBuckets, result.byteFrequencyBuckets);
+    assert.deepEqual(service.listSequencerSessions()[0]?.tokenByteLengthBuckets, result.tokenByteLengthBuckets);
 
     const hidden = await service.runSequencerSession(operator, {
       targetUrl: 'http://fixture.target.test/session-token',

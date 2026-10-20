@@ -1753,6 +1753,36 @@
                               "minimum": 0
                             }
                           },
+                          "tokenLengthBucketMinimums": {
+                            "type": "array",
+                            "minItems": 16,
+                            "maxItems": 16,
+                            "description": "assessed 時のみ。token長の固定16区間の下限 (0, 1, 2, 3, 5, ... 8193)。次の下限未満までを同じ区間とし、最後は上限なし",
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "tokenByteLengthBuckets": {
+                            "type": "array",
+                            "minItems": 16,
+                            "maxItems": 16,
+                            "description": "assessed 時のみ。各tokenのUTF-8 byte長を固定16区間へまとめたsample数。token原文や個別sample長は含まない",
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "tokenCharacterLengthBuckets": {
+                            "type": "array",
+                            "minItems": 16,
+                            "maxItems": 16,
+                            "description": "assessed 時のみ。各tokenのUnicode code point数を固定16区間へまとめたsample数。token原文や個別sample長は含まない",
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
                           "minimum": {
                             "type": "integer",
                             "minimum": 1,
@@ -1925,6 +1955,36 @@
                       "minItems": 16,
                       "maxItems": 16,
                       "description": "assessed 時のみ。0x00–0xFF を上位 nibble ごとの16区間にまとめた出現数。token 原文は含まない",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "tokenLengthBucketMinimums": {
+                      "type": "array",
+                      "minItems": 16,
+                      "maxItems": 16,
+                      "description": "assessed 時のみ。token長の固定16区間の下限 (0, 1, 2, 3, 5, ... 8193)。次の下限未満までを同じ区間とし、最後は上限なし",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "tokenByteLengthBuckets": {
+                      "type": "array",
+                      "minItems": 16,
+                      "maxItems": 16,
+                      "description": "assessed 時のみ。各tokenのUTF-8 byte長を固定16区間へまとめたsample数。token原文や個別sample長は含まない",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "tokenCharacterLengthBuckets": {
+                      "type": "array",
+                      "minItems": 16,
+                      "maxItems": 16,
+                      "description": "assessed 時のみ。各tokenのUnicode code point数を固定16区間へまとめたsample数。token原文や個別sample長は含まない",
                       "items": {
                         "type": "integer",
                         "minimum": 0

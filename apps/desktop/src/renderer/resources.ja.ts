@@ -159,6 +159,9 @@ export const jaStrings = {
   'a10.sequencerEntropy': 'entropy {entropy} bits/byte・出現 byte 種 {distinct}',
   'a10.sequencerByteChart': 'byte 出現頻度 (16区間・最大値に対する相対表示)',
   'a10.sequencerByteBucket': 'byte {range}: {count} / 全 {total}',
+  'a10.sequencerByteLengthChart': 'token のUTF-8 byte長分布 (16区間)',
+  'a10.sequencerCharacterLengthChart': 'token の文字長分布 (Unicode code point・16区間)',
+  'a10.sequencerLengthBucket': '{kind} {range}: {count} / sample {total}',
   'a10.sequencerInsufficient': 'sample 不足のため断定しません (最小 {minimum} 件が必要)。',
   'a10.oastTitle': 'OAST (out-of-band 検出)',
   'a10.oastIntro':

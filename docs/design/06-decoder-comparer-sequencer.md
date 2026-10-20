@@ -35,7 +35,7 @@ SequencerService（新規・A3）:
 redirect 非追従で収集し、応答本文は抽出 callback の間だけ保持する。任意の認証roleを指定すると、
 事前のlogin成功sessionから対象URLのdomain/pathへ適用可能なcookieだけを各収集requestへ付ける。
 認証cookie値はtransport外へ出さず、結果・台帳には適用名だけを残す。応答cookie値も抽出 callback の間だけ扱い、
-結果・台帳には抽出元と該当するcookie名・field名・delimiter対だけを残す。hidden値も上限付き属性走査の間だけ扱う。応答Authorization値も抽出 callback の間だけ扱い、Bearer schemeとRFC 6750のb64token構文に一致する単一値だけを採用する。本文custom extractorは開始・終了delimiterを各UTF-8 128 bytes以下、本文走査1 MiB、token 4 KiBに制限し、任意regexは実行しない。画面の停止またはAPI client切断は`AbortSignal`としてCoreとtransportへ伝播し、進行中の要求を破棄して以後の送信を止める。中断した採取は完了sessionとして保存しない。解析済み結果はbyte値を固定16区間に集約した件数を返し、A10で相対頻度barを表示する。method/header/bodyを任意化する完全な採取専用再送計画は後続とし、現行経路と区別する。
+結果・台帳には抽出元と該当するcookie名・field名・delimiter対だけを残す。hidden値も上限付き属性走査の間だけ扱う。応答Authorization値も抽出 callback の間だけ扱い、Bearer schemeとRFC 6750のb64token構文に一致する単一値だけを採用する。本文custom extractorは開始・終了delimiterを各UTF-8 128 bytes以下、本文走査1 MiB、token 4 KiBに制限し、任意regexは実行しない。画面の停止またはAPI client切断は`AbortSignal`としてCoreとtransportへ伝播し、進行中の要求を破棄して以後の送信を止める。中断した採取は完了sessionとして保存しない。解析済み結果はbyte値の固定16区間に加え、各tokenのUTF-8 byte長とUnicode code point数を固定16区間（0、1、2、3–4、以降は概ね倍幅、8,193以上）へ集約した件数を返し、A10で相対頻度barを表示する。個別sample長は返さない。method/header/bodyを任意化する完全な採取専用再送計画は後続とし、現行経路と区別する。
 
 ## 4. データモデル
 
@@ -52,7 +52,7 @@ redirect 非追従で収集し、応答本文は抽出 callback の間だけ保�
 ## 6. UI
 
 - 「ツール」領域に Decoder（連続変換パネル）・Comparer（2ペイン差分）・Sequencer（採取設定、
-  統計表、固定16区間のbyte頻度chart）を配置。任意の通信・任意の観測から「この要求を Decoder/Comparer へ」で直接渡せる。
+  統計表、固定16区間のbyte頻度chart・tokenのbyte/文字長分布chart）を配置。任意の通信・任意の観測から「この要求を Decoder/Comparer へ」で直接渡せる。
 
 ## 7. 確定事項
 

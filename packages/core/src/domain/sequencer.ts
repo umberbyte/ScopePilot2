@@ -284,6 +284,23 @@ export interface EntropyResult {
   readonly distinctByteValues: number;
   /** 0x00..0xff を上位 nibble ごとの 16 区間にまとめた出現数。token 原文は含まない。 */
   readonly byteFrequencyBuckets: readonly number[];
+  /** token 長を 0, 1, 2, 3-4, ... 4,097-8,192, 8,193+ の固定16区間へ分ける下限。 */
+  readonly tokenLengthBucketMinimums: readonly number[];
+  /** 各 token の UTF-8 byte 長を固定16区間へまとめた sample 数。 */
+  readonly tokenByteLengthBuckets: readonly number[];
+  /** 各 token の Unicode code point 数を固定16区間へまとめた sample 数。 */
+  readonly tokenCharacterLengthBuckets: readonly number[];
+}
+
+const TOKEN_LENGTH_BUCKET_MINIMUMS = Object.freeze([0, 1, 2, 3, 5, 9, 17, 33, 65, 129, 257, 513, 1025, 2049, 4097, 8193]);
+
+function tokenLengthBucketIndex(length: number): number {
+  for (let index = TOKEN_LENGTH_BUCKET_MINIMUMS.length - 1; index > 0; index -= 1) {
+    if (length >= (TOKEN_LENGTH_BUCKET_MINIMUMS[index] ?? 0)) {
+      return index;
+    }
+  }
+  return 0;
 }
 
 /** 固定 bytes には決定的な低 entropy を返す (F07-UT-007 ではなく F07-UT-004)。 */
@@ -291,6 +308,14 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
   const bytes = Buffer.from(tokens.join(''), 'utf8');
   const counts = new Map<number, number>();
   const byteFrequencyBuckets = Array.from({ length: 16 }, () => 0);
+  const tokenByteLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
+  const tokenCharacterLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
+  for (const token of tokens) {
+    const byteBucket = tokenLengthBucketIndex(Buffer.byteLength(token, 'utf8'));
+    const characterBucket = tokenLengthBucketIndex(Array.from(token).length);
+    tokenByteLengthBuckets[byteBucket] = (tokenByteLengthBuckets[byteBucket] ?? 0) + 1;
+    tokenCharacterLengthBuckets[characterBucket] = (tokenCharacterLengthBuckets[characterBucket] ?? 0) + 1;
+  }
   for (const byte of bytes) {
     counts.set(byte, (counts.get(byte) ?? 0) + 1);
     const bucket = Math.floor(byte / 16);
@@ -305,6 +330,9 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
     shannonEntropyBitsPerByte: Number(entropy.toFixed(4)),
     distinctByteValues: counts.size,
     byteFrequencyBuckets: Object.freeze(byteFrequencyBuckets),
+    tokenLengthBucketMinimums: TOKEN_LENGTH_BUCKET_MINIMUMS,
+    tokenByteLengthBuckets: Object.freeze(tokenByteLengthBuckets),
+    tokenCharacterLengthBuckets: Object.freeze(tokenCharacterLengthBuckets),
   };
 }
 
