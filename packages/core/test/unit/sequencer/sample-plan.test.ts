@@ -5,6 +5,7 @@ import {
   assess,
   createSamplePlan,
   createSequencerExtractor,
+  extractBearerToken,
   extractCookieToken,
   extractHiddenInputToken,
   extractSequencerToken,
@@ -72,6 +73,19 @@ describe('Sequencer', () => {
     assert.throws(() => createSequencerExtractor('hidden'), /valid form field name/);
     assert.throws(() => createSequencerExtractor('hidden', 'unused', 'csrf_token'), /only supported/);
     assert.throws(() => createSequencerExtractor('cookie', 'SEQ_TOKEN', 'unused'), /only supported/);
+  });
+
+  test('[F07-UT-010] response Authorization は Bearer b64token だけを抽出する', () => {
+    const extractor = createSequencerExtractor('bearer');
+    const response = { body: 'token=body-value', authorizationHeader: 'bEaReR abc-._~+/==' };
+    assert.deepEqual(extractBearerToken(response), { kind: 'collected', token: 'abc-._~+/==' });
+    assert.deepEqual(extractSequencerToken(response, extractor, /token=([a-z-]+)/), { kind: 'collected', token: 'abc-._~+/==' });
+    assert.equal(extractBearerToken({ authorizationHeader: 'Basic abc123' }).kind, 'missing');
+    assert.equal(extractBearerToken({ authorizationHeader: 'Bearer ' }).kind, 'missing');
+    assert.equal(extractBearerToken({ authorizationHeader: 'Bearer abc, Basic def' }).kind, 'missing');
+    assert.equal(extractBearerToken({ authorizationHeader: 'Bearer abc def' }).kind, 'missing');
+    assert.throws(() => createSequencerExtractor('bearer', 'unused'), /not supported/);
+    assert.throws(() => createSequencerExtractor('bearer', undefined, 'unused'), /not supported/);
   });
 
   test('[F07-UT-003] duplicate token も sample として保持し重複数を数える', () => {

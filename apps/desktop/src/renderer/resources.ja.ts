@@ -142,6 +142,7 @@ export const jaStrings = {
   'a10.sequencerTokenSource.body': '応答本文 (token=...)',
   'a10.sequencerTokenSource.cookie': '応答 Set-Cookie',
   'a10.sequencerTokenSource.hidden': '応答 HTML の hidden input',
+  'a10.sequencerTokenSource.bearer': '応答 Authorization の Bearer token',
   'a10.sequencerTokenCookieNameLabel': '応答 Set-Cookie の token cookie 名',
   'a10.sequencerTokenFieldNameLabel': 'hidden input の token field 名',
   'a10.sequencerRoleLabel': '収集 session の role (任意・A09 で login 済み。空なら非認証)',

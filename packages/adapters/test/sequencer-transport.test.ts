@@ -60,12 +60,13 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
       response.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
         'Set-Cookie': `SEQ_TOKEN=cookie-secret-${sequence.toString(36)}; Path=/; HttpOnly`,
+        'Authorization': `Bearer bearer-secret-${sequence.toString(36)}==`,
       });
       response.end(`token=secret-token-${sequence.toString(36)}<input value="hidden-secret-${sequence.toString(36)}" name="csrf_token" type="hidden">`);
     });
     const base = await listen(server);
     try {
-      const rateResponses: { body: string; setCookieHeaders?: readonly string[] }[] = [];
+      const rateResponses: { body: string; setCookieHeaders?: readonly string[]; authorizationHeader?: string }[] = [];
       const normalRate = new NodeSequencerTransport({ timeoutMs: 5_000 });
       await normalRate.collect({
         targetUrl: `${base}/token`,
@@ -74,12 +75,17 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
         onResponse: (response) => rateResponses.push({
           body: response.body,
           ...(response.setCookieHeaders === undefined ? {} : { setCookieHeaders: response.setCookieHeaders }),
+          ...(response.authorizationHeader === undefined ? {} : { authorizationHeader: response.authorizationHeader }),
         }),
       });
       assert.equal(rateResponses.length, 2);
       assert.deepEqual(rateResponses.map((response) => response.setCookieHeaders), [
         ['SEQ_TOKEN=cookie-secret-1; Path=/; HttpOnly'],
         ['SEQ_TOKEN=cookie-secret-2; Path=/; HttpOnly'],
+      ]);
+      assert.deepEqual(rateResponses.map((response) => response.authorizationHeader), [
+        'Bearer bearer-secret-1==',
+        'Bearer bearer-secret-2==',
       ]);
       assert.ok((receivedAt[1] ?? 0) - (receivedAt[0] ?? 0) >= 400, '既定 2 RPS の間隔を守る');
       assert.deepEqual(receivedCookies.slice(0, 2), ['SEQ_SESSION=transport-secret', 'SEQ_SESSION=transport-secret']);
@@ -102,16 +108,20 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
       assert.equal(JSON.stringify(result).includes('secret-token'), false, '結果に token 原文を出さない');
       assert.equal(JSON.stringify(result).includes('cookie-secret'), false, '結果に cookie token 原文を出さない');
       assert.equal(JSON.stringify(result).includes('hidden-secret'), false, '結果に hidden token 原文を出さない');
+      assert.equal(JSON.stringify(result).includes('bearer-secret'), false, '結果に bearer token 原文を出さない');
       assert.equal(JSON.stringify(service.events()).includes('secret-token'), false, '監査に token 原文を出さない');
       assert.equal(JSON.stringify(service.events()).includes('cookie-secret'), false, '監査に cookie token 原文を出さない');
       assert.equal(JSON.stringify(service.events()).includes('hidden-secret'), false, '監査に hidden token 原文を出さない');
+      assert.equal(JSON.stringify(service.events()).includes('bearer-secret'), false, '監査に bearer token 原文を出さない');
       assert.equal(JSON.stringify(service.listSequencerSessions()).includes('secret-token'), false, '台帳に token 原文を出さない');
       assert.equal(JSON.stringify(service.listSequencerSessions()).includes('cookie-secret'), false, '台帳に cookie token 原文を出さない');
       assert.equal(JSON.stringify(service.listSequencerSessions()).includes('hidden-secret'), false, '台帳に hidden token 原文を出さない');
+      assert.equal(JSON.stringify(service.listSequencerSessions()).includes('bearer-secret'), false, '台帳に bearer token 原文を出さない');
       const traffic = service.listTraffic(100);
       assert.equal(traffic.total, 30);
       assert.ok(traffic.entries?.every((entry) => entry.source === 'sequencer' && entry.status === 200));
       assert.equal(JSON.stringify(traffic).includes('secret-token'), false, '通信 log に token 原文を出さない');
+      assert.equal(JSON.stringify(traffic).includes('bearer-secret'), false, '通信 log に bearer token 原文を出さない');
     } finally {
       await close(server);
     }

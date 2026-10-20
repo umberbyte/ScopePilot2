@@ -24,7 +24,8 @@ export type SampleOutcome =
 export type SequencerExtractor =
   | { readonly source: 'body' }
   | { readonly source: 'cookie'; readonly cookieName: string }
-  | { readonly source: 'hidden'; readonly fieldName: string };
+  | { readonly source: 'hidden'; readonly fieldName: string }
+  | { readonly source: 'bearer' };
 
 const COOKIE_NAME_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const HIDDEN_FIELD_NAME = /^[0-9A-Za-z_.:[\]-]+$/;
@@ -33,13 +34,13 @@ const MAX_INPUT_TAG_LENGTH = 8192;
 
 /** 抽出条件をboundedに固定し、未使用fieldを暗黙に無視しない。 */
 export function createSequencerExtractor(
-  source: 'body' | 'cookie' | 'hidden',
+  source: 'body' | 'cookie' | 'hidden' | 'bearer',
   cookieName?: string,
   fieldName?: string,
 ): SequencerExtractor {
-  if (source === 'body') {
+  if (source === 'body' || source === 'bearer') {
     if (cookieName !== undefined || fieldName !== undefined) {
-      throw domainError('ValidationFailed', 'tokenCookieName and tokenFieldName are not supported when tokenSource is body');
+      throw domainError('ValidationFailed', `tokenCookieName and tokenFieldName are not supported when tokenSource is ${source}`);
     }
     return { source };
   }
@@ -161,8 +162,17 @@ export function extractHiddenInputToken(response: { readonly body: string }, fie
   return { kind: 'missing', reason: `hidden field '${fieldName}' not found in response body` };
 }
 
+/** OAuth 2.0 Bearerのb64token構文だけを受理し、scheme以外や複合値を推測しない。 */
+export function extractBearerToken(response: { readonly authorizationHeader?: string }): SampleOutcome {
+  const match = /^Bearer[\t ]+([0-9A-Za-z\-._~+/]+=*)[\t ]*$/i.exec(response.authorizationHeader ?? '');
+  if (match?.[1] === undefined) {
+    return { kind: 'missing', reason: 'Bearer token not found in response Authorization header' };
+  }
+  return { kind: 'collected', token: match[1] };
+}
+
 export function extractSequencerToken(
-  response: { readonly body: string; readonly setCookieHeaders?: readonly string[] },
+  response: { readonly body: string; readonly setCookieHeaders?: readonly string[]; readonly authorizationHeader?: string },
   extractor: SequencerExtractor,
   bodyPattern: RegExp,
 ): SampleOutcome {
@@ -173,6 +183,8 @@ export function extractSequencerToken(
       return extractCookieToken(response, extractor.cookieName);
     case 'hidden':
       return extractHiddenInputToken(response, extractor.fieldName);
+    case 'bearer':
+      return extractBearerToken(response);
   }
 }
 

@@ -261,8 +261,8 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       }
       try {
         const tokenSource = body.tokenSource ?? 'body';
-        if (tokenSource !== 'body' && tokenSource !== 'cookie' && tokenSource !== 'hidden') {
-          throw new DomainError('ValidationFailed', 'tokenSource must be body, cookie, or hidden');
+        if (tokenSource !== 'body' && tokenSource !== 'cookie' && tokenSource !== 'hidden' && tokenSource !== 'bearer') {
+          throw new DomainError('ValidationFailed', 'tokenSource must be body, cookie, hidden, or bearer');
         }
         const result = await service.runSequencerSession(operator, {
           targetUrl: stringField(body, 'targetUrl'),

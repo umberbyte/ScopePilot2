@@ -69,11 +69,11 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
   const [sequencerTarget, setSequencerTarget] = useState('http://fixture.target.test/session-token');
   const [sequencerSamples, setSequencerSamples] = useState('100');
-  const [sequencerTokenSource, setSequencerTokenSource] = useState<'body' | 'cookie' | 'hidden'>('body');
+  const [sequencerTokenSource, setSequencerTokenSource] = useState<'body' | 'cookie' | 'hidden' | 'bearer'>('body');
   const [sequencerTokenCookieName, setSequencerTokenCookieName] = useState('SEQ_TOKEN');
   const [sequencerTokenFieldName, setSequencerTokenFieldName] = useState('csrf_token');
   const [sequencerRole, setSequencerRole] = useState('');
-  const [sequencerResult, setSequencerResult] = useState<{ tokenSource: 'body' | 'cookie' | 'hidden'; tokenCookieName?: string; tokenFieldName?: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] } | null>(null);
+  const [sequencerResult, setSequencerResult] = useState<{ tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] } | null>(null);
   const [oastTarget, setOastTarget] = useState('http://fixture.target.test/callback');
   const [oastProtocol, setOastProtocol] = useState('http');
   const [oastToken, setOastToken] = useState('');
@@ -132,7 +132,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     setSequencerResult(null);
     try {
       const samples = Number(sequencerSamples);
-      setSequencerResult(await callJson<{ tokenSource: 'body' | 'cookie' | 'hidden'; tokenCookieName?: string; tokenFieldName?: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }>(apiBase, '/api/tools/sequencer/runs', {
+      setSequencerResult(await callJson<{ tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }>(apiBase, '/api/tools/sequencer/runs', {
         targetUrl: sequencerTarget,
         samples,
         tokenSource: sequencerTokenSource,
@@ -388,10 +388,11 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         <Input value={sequencerSamples} onChange={(_, data) => setSequencerSamples(data.value)} />
       </Field>
       <Field label={t('a10.sequencerTokenSourceLabel')}>
-        <Select value={sequencerTokenSource} onChange={(_, data) => setSequencerTokenSource(data.value as 'body' | 'cookie' | 'hidden')}>
+        <Select value={sequencerTokenSource} onChange={(_, data) => setSequencerTokenSource(data.value as 'body' | 'cookie' | 'hidden' | 'bearer')}>
           <option value="body">{t('a10.sequencerTokenSource.body')}</option>
           <option value="cookie">{t('a10.sequencerTokenSource.cookie')}</option>
           <option value="hidden">{t('a10.sequencerTokenSource.hidden')}</option>
+          <option value="bearer">{t('a10.sequencerTokenSource.bearer')}</option>
         </Select>
       </Field>
       {sequencerTokenSource === 'cookie' && (
@@ -418,7 +419,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
               ? t('a10.sequencerTokenSource.body')
               : sequencerResult.tokenSource === 'cookie'
                 ? `${t('a10.sequencerTokenSource.cookie')} (${sequencerResult.tokenCookieName ?? '—'})`
-                : `${t('a10.sequencerTokenSource.hidden')} (${sequencerResult.tokenFieldName ?? '—'})`,
+                : sequencerResult.tokenSource === 'hidden'
+                  ? `${t('a10.sequencerTokenSource.hidden')} (${sequencerResult.tokenFieldName ?? '—'})`
+                  : t('a10.sequencerTokenSource.bearer'),
           })}</Text>
           {sequencerResult.sessionCookieNames !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerSessionApplied', { cookies: sequencerResult.sessionCookieNames.join(', ') || '—' })}</Text>

@@ -84,12 +84,15 @@ export class NodeSequencerTransport implements SequencerTransportPort {
             }
             const rawContentType = response.headers['content-type'];
             const setCookieHeaders = response.headers['set-cookie'];
+            const rawAuthorization = response.headers.authorization;
+            const authorizationHeader = Array.isArray(rawAuthorization) ? rawAuthorization[0] : rawAuthorization;
             resolve({
               requestUrl,
               status: response.statusCode ?? 0,
               contentType: Array.isArray(rawContentType) ? rawContentType[0] ?? '' : rawContentType ?? '',
               body: Buffer.concat(chunks).toString('utf8'),
               ...(setCookieHeaders === undefined ? {} : { setCookieHeaders }),
+              ...(authorizationHeader === undefined ? {} : { authorizationHeader }),
             });
           });
           response.on('error', reject);

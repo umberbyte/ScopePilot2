@@ -1364,6 +1364,17 @@ describe('Core API server (node:http)', () => {
     assert.equal(hiddenResult.sampleCount, 30);
     assert.equal(JSON.stringify(hiddenResult).includes('sample-'), false, 'hidden token 原文は応答に出ない');
 
+    const bearerRun = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30, tokenSource: 'bearer' }),
+    });
+    assert.equal(bearerRun.status, 200);
+    const bearerResult = (await bearerRun.json()) as { tokenSource: string; sampleCount: number };
+    assert.equal(bearerResult.tokenSource, 'bearer');
+    assert.equal(bearerResult.sampleCount, 30);
+    assert.equal(JSON.stringify(bearerResult).includes('sample-'), false, 'bearer token 原文は応答に出ない');
+
     const invalidCookieName = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1410,6 +1421,7 @@ describe('Core API server (node:http)', () => {
     assert.ok(list.sessions.length >= 1);
     assert.ok(list.sessions.some((session) => session.tokenSource === 'cookie' && session.tokenCookieName === 'SEQ_TOKEN'));
     assert.ok(list.sessions.some((session) => session.tokenSource === 'hidden' && session.tokenFieldName === 'csrf_token'));
+    assert.ok(list.sessions.some((session) => session.tokenSource === 'bearer'));
     const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
     assert.match(eventsText, /SequencerSessionCompleted/);
   });

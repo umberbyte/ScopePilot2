@@ -1692,7 +1692,8 @@
                             "enum": [
                               "body",
                               "cookie",
-                              "hidden"
+                              "hidden",
+                              "bearer"
                             ],
                             "description": "token の抽出元。token 値は保持しない"
                           },
@@ -1789,7 +1790,8 @@
                     "enum": [
                       "body",
                       "cookie",
-                      "hidden"
+                      "hidden",
+                      "bearer"
                     ],
                     "default": "body",
                     "description": "token の抽出元"
@@ -1835,7 +1837,8 @@
                       "enum": [
                         "body",
                         "cookie",
-                        "hidden"
+                        "hidden",
+                        "bearer"
                       ],
                       "description": "token の抽出元。token 値は返さない"
                     },

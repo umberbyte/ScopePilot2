@@ -32,6 +32,16 @@ describe('sequencer session (service)', () => {
     assert.equal(hidden.tokenFieldName, 'csrf_token');
     assert.equal(JSON.stringify(hidden).includes('sample-'), false);
 
+    const bearer = await service.runSequencerSession(operator, {
+      targetUrl: 'http://fixture.target.test/session-token',
+      samples: 30,
+      tokenSource: 'bearer',
+    });
+    assert.equal(bearer.verdict, 'assessed');
+    assert.equal(bearer.sampleCount, 30);
+    assert.equal(bearer.tokenSource, 'bearer');
+    assert.equal(JSON.stringify(bearer).includes('sample-'), false);
+
     // URL に fixed を含む対象は毎回同一 token — 重複が増える (entropy は byte 分布の
     // 統計のため繰り返しでは下がらない。低 entropy 自体は F07-UT-004 の domain UT で担保)。
     const fixed = await service.runSequencerSession(operator, { targetUrl: 'http://fixture.target.test/fixed-token', samples: 40 });

@@ -258,6 +258,7 @@ export const enStrings: Readonly<Record<StringKey, string>> = {
   'a10.sequencerTokenSource.body': 'Response body (token=...)',
   'a10.sequencerTokenSource.cookie': 'Response Set-Cookie',
   'a10.sequencerTokenSource.hidden': 'Hidden input in response HTML',
+  'a10.sequencerTokenSource.bearer': 'Bearer token in response Authorization',
   'a10.sequencerTokenCookieNameLabel': 'Token cookie name in response Set-Cookie',
   'a10.sequencerTokenFieldNameLabel': 'Token field name in hidden input',
   'a10.sequencerRoleLabel': 'Session role for collection (optional; log in via A09 first)',

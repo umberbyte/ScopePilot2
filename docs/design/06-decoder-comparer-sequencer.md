@@ -31,11 +31,11 @@ SequencerService（新規・A3）:
 ```
 
 2026-10-20 時点の実収集経路は、許可済み `targetUrl` への逐次 GET と本文中の
-`token=...`、名前を指定した応答 `Set-Cookie`、または名前を指定したHTML `hidden` inputからの抽出に限定する。`NodeSequencerTransport` が既定 2 RPS、応答 1 MiB 上限、
+`token=...`、名前を指定した応答 `Set-Cookie`、名前を指定したHTML `hidden` input、または応答 `Authorization` の Bearer tokenからの抽出に限定する。`NodeSequencerTransport` が既定 2 RPS、応答 1 MiB 上限、
 redirect 非追従で収集し、応答本文は抽出 callback の間だけ保持する。任意の認証roleを指定すると、
 事前のlogin成功sessionから対象URLのdomain/pathへ適用可能なcookieだけを各収集requestへ付ける。
 認証cookie値はtransport外へ出さず、結果・台帳には適用名だけを残す。応答cookie値も抽出 callback の間だけ扱い、
-結果・台帳には抽出元とcookie名またはfield名だけを残す。hidden値も上限付き属性走査の間だけ扱う。bearerからの抽出、任意extractorを含む完全な採取専用再送計画は後続とし、現行経路と区別する。
+結果・台帳には抽出元とcookie名またはfield名だけを残す。hidden値も上限付き属性走査の間だけ扱う。応答Authorization値も抽出 callback の間だけ扱い、Bearer schemeとRFC 6750のb64token構文に一致する単一値だけを採用する。任意extractorを含む完全な採取専用再送計画は後続とし、現行経路と区別する。
 
 ## 4. データモデル
 
