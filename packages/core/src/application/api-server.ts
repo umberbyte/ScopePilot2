@@ -382,7 +382,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         if (requested !== undefined && requested !== 'h2' && requested !== 'http/1.1' && requested !== 'h3') {
           return respondError(response, 400, 'ValidationFailed', 'field requested must be one of h2/http-1.1/h3', false);
         }
-        const result = service.negotiateTransportFor(operator, {
+        const result = await service.negotiateTransportFor(operator, {
           targetUrl: stringField(body, 'targetUrl'),
           allowFallback: body.allowFallback === true,
           ...(requested === undefined ? {} : { requested: requested as 'h2' | 'http/1.1' }),

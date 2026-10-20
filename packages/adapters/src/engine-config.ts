@@ -23,6 +23,7 @@ import { PlaywrightLoginExecutor } from './login-executor.ts';
 import { NodeRepeaterTransport } from './repeater-transport.ts';
 import { NodeSequencerTransport } from './sequencer-transport.ts';
 import { NodeWebSocketTransport } from './websocket-transport.ts';
+import { NodeHttp2Transport } from './http2-transport.ts';
 import { ZapEngineAdapter } from './zap-engine.ts';
 import { PlaywrightExplorerAdapter } from './playwright-explorer.ts';
 
@@ -143,6 +144,8 @@ export interface ComposedEngines {
   readonly oastProvider?: import('@scopepilot2/core').OastProviderPort;
   /** WebSocket text 実 transport (design/f14)。実 engine 時のみ構成。 */
   readonly webSocketTransport?: import('@scopepilot2/core').WebSocketTransportPort;
+  /** HTTP/2 negotiation/request probe (design/f15). */
+  readonly advancedTransport?: import('@scopepilot2/core').AdvancedTransportPort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   /** 実 engine 時の監査記録用 hash。fixture のときは呼出側の既定を使う。 */
   readonly runtimeBundleHash?: string;
@@ -190,6 +193,7 @@ export async function composeEngines(
   const fuzzTransport = new NodeFuzzTransport();
   const sequencerTransport = new NodeSequencerTransport();
   const webSocketTransport = new NodeWebSocketTransport();
+  const advancedTransport = new NodeHttp2Transport();
   const interactshProvider = realOast
     ? new InteractshCliProvider({ serverUrl: selection.oastServerUrl!, configPath: selection.interactshConfigPath! })
     : undefined;
@@ -209,6 +213,7 @@ export async function composeEngines(
     fuzzTransport,
     sequencerTransport,
     webSocketTransport,
+    advancedTransport,
     oastProvider,
     capabilities: createCapabilitySnapshots({
       zap: { engineVersion: scanEngine.engineVersion, real: realZap },

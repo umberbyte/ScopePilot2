@@ -134,6 +134,8 @@ export interface BaselineFlowDeps {
   readonly oastProvider?: import('../ports/engines.ts').OastProviderPort;
   /** WebSocket の実 text transport (design/f14)。未構成なら fixture 台帳だけを使う。 */
   readonly webSocketTransport?: import('../ports/engines.ts').WebSocketTransportPort;
+  /** HTTP/2 negotiation/request probe (design/f15). Omitted for deterministic fixtures. */
+  readonly advancedTransport?: import('../ports/engines.ts').AdvancedTransportPort;
 
   /** login 実行器 (design/f09)。未構成の service では runLogin が ValidationFailed。 */
   readonly loginExecutor?: LoginExecutorPort;
@@ -1218,10 +1220,10 @@ export class BaselineFlowService {
   /**
    * transport の選択 (design/f15)。HTTP/3 は能力表で Unsupported。peer が h2 を
    * offer しない場合、fallback 未許可なら CapabilityUnavailable (F15-UT-004)。
-   * fixture peer は URL に h1-only を含む場合のみ h2 を offer しない。
-   * negotiation 結果は ALPN/runtime を保持する (F15-UT-007)。
+   * 実 port 構成時は bounded request probe を行い、未構成時は URL に h1-only を含む
+   * fixture peer だけが h2 を offer しない。結果は ALPN/runtime を保持する (F15-UT-007)。
    */
-  negotiateTransportFor(operator: OperatorProfile, input: { readonly targetUrl: string; readonly allowFallback: boolean; readonly requested?: 'h2' | 'http/1.1' }): { protocol: 'h2' | 'http/1.1'; downgraded: boolean; alpn: string; runtime: string } {
+  async negotiateTransportFor(operator: OperatorProfile, input: { readonly targetUrl: string; readonly allowFallback: boolean; readonly requested?: 'h2' | 'http/1.1' }): Promise<{ protocol: 'h2' | 'http/1.1'; downgraded: boolean; alpn: string; runtime: string }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -1232,9 +1234,15 @@ export class BaselineFlowService {
     if (input.requested !== undefined && transportCapability(input.requested) === 'Unsupported') {
       throw domainError('CapabilityUnavailable', `transport ${input.requested} is Unsupported`);
     }
-    const offered = canonical.includes('h1-only') ? ['http/1.1'] : ['h2'];
-    const negotiated = negotiateTransport({ offered, allowFallback: input.allowFallback });
-    const evidence = transportEvidence({ alpn: negotiated.protocol, runtime: 'fixture-transport' });
+    const probe = this.deps.advancedTransport === undefined
+      ? {
+          offered: canonical.includes('h1-only') ? ['http/1.1'] as const : ['h2'] as const,
+          alpn: canonical.includes('h1-only') ? 'http/1.1' : 'h2',
+          runtime: 'fixture-transport',
+        }
+      : await this.deps.advancedTransport.probe({ targetUrl: canonical, allowFallback: input.allowFallback });
+    const negotiated = negotiateTransport({ offered: probe.offered, allowFallback: input.allowFallback });
+    const evidence = transportEvidence({ alpn: probe.alpn, runtime: probe.runtime });
     this.record({
       type: 'TransportNegotiated',
       at: this.deps.clock.now().toISOString(),

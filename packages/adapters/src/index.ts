@@ -8,3 +8,4 @@ export * from './fuzz-transport.ts';
 export * from './sequencer-transport.ts';
 export * from './interactsh-provider.ts';
 export * from './websocket-transport.ts';
+export * from './http2-transport.ts';

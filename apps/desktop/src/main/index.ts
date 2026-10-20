@@ -61,6 +61,7 @@ async function bootstrap(): Promise<void> {
             ...(engines.sequencerTransport === undefined ? {} : { sequencerTransport: engines.sequencerTransport }),
             ...(engines.oastProvider === undefined ? {} : { oastProvider: engines.oastProvider }),
             ...(engines.webSocketTransport === undefined ? {} : { webSocketTransport: engines.webSocketTransport }),
+            ...(engines.advancedTransport === undefined ? {} : { advancedTransport: engines.advancedTransport }),
             ...(engines.runtimeBundleHash === undefined ? {} : { runtimeBundleHash: engines.runtimeBundleHash }),
           },
         }),

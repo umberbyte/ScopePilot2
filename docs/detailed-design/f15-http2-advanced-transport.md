@@ -41,3 +41,14 @@ ALPN 不成立、GOAWAY、RST_STREAM、timeout を別 code で保持する。HTT
 ## 8. 非単体テスト
 
 Node HTTP/2 adapter と TLS/ALPN server の IT、Windows/macOS runtime matrix、ZAP と Node 経路の表示差を fixture で検証する。
+
+## 9. 現行の実プローブ経路
+
+- `NodeHttp2Transport` は Core で案件 scope を確認した canonical HTTP(S) URL に、本文を保持しない
+  bounded `GET` を送る。平文は h2c prior knowledge、TLS は `h2` / `http/1.1` の ALPN negotiation を使う。
+- HTTP/2 response header を実際に受信した場合だけ h2 成功とする。response は 1 MiB、処理時間は30秒を上限とし、
+  redirect は追従しない。GOAWAY、stream/session error、timeout、接続失敗を成功として補完しない。
+- HTTP/1.1 request は利用者が fallback を明示許可した場合だけ別requestとして送る。未許可時はh2不成立を
+  `CapabilityUnavailable` とし、H1へ暗黙再送しない。結果にはNode runtimeと実測ALPN（平文は `h2c` marker）を残す。
+- 現行UI/APIは capability probe に限定する。任意method/body/header、stream ID/settings/timing証跡、connect先・
+  `:authority`・SNIの独立指定、connection reuse、TLS test fixtureは未実装であり、完全なsemantic request editorとは表示しない。

@@ -134,6 +134,21 @@ export interface WebSocketTransportPort {
   }): Promise<{ readonly sent: number }>;
 }
 
+/** HTTP/2 capability probe. Scope is enforced by core before this port is called. */
+export interface AdvancedTransportPort {
+  probe(input: {
+    readonly targetUrl: string;
+    /** An HTTP/1.1 request may only be sent when this flag is true. */
+    readonly allowFallback: boolean;
+  }): Promise<{
+    /** Protocols usable by the completed probe, or detected during negotiation. */
+    readonly offered: readonly ('h2' | 'http/1.1')[];
+    /** TLS ALPN result, or an explicit h2c marker for cleartext HTTP/2. */
+    readonly alpn: string;
+    readonly runtime: string;
+  }>;
+}
+
 /** Repeater の実 transport (実 HTTP 送信)。未構成の service は fixture 応答を使う。 */
 export interface RepeaterTransportPort {
   send(input: {

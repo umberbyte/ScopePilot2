@@ -79,3 +79,11 @@ channel・方向を指定したtext送信を公開する。binary送信等は文
 - binary受信はtextへ暗黙変換せず取り込まない。binary送信、fragmentation、extension、
   ping/pong証跡、既存ZAP channelの再利用、role cookie/subprotocol、切断後再送は未対応。
   現行経路をZAP message paging/resendの完全実装とは表示しない。
+
+## 9. 現行 HTTP/2 実プローブ経路
+
+- `NodeHttp2Transport` はscope確認済みURLへbounded `GET`を送り、平文h2cまたはTLS ALPNの
+  実測結果とNode runtimeを返す。HTTP/2 response headerを受信するまで成功扱いにしない。
+- HTTP/1.1 fallbackは明示許可時だけ別requestを送る。redirect非追従、response 1 MiB、timeout 30秒である。
+- これはtransport capabilityの確認経路であり、任意のpseudo-header/body、stream metadata、settings/timing、
+  connect先・authority・SNIの独立編集、connection reuse、wire表現は未対応である。

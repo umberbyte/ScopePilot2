@@ -170,10 +170,10 @@ export const jaStrings = {
   'a10.ws.col.rawHash': 'raw hash',
   'a10.transportTitle': 'HTTP/2 transport',
   'a10.transportIntro':
-    'transport の選択と HTTP/2 header 検証 (design/f15)。HTTP/3 は Unsupported。fallback を許可しない場合、peer が h2 を offer しなければ失敗します (暗黙の H1 downgrade はしない)。',
+    '対象へ bounded GET probe を送り、HTTP/2 transport と runtime を実測します (design/f15)。HTTP/3 は Unsupported。fallback を許可しない場合、HTTP/1.1 request は送りません。',
   'a10.transportTargetLabel': '対象 URL (transport)',
   'a10.transportFallbackLabel': 'HTTP/1.1 fallback を許可する',
-  'a10.transportNegotiate': 'transport を選択する',
+  'a10.transportNegotiate': 'transport を probe する',
   'a10.transportResult': 'protocol {protocol} ({downgraded})・ALPN {alpn}・runtime {runtime}',
   'a10.transportDowngraded': 'downgrade あり',
   'a10.transportNoDowngrade': 'downgrade なし',
