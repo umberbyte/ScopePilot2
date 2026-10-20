@@ -1335,7 +1335,7 @@ describe('Core API server (node:http)', () => {
       body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 40 }),
     });
     assert.equal(run.status, 200);
-    const result = (await run.json()) as { tokenSource: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; byteFrequencyBuckets?: readonly number[]; tokenLengthBucketMinimums?: readonly number[]; tokenByteLengthBuckets?: readonly number[]; tokenCharacterLengthBuckets?: readonly number[]; observedAlphabetSize?: number; alphabetClassCounts?: Readonly<Record<string, number>> };
+    const result = (await run.json()) as { tokenSource: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; byteFrequencyBuckets?: readonly number[]; tokenLengthBucketMinimums?: readonly number[]; tokenByteLengthBuckets?: readonly number[]; tokenCharacterLengthBuckets?: readonly number[]; observedAlphabetSize?: number; alphabetClassCounts?: Readonly<Record<string, number>>; positionAnalysisLimit?: number; positionAlphabetClassCounts?: readonly Readonly<Record<string, number>>[]; positionOverflowSamples?: number };
     assert.equal(result.verdict, 'assessed');
     assert.equal(result.tokenSource, 'body');
     assert.equal(result.sampleCount, 40);
@@ -1346,6 +1346,10 @@ describe('Core API server (node:http)', () => {
     assert.equal(result.tokenCharacterLengthBuckets?.reduce((sum, count) => sum + count, 0), 40);
     assert.ok((result.observedAlphabetSize ?? 0) > 0);
     assert.ok(Object.values(result.alphabetClassCounts ?? {}).reduce((sum, count) => sum + count, 0) > 0);
+    assert.equal(result.positionAnalysisLimit, 64);
+    assert.ok((result.positionAlphabetClassCounts?.length ?? 0) > 0);
+    assert.ok((result.positionAlphabetClassCounts?.length ?? 0) <= 64);
+    assert.equal(result.positionOverflowSamples, 0);
     assert.equal(JSON.stringify(result).includes('token=sample-'), false, 'token 原文は応答に出ない');
 
     const cookieRun = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {

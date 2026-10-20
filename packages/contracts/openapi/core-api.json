@@ -1789,29 +1789,25 @@
                             "description": "assessed 時のみ。観測したUnicode code pointの種類数。文字自体は返さない"
                           },
                           "alphabetClassCounts": {
-                            "type": "object",
-                            "description": "assessed 時のみ。文字を復元できない固定classへ集約した出現数",
-                            "required": [
-                              "digit",
-                              "lowerAscii",
-                              "upperAscii",
-                              "base64UrlPunctuation",
-                              "base64StandardPunctuation",
-                              "padding",
-                              "otherAscii",
-                              "nonAscii"
-                            ],
-                            "properties": {
-                              "digit": { "type": "integer", "minimum": 0 },
-                              "lowerAscii": { "type": "integer", "minimum": 0 },
-                              "upperAscii": { "type": "integer", "minimum": 0 },
-                              "base64UrlPunctuation": { "type": "integer", "minimum": 0 },
-                              "base64StandardPunctuation": { "type": "integer", "minimum": 0 },
-                              "padding": { "type": "integer", "minimum": 0 },
-                              "otherAscii": { "type": "integer", "minimum": 0 },
-                              "nonAscii": { "type": "integer", "minimum": 0 }
-                            },
-                            "additionalProperties": false
+                            "$ref": "#/components/schemas/SequencerAlphabetClassCounts"
+                          },
+                          "positionAnalysisLimit": {
+                            "type": "integer",
+                            "const": 64,
+                            "description": "assessed 時のみ。位置別class頻度を集約するUnicode code point数の上限"
+                          },
+                          "positionAlphabetClassCounts": {
+                            "type": "array",
+                            "maxItems": 64,
+                            "description": "assessed 時のみ。先頭64 Unicode code pointまでの各位置を固定classへ集約した出現数。配列index 0が先頭位置で、文字自体は返さない",
+                            "items": {
+                              "$ref": "#/components/schemas/SequencerAlphabetClassCounts"
+                            }
+                          },
+                          "positionOverflowSamples": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "assessed 時のみ。64 Unicode code pointを超えたtokenのsample数"
                           },
                           "minimum": {
                             "type": "integer",
@@ -2026,29 +2022,25 @@
                       "description": "assessed 時のみ。観測したUnicode code pointの種類数。文字自体は返さない"
                     },
                     "alphabetClassCounts": {
-                      "type": "object",
-                      "description": "assessed 時のみ。文字を復元できない固定classへ集約した出現数",
-                      "required": [
-                        "digit",
-                        "lowerAscii",
-                        "upperAscii",
-                        "base64UrlPunctuation",
-                        "base64StandardPunctuation",
-                        "padding",
-                        "otherAscii",
-                        "nonAscii"
-                      ],
-                      "properties": {
-                        "digit": { "type": "integer", "minimum": 0 },
-                        "lowerAscii": { "type": "integer", "minimum": 0 },
-                        "upperAscii": { "type": "integer", "minimum": 0 },
-                        "base64UrlPunctuation": { "type": "integer", "minimum": 0 },
-                        "base64StandardPunctuation": { "type": "integer", "minimum": 0 },
-                        "padding": { "type": "integer", "minimum": 0 },
-                        "otherAscii": { "type": "integer", "minimum": 0 },
-                        "nonAscii": { "type": "integer", "minimum": 0 }
-                      },
-                      "additionalProperties": false
+                      "$ref": "#/components/schemas/SequencerAlphabetClassCounts"
+                    },
+                    "positionAnalysisLimit": {
+                      "type": "integer",
+                      "const": 64,
+                      "description": "assessed 時のみ。位置別class頻度を集約するUnicode code point数の上限"
+                    },
+                    "positionAlphabetClassCounts": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "description": "assessed 時のみ。先頭64 Unicode code pointまでの各位置を固定classへ集約した出現数。配列index 0が先頭位置で、文字自体は返さない",
+                      "items": {
+                        "$ref": "#/components/schemas/SequencerAlphabetClassCounts"
+                      }
+                    },
+                    "positionOverflowSamples": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "assessed 時のみ。64 Unicode code pointを超えたtokenのsample数"
                     },
                     "minimum": {
                       "type": "integer",
@@ -6247,6 +6239,31 @@
             "type": "boolean"
           }
         }
+      },
+      "SequencerAlphabetClassCounts": {
+        "type": "object",
+        "description": "文字を復元できない固定classへ集約した出現数",
+        "required": [
+          "digit",
+          "lowerAscii",
+          "upperAscii",
+          "base64UrlPunctuation",
+          "base64StandardPunctuation",
+          "padding",
+          "otherAscii",
+          "nonAscii"
+        ],
+        "properties": {
+          "digit": { "type": "integer", "minimum": 0 },
+          "lowerAscii": { "type": "integer", "minimum": 0 },
+          "upperAscii": { "type": "integer", "minimum": 0 },
+          "base64UrlPunctuation": { "type": "integer", "minimum": 0 },
+          "base64StandardPunctuation": { "type": "integer", "minimum": 0 },
+          "padding": { "type": "integer", "minimum": 0 },
+          "otherAscii": { "type": "integer", "minimum": 0 },
+          "nonAscii": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
       },
       "SequencerSessionCompletedEvent": {
         "type": "object",

@@ -294,6 +294,9 @@ export interface EntropyResult {
   readonly observedAlphabetSize: number;
   /** 文字集合を固定classへ集約した出現数。順序や個々の文字は含まない。 */
   readonly alphabetClassCounts: AlphabetClassCounts;
+  readonly positionAnalysisLimit: number;
+  readonly positionAlphabetClassCounts: readonly AlphabetClassCounts[];
+  readonly positionOverflowSamples: number;
 }
 
 export interface AlphabetClassCounts {
@@ -308,6 +311,21 @@ export interface AlphabetClassCounts {
 }
 
 type AlphabetClass = keyof AlphabetClassCounts;
+
+export const SEQUENCER_POSITION_LIMIT = 64;
+
+function createAlphabetClassCounts(): Record<AlphabetClass, number> {
+  return {
+    digit: 0,
+    lowerAscii: 0,
+    upperAscii: 0,
+    base64UrlPunctuation: 0,
+    base64StandardPunctuation: 0,
+    padding: 0,
+    otherAscii: 0,
+    nonAscii: 0,
+  };
+}
 
 function alphabetClassOf(symbol: string): AlphabetClass {
   const codePoint = symbol.codePointAt(0) ?? 0;
@@ -339,25 +357,27 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
   const tokenByteLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
   const tokenCharacterLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
   const observedAlphabet = new Set<string>();
-  const alphabetClassCounts: Record<AlphabetClass, number> = {
-    digit: 0,
-    lowerAscii: 0,
-    upperAscii: 0,
-    base64UrlPunctuation: 0,
-    base64StandardPunctuation: 0,
-    padding: 0,
-    otherAscii: 0,
-    nonAscii: 0,
-  };
+  const alphabetClassCounts = createAlphabetClassCounts();
+  const positionAlphabetClassCounts: Record<AlphabetClass, number>[] = [];
+  let positionOverflowSamples = 0;
   for (const token of tokens) {
+    const symbols = Array.from(token);
     const byteBucket = tokenLengthBucketIndex(Buffer.byteLength(token, 'utf8'));
-    const characterBucket = tokenLengthBucketIndex(Array.from(token).length);
+    const characterBucket = tokenLengthBucketIndex(symbols.length);
     tokenByteLengthBuckets[byteBucket] = (tokenByteLengthBuckets[byteBucket] ?? 0) + 1;
     tokenCharacterLengthBuckets[characterBucket] = (tokenCharacterLengthBuckets[characterBucket] ?? 0) + 1;
-    for (const symbol of token) {
+    if (symbols.length > SEQUENCER_POSITION_LIMIT) {
+      positionOverflowSamples += 1;
+    }
+    for (const [position, symbol] of symbols.entries()) {
       observedAlphabet.add(symbol);
       const alphabetClass = alphabetClassOf(symbol);
       alphabetClassCounts[alphabetClass] += 1;
+      if (position < SEQUENCER_POSITION_LIMIT) {
+        const positionCounts = positionAlphabetClassCounts[position] ?? createAlphabetClassCounts();
+        positionCounts[alphabetClass] += 1;
+        positionAlphabetClassCounts[position] = positionCounts;
+      }
     }
   }
   for (const byte of bytes) {
@@ -379,6 +399,9 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
     tokenCharacterLengthBuckets: Object.freeze(tokenCharacterLengthBuckets),
     observedAlphabetSize: observedAlphabet.size,
     alphabetClassCounts: Object.freeze(alphabetClassCounts),
+    positionAnalysisLimit: SEQUENCER_POSITION_LIMIT,
+    positionAlphabetClassCounts: Object.freeze(positionAlphabetClassCounts.map((counts) => Object.freeze(counts))),
+    positionOverflowSamples,
   };
 }
 

@@ -163,6 +163,32 @@ describe('Sequencer', () => {
     assert.equal(JSON.stringify(distribution).includes('😀'), false, '個々の文字は統計へ残さない');
   });
 
+  test('[F07-UT-015] 文字位置別頻度は先頭64 code pointを固定classへ集約する', () => {
+    const distribution = analyzeEntropy(['a0-', 'A1_', 'é2+', `${'a'.repeat(64)}Z`]);
+    assert.equal(distribution.positionAnalysisLimit, 64);
+    assert.equal(distribution.positionAlphabetClassCounts.length, 64);
+    assert.deepEqual(distribution.positionAlphabetClassCounts[0], {
+      digit: 0,
+      lowerAscii: 2,
+      upperAscii: 1,
+      base64UrlPunctuation: 0,
+      base64StandardPunctuation: 0,
+      padding: 0,
+      otherAscii: 0,
+      nonAscii: 1,
+    });
+    assert.equal(distribution.positionAlphabetClassCounts[1]?.digit, 3);
+    assert.equal(distribution.positionAlphabetClassCounts[1]?.lowerAscii, 1);
+    assert.equal(distribution.positionAlphabetClassCounts[2]?.base64UrlPunctuation, 2);
+    assert.equal(distribution.positionAlphabetClassCounts[2]?.base64StandardPunctuation, 1);
+    assert.equal(distribution.positionAlphabetClassCounts[2]?.lowerAscii, 1);
+    assert.equal(distribution.positionAlphabetClassCounts[63]?.lowerAscii, 1);
+    assert.equal(distribution.positionOverflowSamples, 1);
+    const serialized = JSON.stringify(distribution.positionAlphabetClassCounts);
+    assert.equal(serialized.includes('é'), false);
+    assert.equal(serialized.includes('Z'), false);
+  });
+
   test('[F07-UT-005] sample 不足は断定せず insufficient を返す', () => {
     const result = assess(Array.from({ length: 29 }, (_, i) => `t${i}`));
     assert.deepEqual(result, { verdict: 'insufficient', collected: 29, minimum: 30 });

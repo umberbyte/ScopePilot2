@@ -41,6 +41,17 @@ interface TransportResult {
   };
 }
 
+interface AlphabetClassCounts {
+  readonly digit: number;
+  readonly lowerAscii: number;
+  readonly upperAscii: number;
+  readonly base64UrlPunctuation: number;
+  readonly base64StandardPunctuation: number;
+  readonly padding: number;
+  readonly otherAscii: number;
+  readonly nonAscii: number;
+}
+
 interface SequencerResult {
   readonly tokenSource: SequencerTokenSource;
   readonly tokenCookieName?: string;
@@ -58,16 +69,10 @@ interface SequencerResult {
   readonly tokenByteLengthBuckets?: readonly number[];
   readonly tokenCharacterLengthBuckets?: readonly number[];
   readonly observedAlphabetSize?: number;
-  readonly alphabetClassCounts?: {
-    readonly digit: number;
-    readonly lowerAscii: number;
-    readonly upperAscii: number;
-    readonly base64UrlPunctuation: number;
-    readonly base64StandardPunctuation: number;
-    readonly padding: number;
-    readonly otherAscii: number;
-    readonly nonAscii: number;
-  };
+  readonly alphabetClassCounts?: AlphabetClassCounts;
+  readonly positionAnalysisLimit?: number;
+  readonly positionAlphabetClassCounts?: readonly AlphabetClassCounts[];
+  readonly positionOverflowSamples?: number;
   readonly minimum?: number;
   readonly sessionCookieNames?: readonly string[];
 }
@@ -78,6 +83,7 @@ const useStyles = makeStyles({
   chips: { display: 'flex', gap: '4px', flexWrap: 'wrap' },
   byteChart: { display: 'grid', gridTemplateColumns: 'max-content minmax(120px, 1fr) max-content', gap: '4px 8px', alignItems: 'center', maxWidth: '640px' },
   byteChartTitle: { gridColumn: '1 / -1' },
+  positionTable: { maxHeight: '480px', maxWidth: '100%', overflow: 'auto' },
 });
 
 async function callJson<T>(apiBase: string, path: string, body?: unknown, method: 'GET' | 'POST' = 'POST', signal?: AbortSignal): Promise<T> {
@@ -605,6 +611,51 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
               </div>
             );
           })()}
+          {sequencerResult.positionAnalysisLimit !== undefined
+            && sequencerResult.positionAlphabetClassCounts !== undefined
+            && sequencerResult.positionOverflowSamples !== undefined && (
+              <div className={styles.section} role="group" aria-label={t('a10.sequencerPositionChart')}>
+                <Text weight="semibold">{t('a10.sequencerPositionChart')}</Text>
+                <Text className={styles.muted}>
+                  {t('a10.sequencerPositionSummary', {
+                    limit: sequencerResult.positionAnalysisLimit,
+                    overflow: sequencerResult.positionOverflowSamples,
+                  })}
+                </Text>
+                <div className={styles.positionTable}>
+                  <Table size="extra-small" aria-label={t('a10.sequencerPositionChart')}>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHeaderCell>{t('a10.sequencerPosition')}</TableHeaderCell>
+                        <TableHeaderCell>{t('a10.sequencerAlphabetClass.digit')}</TableHeaderCell>
+                        <TableHeaderCell>{t('a10.sequencerAlphabetClass.lowerAscii')}</TableHeaderCell>
+                        <TableHeaderCell>{t('a10.sequencerAlphabetClass.upperAscii')}</TableHeaderCell>
+                        <TableHeaderCell>{t('a10.sequencerAlphabetClass.base64UrlPunctuation')}</TableHeaderCell>
+                        <TableHeaderCell>{t('a10.sequencerAlphabetClass.base64StandardPunctuation')}</TableHeaderCell>
+                        <TableHeaderCell>{t('a10.sequencerAlphabetClass.padding')}</TableHeaderCell>
+                        <TableHeaderCell>{t('a10.sequencerAlphabetClass.otherAscii')}</TableHeaderCell>
+                        <TableHeaderCell>{t('a10.sequencerAlphabetClass.nonAscii')}</TableHeaderCell>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {sequencerResult.positionAlphabetClassCounts.map((counts, position) => (
+                        <TableRow key={position}>
+                          <TableCell>{position + 1}</TableCell>
+                          <TableCell>{counts.digit}</TableCell>
+                          <TableCell>{counts.lowerAscii}</TableCell>
+                          <TableCell>{counts.upperAscii}</TableCell>
+                          <TableCell>{counts.base64UrlPunctuation}</TableCell>
+                          <TableCell>{counts.base64StandardPunctuation}</TableCell>
+                          <TableCell>{counts.padding}</TableCell>
+                          <TableCell>{counts.otherAscii}</TableCell>
+                          <TableCell>{counts.nonAscii}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
           {sequencerResult.minimum !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerInsufficient', { minimum: sequencerResult.minimum })}</Text>
           )}

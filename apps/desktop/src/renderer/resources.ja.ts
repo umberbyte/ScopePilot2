@@ -173,6 +173,9 @@ export const jaStrings = {
   'a10.sequencerAlphabetClass.otherAscii': 'その他 ASCII',
   'a10.sequencerAlphabetClass.nonAscii': '非 ASCII',
   'a10.sequencerAlphabetBucket': '{class}: {count} / 全 {total} 文字',
+  'a10.sequencerPositionChart': '文字位置別のclass頻度',
+  'a10.sequencerPositionSummary': '先頭 {limit} Unicode code pointまでを集約（上限超過 sample: {overflow}）',
+  'a10.sequencerPosition': '位置',
   'a10.sequencerInsufficient': 'sample 不足のため断定しません (最小 {minimum} 件が必要)。',
   'a10.oastTitle': 'OAST (out-of-band 検出)',
   'a10.oastIntro':
