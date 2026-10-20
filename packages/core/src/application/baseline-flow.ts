@@ -86,6 +86,7 @@ import {
 import {
   DraftRegistry,
   applicableSessionCookies,
+  runRedirects,
   applyEdit,
   recordSendAttempt,
   renderInitialRequest,
@@ -123,6 +124,8 @@ export interface BaselineFlowDeps {
   readonly caseSink?: { save(record: CaseRecord): void };
   /** 実 engine 診断の完了後、alert 生成の遅れを待つ時間 (ms)。fixture では 0。 */
   readonly scanAlertSettleMs?: number;
+  /** Repeater の実 transport (design/f04)。未構成なら fixture 応答を使う。 */
+  readonly repeaterTransport?: import('../ports/engines.ts').RepeaterTransportPort;
 
   /** login 実行器 (design/f09)。未構成の service では runLogin が ValidationFailed。 */
   readonly loginExecutor?: LoginExecutorPort;
@@ -1367,23 +1370,57 @@ export class BaselineFlowService {
       appliedCookies = applicableSessionCookies([...session.cookies], draft.targetUrl);
     }
     const currentHash = hashStable('scopepilot2.repeater.request', { bytes: draft.requestBytes, revision: draft.revision, target: draft.targetUrl });
+    let transportResponse: import('../ports/engines.ts').RepeaterTransportResponse | undefined;
     const outcome = await sendCommand(draft, confirmedPlanHash, {
       send: async (command) => {
-        // fixture adapter: 対象 URL から決定的な text 応答を返す。実 adapter は後続増分。
+        if (this.deps.repeaterTransport === undefined) {
+          // fixture adapter: 対象 URL から決定的な text 応答を返す。実 transport 未構成時の経路。
+          this.repeaterSentCommands.push(command);
+          this.recordObservedExchange({ url: draft.targetUrl, method: 'GET', status: 200, contentType: 'text/html' }, this.deps.clock.now().toISOString(), 'repeater');
+          return;
+        }
+        transportResponse = await this.deps.repeaterTransport.send({
+          targetUrl: draft.targetUrl,
+          requestBytes: draft.requestBytes,
+          ...(appliedCookies === undefined ? {} : { sessionCookies: appliedCookies.map((cookie) => ({ name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path })) }),
+        });
         this.repeaterSentCommands.push(command);
-        this.recordObservedExchange({ url: draft.targetUrl, method: 'GET', status: 200, contentType: 'text/html' }, this.deps.clock.now().toISOString(), 'repeater');
+        this.recordObservedExchange(
+          {
+            url: draft.targetUrl,
+            method: 'GET',
+            status: transportResponse.status,
+            contentType: transportResponse.headers.find(([name]) => name.toLowerCase() === 'content-type')?.[1] ?? '',
+          },
+          this.deps.clock.now().toISOString(),
+          'repeater',
+        );
       },
     }, appliedCookies === undefined ? undefined : [...appliedCookies]);
     if (!outcome.sent) {
       return { sent: false, reason: 'confirmed plan hash does not match the current draft (revision が進んでいないか確認してください)' };
     }
-    const body = Buffer.from(`<html><body>fixture response for ${new URL(draft.targetUrl).pathname}</body></html>`, 'utf8');
+    // 実 transport の redirect は domain と同じ規則で評価する (scope 外 Location は
+    // hop 前に停止 — F04-UT-004)。停止した場合は応答を返さない。
+    if (transportResponse !== undefined && transportResponse.redirectLocations.length > 0) {
+      const redirects = runRedirects(
+        transportResponse.redirectLocations.map((location) => ({ location })),
+        this.currentCase().scope,
+      );
+      if (redirects.outcome !== 'completed') {
+        return { sent: false, reason: `redirect stopped: ${redirects.outcome}${redirects.lastReason === undefined ? '' : ` (${redirects.lastReason})`}` };
+      }
+    }
+    const body = transportResponse?.body ?? Buffer.from(`<html><body>fixture response for ${new URL(draft.targetUrl).pathname}</body></html>`, 'utf8');
     const attempt = recordSendAttempt(draft.draftId, body);
     this.repeaterAttempts.push(attempt);
+    const summaryInput = transportResponse === undefined
+      ? { status: 200, headers: [['content-type', 'text/html']] as readonly (readonly [string, string])[], body }
+      : { status: transportResponse.status, headers: transportResponse.headers, body };
     return {
       sent: true,
       attempt,
-      response: summarizeResponse({ status: 200, headers: [['content-type', 'text/html']], body }),
+      response: summarizeResponse(summaryInput),
       // 適用した cookie は名前のみ応答に出す (値は出さない — F09-UT-006 と同一規則)。
       ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
     };

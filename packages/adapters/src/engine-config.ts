@@ -16,6 +16,7 @@ import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort } from '@
 import type { EngineCapabilitySnapshot } from '@scopepilot2/contracts';
 import { FixtureExplorer, FixtureZapEngine } from '@scopepilot2/simulation';
 import { PlaywrightLoginExecutor } from './login-executor.ts';
+import { NodeRepeaterTransport } from './repeater-transport.ts';
 import { ZapEngineAdapter } from './zap-engine.ts';
 import { PlaywrightExplorerAdapter } from './playwright-explorer.ts';
 
@@ -115,6 +116,8 @@ export interface ComposedEngines {
   readonly scanEngine: ActiveScanEnginePort;
   /** login 実行器 (design/f09)。実 engine 時のみ構成 (browser 駆動・遅延起動)。 */
   readonly loginExecutor?: LoginExecutorPort;
+  /** Repeater 実 transport (design/f04)。実 engine 時のみ構成。 */
+  readonly repeaterTransport?: import('@scopepilot2/core').RepeaterTransportPort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   /** 実 engine 時の監査記録用 hash。fixture のときは呼出側の既定を使う。 */
   readonly runtimeBundleHash?: string;
@@ -155,11 +158,14 @@ export async function composeEngines(
   const playwrightAdapter = explorer instanceof PlaywrightExplorerAdapter ? explorer : null;
   // login 実行器は実 engine 構成で常に使えるようにする (browser は execute 時に遅延起動)。
   const loginExecutor = new PlaywrightLoginExecutor();
+  // Repeater は ZAP 不要の直接送信のため、実 engine 構成では常に実 transport を使う。
+  const repeaterTransport = new NodeRepeaterTransport();
   return {
     mode: 'real',
     explorer,
     scanEngine,
     loginExecutor,
+    repeaterTransport,
     capabilities: createCapabilitySnapshots({
       zap: { engineVersion: scanEngine.engineVersion, real: realZap },
       explorer: { engineVersion: explorer.engineVersion, real: realExplorer },

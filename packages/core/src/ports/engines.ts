@@ -58,6 +58,23 @@ export interface ObservedProxyMessage {
   readonly direction: 'sent' | 'received';
 }
 
+/** Repeater 実送信の結果 (f04)。binary は text 化せず bytes のみ返す。 */
+export interface RepeaterTransportResponse {
+  readonly status: number;
+  readonly headers: readonly (readonly [string, string])[];
+  readonly body: Buffer;
+  readonly redirectLocations: readonly string[];
+}
+
+/** Repeater の実 transport (実 HTTP 送信)。未構成の service は fixture 応答を使う。 */
+export interface RepeaterTransportPort {
+  send(input: {
+    readonly targetUrl: string;
+    readonly requestBytes: string;
+    readonly sessionCookies?: readonly { readonly name: string; readonly value: string; readonly domain: string; readonly path: string }[];
+  }): Promise<RepeaterTransportResponse>;
+}
+
 /** 実 proxy listener (ZAP daemon 等)。core は判断 (scope 強制) を持ち、ここは運搬。 */
 export interface ProxyListenerPort {
   startSession(): Promise<void>;
