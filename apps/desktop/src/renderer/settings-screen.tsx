@@ -31,7 +31,7 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
   const styles = useStyles();
   const [capabilities, setCapabilities] = useState<readonly EngineCapabilitySnapshot[]>([]);
   const [extensions, setExtensions] = useState<readonly { extensionId: string; version: string; permissions: readonly string[]; apiRange: readonly string[] }[]>([]);
-  const [extensionId, setExtensionId] = useState('fixture-helper');
+  const [extensionId, setExtensionId] = useState('');
   const [extensionVersion, setExtensionVersion] = useState('1.0.0');
   const [extensionSignature, setExtensionSignature] = useState('');
   const [extensionNotice, setExtensionNotice] = useState('');

@@ -51,7 +51,7 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
   const [payloadVersion, setSetVersion] = useState('');
   const [license, setLicense] = useState('');
   const [payloadValues, setSetValues] = useState('');
-  const [targetUrl, setTargetUrl] = useState('http://fixture.target.test/fuzz');
+  const [targetUrl, setTargetUrl] = useState('');
   const [sessionRole, setSessionRole] = useState('');
   const [paramHints, setParamHints] = useState<readonly { documentLabel: string; parameters: readonly { name: string; values: readonly string[] }[] }[]>([]);
   const [positionsText, setPositionsText] = useState('user: admin, guest\nid: 1, 2');

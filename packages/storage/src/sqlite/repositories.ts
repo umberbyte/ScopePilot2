@@ -5,7 +5,7 @@
  * 自動再開は行わない。
  */
 import type { DatabaseSync } from 'node:sqlite';
-import { canonicalJson, hashStable, type CaseRecord, type Finding, type RunRecord, type StopReason } from '@scopepilot2/contracts';
+import { canonicalJson, hashStable, type AuthorizationRecord, type CaseRecord, type Finding, type RunRecord, type StopReason } from '@scopepilot2/contracts';
 import type { EvidenceStorePort, StoredEvidence } from '@scopepilot2/core';
 import { RunStateMachine } from '@scopepilot2/core';
 
@@ -82,6 +82,234 @@ export class CaseRepository {
       scope: JSON.parse(row.scope_json) as CaseRecord['scope'],
       createdAt: row.created_at,
     };
+  }
+
+  list(): readonly CaseRecord[] {
+    const rows = this.db.prepare('SELECT case_id FROM cases ORDER BY created_at, case_id').all() as { case_id: string }[];
+    return rows.map((row) => this.get(row.case_id)).filter((record): record is CaseRecord => record !== null);
+  }
+}
+
+export class AuthorizationRepository {
+  private readonly db: DatabaseSync;
+
+  constructor(db: DatabaseSync) {
+    this.db = db;
+  }
+
+  save(record: AuthorizationRecord): void {
+    this.db.prepare(
+      `INSERT INTO authorizations (authorization_id, case_id, allowed_json, valid_from, valid_until, evidence_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(authorization_id) DO UPDATE SET allowed_json = excluded.allowed_json,
+         valid_from = excluded.valid_from, valid_until = excluded.valid_until, evidence_id = excluded.evidence_id`,
+    ).run(
+      record.authorizationId,
+      record.caseId,
+      canonicalJson({
+        operationClasses: record.allowedOperationClasses,
+        targetRoles: record.targetRoles,
+        evidenceRef: record.evidenceRef,
+      }),
+      record.validFrom,
+      record.validUntil,
+      record.evidenceRef.evidenceId,
+      new Date().toISOString(),
+    );
+  }
+
+  latest(caseId: string): AuthorizationRecord | null {
+    const row = this.db.prepare(
+      `SELECT authorization_id, allowed_json, valid_from, valid_until
+       FROM authorizations WHERE case_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    ).get(caseId) as { authorization_id: string; allowed_json: string; valid_from: string; valid_until: string } | undefined;
+    if (row === undefined) return null;
+    const stored = JSON.parse(row.allowed_json) as {
+      operationClasses: AuthorizationRecord['allowedOperationClasses'];
+      targetRoles: readonly string[];
+      evidenceRef: AuthorizationRecord['evidenceRef'];
+    };
+    return {
+      authorizationId: row.authorization_id,
+      caseId,
+      allowedOperationClasses: stored.operationClasses,
+      targetRoles: stored.targetRoles,
+      validFrom: row.valid_from,
+      validUntil: row.valid_until,
+      evidenceRef: stored.evidenceRef,
+    };
+  }
+}
+
+export type WorkspaceAiProvider = 'zcode' | 'codex' | 'claude';
+
+export interface WorkspaceSettings {
+  readonly startUrl: string;
+  readonly supportingOrigins: readonly string[];
+  readonly targetRoles: readonly string[];
+  readonly forbiddenActions: readonly string[];
+  readonly aiProvider: WorkspaceAiProvider;
+  readonly aiModel: string;
+  readonly updatedAt: string;
+}
+
+export interface WorkspaceInputSource {
+  readonly inputId: string;
+  readonly relativePath: string;
+  readonly originalName: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
+  readonly importedAt: string;
+}
+
+export type AiTaskKind = 'DocumentExtract' | 'ReportDraft';
+export type AiInvocationStatus = 'succeeded' | 'failed';
+
+export interface AiInvocationRecord {
+  readonly invocationId: string;
+  readonly taskKind: AiTaskKind;
+  readonly provider: WorkspaceAiProvider;
+  readonly model: string;
+  readonly inputHash: string;
+  readonly outputHash?: string;
+  readonly status: AiInvocationStatus;
+  readonly proposal?: unknown;
+  readonly errorMessage?: string;
+  readonly startedAt: string;
+  readonly completedAt: string;
+}
+
+/** AIの提案と失敗を案件単位で追跡する。秘密値を含む生のCLI出力は保存しない。 */
+export class AiInvocationRepository {
+  private readonly db: DatabaseSync;
+
+  constructor(db: DatabaseSync) {
+    this.db = db;
+  }
+
+  save(record: AiInvocationRecord): void {
+    this.db.prepare(
+      `INSERT INTO ai_invocations
+       (invocation_id, task_kind, provider, model, input_hash, output_hash, status, proposal_json, error_message, started_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(invocation_id) DO UPDATE SET output_hash = excluded.output_hash,
+         status = excluded.status, proposal_json = excluded.proposal_json,
+         error_message = excluded.error_message, completed_at = excluded.completed_at`,
+    ).run(
+      record.invocationId,
+      record.taskKind,
+      record.provider,
+      record.model,
+      record.inputHash,
+      record.outputHash ?? null,
+      record.status,
+      record.proposal === undefined ? null : canonicalJson(record.proposal),
+      record.errorMessage ?? null,
+      record.startedAt,
+      record.completedAt,
+    );
+  }
+
+  list(): readonly AiInvocationRecord[] {
+    const rows = this.db.prepare(
+      `SELECT invocation_id, task_kind, provider, model, input_hash, output_hash, status,
+        proposal_json, error_message, started_at, completed_at
+       FROM ai_invocations ORDER BY started_at, invocation_id`,
+    ).all() as {
+      invocation_id: string; task_kind: AiTaskKind; provider: WorkspaceAiProvider; model: string;
+      input_hash: string; output_hash: string | null; status: AiInvocationStatus;
+      proposal_json: string | null; error_message: string | null; started_at: string; completed_at: string;
+    }[];
+    return rows.map((row) => ({
+      invocationId: row.invocation_id,
+      taskKind: row.task_kind,
+      provider: row.provider,
+      model: row.model,
+      inputHash: row.input_hash,
+      status: row.status,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      ...(row.output_hash === null ? {} : { outputHash: row.output_hash }),
+      ...(row.proposal_json === null ? {} : { proposal: JSON.parse(row.proposal_json) as unknown }),
+      ...(row.error_message === null ? {} : { errorMessage: row.error_message }),
+    }));
+  }
+}
+
+export class WorkspaceRepository {
+  private readonly db: DatabaseSync;
+
+  constructor(db: DatabaseSync) {
+    this.db = db;
+  }
+
+  saveSettings(settings: WorkspaceSettings): void {
+    this.db.prepare(
+      `INSERT INTO workspace_settings
+       (singleton_id, start_url, supporting_origins_json, target_roles_json, forbidden_actions_json, ai_provider, ai_model, updated_at)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(singleton_id) DO UPDATE SET start_url = excluded.start_url,
+         supporting_origins_json = excluded.supporting_origins_json,
+         target_roles_json = excluded.target_roles_json,
+         forbidden_actions_json = excluded.forbidden_actions_json,
+         ai_provider = excluded.ai_provider, ai_model = excluded.ai_model, updated_at = excluded.updated_at`,
+    ).run(
+      settings.startUrl,
+      canonicalJson(settings.supportingOrigins),
+      canonicalJson(settings.targetRoles),
+      canonicalJson(settings.forbiddenActions),
+      settings.aiProvider,
+      settings.aiModel,
+      settings.updatedAt,
+    );
+  }
+
+  getSettings(): WorkspaceSettings | null {
+    const row = this.db.prepare(
+      `SELECT start_url, supporting_origins_json, target_roles_json, forbidden_actions_json,
+        ai_provider, ai_model, updated_at FROM workspace_settings WHERE singleton_id = 1`,
+    ).get() as {
+      start_url: string;
+      supporting_origins_json: string;
+      target_roles_json: string;
+      forbidden_actions_json: string;
+      ai_provider: WorkspaceAiProvider;
+      ai_model: string;
+      updated_at: string;
+    } | undefined;
+    return row === undefined ? null : {
+      startUrl: row.start_url,
+      supportingOrigins: JSON.parse(row.supporting_origins_json) as string[],
+      targetRoles: JSON.parse(row.target_roles_json) as string[],
+      forbiddenActions: JSON.parse(row.forbidden_actions_json) as string[],
+      aiProvider: row.ai_provider,
+      aiModel: row.ai_model,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  saveInput(source: WorkspaceInputSource): void {
+    this.db.prepare(
+      `INSERT INTO input_sources (input_id, relative_path, original_name, sha256, size_bytes, imported_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(sha256, original_name) DO UPDATE SET relative_path = excluded.relative_path`,
+    ).run(source.inputId, source.relativePath, source.originalName, source.sha256, source.sizeBytes, source.importedAt);
+  }
+
+  listInputs(): readonly WorkspaceInputSource[] {
+    const rows = this.db.prepare(
+      'SELECT input_id, relative_path, original_name, sha256, size_bytes, imported_at FROM input_sources ORDER BY imported_at, input_id',
+    ).all() as {
+      input_id: string; relative_path: string; original_name: string; sha256: string; size_bytes: number; imported_at: string;
+    }[];
+    return rows.map((row) => ({
+      inputId: row.input_id,
+      relativePath: row.relative_path,
+      originalName: row.original_name,
+      sha256: row.sha256,
+      sizeBytes: row.size_bytes,
+      importedAt: row.imported_at,
+    }));
   }
 }
 

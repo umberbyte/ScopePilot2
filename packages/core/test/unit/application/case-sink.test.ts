@@ -19,6 +19,29 @@ const CASE_INPUT = {
 } as const;
 
 describe('case persistence (caseSink)', () => {
+  test('保存済み案件と認可を監査eventを捏造せず復元する', () => {
+    const { service } = createTestService();
+    const record: CaseRecord = {
+      caseId: 'case-restored',
+      name: 'restored',
+      revision: 3,
+      scope: { allowedOrigins: ['https://example.test'], deniedOrigins: [], limits: { maxRequests: 20, maxPages: 10, maxDurationMinutes: 5 } },
+      createdAt: '2026-10-20T00:00:00.000Z',
+    };
+    service.restoreWorkspace(record, {
+      authorizationId: 'authz-restored',
+      caseId: record.caseId,
+      allowedOperationClasses: ['Browse'],
+      targetRoles: ['member'],
+      validFrom: '2026-10-20T00:00:00.000Z',
+      validUntil: '2026-11-20T00:00:00.000Z',
+      evidenceRef: { evidenceId: 'evidence-restored', sha256: 'b'.repeat(64), label: '依頼書' },
+    });
+    assert.deepEqual(service.currentCase(), record);
+    assert.equal(service.currentAuthorization().authorizationId, 'authz-restored');
+    assert.deepEqual(service.events(), []);
+  });
+
   test('案件作成と scope 更新のたびに案件記録を保存する (runs FK の参照先)', () => {
     const sink = new RecordingCaseSink();
     const { service, operator } = createTestService({ caseSink: sink });

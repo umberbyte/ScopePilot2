@@ -64,6 +64,52 @@ export const MIGRATIONS: readonly Migration[] = [
       )`,
     ],
   },
+  {
+    version: 2,
+    name: 'case-workspace',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS workspace_settings (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        start_url TEXT NOT NULL,
+        supporting_origins_json TEXT NOT NULL,
+        target_roles_json TEXT NOT NULL,
+        forbidden_actions_json TEXT NOT NULL,
+        ai_provider TEXT NOT NULL,
+        ai_model TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE TABLE IF NOT EXISTS input_sources (
+        input_id TEXT PRIMARY KEY,
+        relative_path TEXT NOT NULL UNIQUE,
+        original_name TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        imported_at TEXT NOT NULL,
+        UNIQUE (sha256, original_name)
+      )`,
+      'CREATE INDEX IF NOT EXISTS input_sources_sha256_idx ON input_sources (sha256)',
+    ],
+  },
+  {
+    version: 3,
+    name: 'ai-assistance-audit',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS ai_invocations (
+        invocation_id TEXT PRIMARY KEY,
+        task_kind TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input_hash TEXT NOT NULL,
+        output_hash TEXT,
+        status TEXT NOT NULL,
+        proposal_json TEXT,
+        error_message TEXT,
+        started_at TEXT NOT NULL,
+        completed_at TEXT NOT NULL
+      )`,
+      'CREATE INDEX IF NOT EXISTS ai_invocations_task_idx ON ai_invocations (task_kind, completed_at)',
+    ],
+  },
 ];
 
 export interface MigrationResult {

@@ -50,6 +50,10 @@ export interface SimulationHarness {
 export interface HarnessOptions {
   readonly runSink?: { save(record: import('@scopepilot2/contracts').RunRecord): void };
   readonly caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
+  readonly authorizationSink?: { save(record: import('@scopepilot2/contracts').AuthorizationRecord): void };
+  readonly evidenceStore?: import('@scopepilot2/core').EvidenceStorePort;
+  readonly initialCase?: import('@scopepilot2/contracts').CaseRecord;
+  readonly initialAuthorization?: import('@scopepilot2/contracts').AuthorizationRecord;
   /** 実 engine 差し込み (adapters の composeEngines 由来)。既定は fixture 構成。 */
   readonly engines?: {
     readonly explorer: ExplorationPort;
@@ -79,7 +83,7 @@ export function createHarness(options: HarnessOptions = {}): SimulationHarness {
     // 実 engine 時は実時間 (認可の有効期間・監査記録)。既定は決定的な固定 clock。
     clock: options.engines?.clock ?? new FixedClock(FIXTURE_CLOCK_TIMES),
     ids: new SequentialIdGenerator(),
-    evidence: new InMemoryEvidenceStore(),
+    evidence: options.evidenceStore ?? new InMemoryEvidenceStore(),
     explorer,
     scanEngine,
     capabilities,
@@ -94,6 +98,10 @@ export function createHarness(options: HarnessOptions = {}): SimulationHarness {
     ...(options.engines?.domObserver === undefined ? {} : { domObserver: options.engines.domObserver }),
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
     ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
+    ...(options.authorizationSink === undefined ? {} : { authorizationSink: options.authorizationSink }),
   });
+  if (options.initialCase !== undefined) {
+    service.restoreWorkspace(options.initialCase, options.initialAuthorization);
+  }
   return { service, explorer, scanEngine, capabilities, runtimeBundleHash };
 }

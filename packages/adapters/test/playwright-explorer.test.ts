@@ -78,7 +78,7 @@ describe('Playwright explorer adapter (stub browser 契約検証)', () => {
     await adapter.close();
   });
 
-  test('navigation 失敗と 4xx は観測なし/解析なしとして扱う', async () => {
+  test('navigation 失敗は明示エラー、4xx は解析なしとして扱う', async () => {
     const failing = new PlaywrightExplorerAdapter({
       scope: { allowedOrigins: ['http://fixture.target.test'], deniedOrigins: [] },
       launcher: async () => ({
@@ -86,7 +86,7 @@ describe('Playwright explorer adapter (stub browser 契約検証)', () => {
         close: async () => undefined,
       }),
     });
-    assert.equal(await failing.observe('http://fixture.target.test/x'), null);
+    await assert.rejects(() => failing.observe('http://fixture.target.test/x'), /Playwright exploration failed/);
     await failing.close();
 
     const notFound = new PlaywrightExplorerAdapter({

@@ -47,7 +47,7 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
   const styles = useStyles();
   const [drafts, setDrafts] = useState<readonly DraftView[]>([]);
   const [selected, setSelected] = useState<DraftView | null>(null);
-  const [newTargetUrl, setNewTargetUrl] = useState('http://fixture.target.test/repeater');
+  const [newTargetUrl, setNewTargetUrl] = useState('');
   const [sessionRole, setSessionRole] = useState('');
   const [headersText, setHeadersText] = useState('');
   const [bodyText, setBodyText] = useState('');

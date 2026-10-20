@@ -40,9 +40,9 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
   const [authHints, setAuthHints] = useState<readonly { documentLabel: string; entries: readonly { role: string; authMethod: string; documentLocation: string }[] }[]>([]);
   const [role, setRole] = useState('admin');
   const [flowVersion, setFlowVersion] = useState('flow-1');
-  const [stepsText, setStepsText] = useState('[\n  { "kind": "navigate", "target": "http://fixture.target.test/login.php" },\n  { "kind": "fill", "target": "#username", "secretReference": "vault://admin-user" },\n  { "kind": "fill", "target": "#password", "secretReference": "vault://admin-pass" },\n  { "kind": "click", "target": "input[type=submit]" },\n  { "kind": "assert", "target": "Fixture Target Home" }\n]');
-  const [loginBaseUrl, setLoginBaseUrl] = useState('http://fixture.target.test');
-  const [loginExpectedPrefix, setLoginExpectedPrefix] = useState('http://fixture.target.test/');
+  const [stepsText, setStepsText] = useState('[]');
+  const [loginBaseUrl, setLoginBaseUrl] = useState('');
+  const [loginExpectedPrefix, setLoginExpectedPrefix] = useState('');
   const [loginProxy, setLoginProxy] = useState('');
   const [secretInputs, setSecretInputs] = useState<Readonly<Record<string, string>>>({});
   const [loginResult, setLoginResult] = useState<{ role: string; authenticated: boolean; finalUrl: string; cookieNames: readonly string[]; sharedCookieNames: boolean } | null>(null);
@@ -163,12 +163,12 @@ export function SessionsScreen({ apiBase }: { apiBase: string }): React.ReactEle
         const roles = bizRoles.split(',').map((value) => value.trim()).filter((value) => value !== '');
         const result = await callJson<{ status: string; comparison: { outcome: string }; restore: { outcome: string }; matrix: { evidenceSeparated: boolean }; observations: readonly { role: string; observation: string | null }[] }>(apiBase, 'POST', '/api/business-logic/checks', {
           roles,
-          targetUrl: 'http://fixture.target.test/admin-only',
+          targetUrl: loginBaseUrl,
           expectation: { expression: bizExpression, args: [bizExpected] },
         });
         setBizResult(result);
       }),
-    [apiBase, bizExpected, bizExpression, bizRoles, run],
+    [apiBase, bizExpected, bizExpression, bizRoles, loginBaseUrl, run],
   );
 
   return (

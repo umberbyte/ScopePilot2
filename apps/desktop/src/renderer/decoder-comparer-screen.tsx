@@ -130,7 +130,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [right, setRight] = useState('');
   const [normalizeNewlines, setNormalizeNewlines] = useState(true);
   const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
-  const [sequencerTarget, setSequencerTarget] = useState('http://fixture.target.test/session-token');
+  const [sequencerTarget, setSequencerTarget] = useState('');
   const [sequencerSamples, setSequencerSamples] = useState('100');
   const [sequencerTokenSource, setSequencerTokenSource] = useState<SequencerTokenSource>('body');
   const [sequencerTokenCookieName, setSequencerTokenCookieName] = useState('SEQ_TOKEN');
@@ -145,11 +145,11 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [sequencerRunning, setSequencerRunning] = useState(false);
   const [sequencerNotice, setSequencerNotice] = useState('');
   const sequencerAbort = useRef<AbortController | null>(null);
-  const [oastTarget, setOastTarget] = useState('http://fixture.target.test/callback');
+  const [oastTarget, setOastTarget] = useState('');
   const [oastProtocol, setOastProtocol] = useState('http');
   const [oastToken, setOastToken] = useState('');
   const [oastResult, setOastResult] = useState<string>('');
-  const [wsTarget, setWsTarget] = useState('http://fixture.target.test/ws');
+  const [wsTarget, setWsTarget] = useState('');
   const [wsRole, setWsRole] = useState('');
   const [wsSubprotocolsText, setWsSubprotocolsText] = useState('');
   const [wsImportText, setWsImportText] = useState('');
@@ -158,13 +158,13 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [wsSessionCookieNames, setWsSessionCookieNames] = useState<readonly string[] | undefined>(undefined);
   const [wsNegotiatedSubprotocol, setWsNegotiatedSubprotocol] = useState<string | undefined>(undefined);
   const [wsFrames, setWsFrames] = useState<readonly { frameId: string; direction: string; text: string; rawHash: string }[]>([]);
-  const [transportTarget, setTransportTarget] = useState('http://fixture.target.test/api');
+  const [transportTarget, setTransportTarget] = useState('');
   const [transportRequested, setTransportRequested] = useState<'h2' | 'http/1.1'>('h2');
   const [transportAllowFallback, setTransportAllowFallback] = useState(true);
   const [transportResult, setTransportResult] = useState<TransportResult | null>(null);
-  const [headerText, setHeaderText] = useState(':method: GET\n:scheme: http\n:authority: fixture.target.test\n:path: /');
+  const [headerText, setHeaderText] = useState('');
   const [headerResult, setHeaderResult] = useState('');
-  const [domTarget, setDomTarget] = useState('http://fixture.target.test/app');
+  const [domTarget, setDomTarget] = useState('');
   const [domLive, setDomLive] = useState(false);
   const [domRole, setDomRole] = useState('');
   const [domObservationsText, setDomObservationsText] = useState('');
@@ -403,7 +403,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     setError('');
     try {
       const result = await callJson<{ kept: number; duplicates: number; correlated: number; uncorrelated: number }>(apiBase, '/api/oast/callbacks', {
-        events: [{ eventId: `fixture-${Date.now()}`, token: oastToken, payload: 'fixture interaction' }],
+        events: [{ eventId: `manual-${Date.now()}`, token: oastToken, payload: 'manually supplied callback' }],
       });
       setOastResult(t('a10.oastRecorded', { correlated: result.correlated, uncorrelated: result.uncorrelated, duplicates: result.duplicates }));
     } catch (cause) {

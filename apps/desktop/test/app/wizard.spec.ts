@@ -8,21 +8,60 @@ import { _electron as electron } from 'playwright';
 let app: ElectronApplication;
 let page: Page;
 
+async function visiblePureBlackText(): Promise<readonly string[]> {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('body *'))
+      .filter((element) => element.offsetParent !== null)
+      .filter((element) => Array.from(element.childNodes).some(
+        (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '',
+      ))
+      .filter((element) => {
+        const color = getComputedStyle(element).color.replaceAll(' ', '').toLowerCase();
+        return color === 'rgb(0,0,0)' || color === 'rgba(0,0,0,1)';
+      })
+      .map((element) => (element.textContent ?? '').trim().slice(0, 80)),
+  );
+}
+
 test.beforeAll(async () => {
-  app = await electron.launch({ args: ['dist/main.cjs'] });
+  app = await electron.launch({ args: ['dist/main.cjs'], env: { ...process.env, SCOPEPILOT_DISABLE_AI: '1' } });
   page = await app.firstWindow();
   await expect(page).toHaveTitle(/ScopePilot2/);
+  await app.evaluate(({ dialog, app }) => {
+    Object.defineProperty(dialog, 'showOpenDialog', {
+      configurable: true,
+      value: async (...args: unknown[]) => {
+        const options = args.at(-1) as { properties?: readonly string[] };
+        const caseRoot = `${app.getPath('temp')}\\scopepilot2-desktop-test-${process.pid}`;
+        return options.properties?.includes('openDirectory') === true
+          ? { canceled: false, filePaths: [caseRoot] }
+          : { canceled: false, filePaths: [`${process.cwd()}\\package.json`] };
+      },
+    });
+  });
+  await page.getByRole('combobox', { name: 'テーマ' }).selectOption('dark');
+});
+
+test.afterEach(async () => {
+  expect(await visiblePureBlackText()).toEqual([]);
 });
 
 test.afterAll(async () => {
+  await page.getByRole('combobox', { name: 'テーマ' }).selectOption('system');
   await app.close();
 });
 
 test('S01: 案件を開くまで次へは無効', async () => {
   const next = page.getByRole('button', { name: /次へ/ });
   await expect(next).toBeDisabled();
-  await page.getByRole('button', { name: '案件を開く' }).click();
-  const openNotice = page.getByRole('status').filter({ hasText: /案件「ScopePilot2 案件」を開きました/ });
+  await page.getByRole('button', { name: '新規案件を作成' }).click();
+  await expect(page.getByText(/^scopepilot2-desktop-test-\d+$/, { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '案件を作成' })).toBeEnabled();
+  await page.getByRole('textbox', { name: '診断を許可されたOrigin' }).fill('http://fixture.target.test/');
+  await page.getByRole('button', { name: '資料ファイルを追加' }).click();
+  await expect(page.getByText('package.json', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '案件を作成' }).click();
+  const openNotice = page.getByRole('status').filter({ hasText: /案件「scopepilot2-desktop-test-/ });
   await expect(openNotice).toBeVisible();
   await expect(next).toBeEnabled();
   await next.click();

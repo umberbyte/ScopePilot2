@@ -19,10 +19,16 @@ import { RepeaterScreen } from './repeater-screen.tsx';
 import { FuzzerScreen } from './fuzzer-screen.tsx';
 import { SessionsScreen } from './sessions-screen.tsx';
 
-/** desktop harness の operator (fixture・全権限)。operator 照会 API は後続増分で追加する。 */
+/** ローカル desktop operator。operator 照会 API は後続増分で追加する。 */
 const OPERATOR_PERMISSIONS: readonly OperatorPermission[] = ['case.manage', 'case.read', 'run.manage', 'finding.confirm', 'report.export'];
 
 const CONTROL_ASPECTS = ['preSendScopeEnforcement', 'stopControl', 'budgetLease', 'rateLimit'] as const;
+const CONTROL_ASPECT_LABELS: Record<(typeof CONTROL_ASPECTS)[number], string> = {
+  preSendScopeEnforcement: 'scope guard',
+  stopControl: 'stop',
+  budgetLease: 'budget',
+  rateLimit: 'rate limit',
+};
 
 interface AuditEvent {
   readonly eventId: number;
@@ -31,13 +37,96 @@ interface AuditEvent {
 }
 
 const useStyles = makeStyles({
-  root: { display: 'flex', gap: '16px', padding: '16px', alignItems: 'flex-start' },
-  nav: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: '300px' },
-  navItem: { textAlign: 'left', padding: '6px 10px', borderRadius: '4px', border: 'none', background: 'transparent', cursor: 'pointer' },
-  navActive: { fontWeight: 600, backgroundColor: tokens.colorBrandBackground2 },
-  content: { display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minWidth: '560px' },
-  section: { display: 'flex', flexDirection: 'column', gap: '4px' },
+  root: {
+    display: 'grid',
+    gridTemplateColumns: '264px minmax(0, 1fr)',
+    flex: 1,
+    minHeight: 0,
+    color: tokens.colorNeutralForeground1,
+  },
+  nav: {
+    position: 'sticky',
+    top: '64px',
+    display: 'flex',
+    height: 'calc(100vh - 64px)',
+    flexDirection: 'column',
+    gap: '3px',
+    padding: '20px 12px',
+    overflowY: 'auto',
+    color: tokens.colorNeutralForeground1,
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  navHeader: { display: 'flex', flexDirection: 'column', gap: '2px', padding: '0 10px 14px' },
+  navEyebrow: {
+    color: tokens.colorBrandForeground1,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+  },
+  navItem: {
+    width: '100%',
+    minHeight: '38px',
+    textAlign: 'left',
+    padding: '8px 10px',
+    borderRadius: '6px',
+    border: '1px solid transparent',
+    color: tokens.colorNeutralForeground2,
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+  },
+  navActive: {
+    color: tokens.colorNeutralForeground1,
+    fontWeight: 600,
+    backgroundColor: tokens.colorBrandBackground2,
+    borderColor: tokens.colorBrandStroke2,
+    boxShadow: `inset 3px 0 ${tokens.colorBrandStroke1}`,
+  },
+  content: {
+    display: 'flex',
+    width: 'calc(100% - 48px)',
+    maxWidth: '1180px',
+    minWidth: 0,
+    minHeight: 'calc(100vh - 112px)',
+    flexDirection: 'column',
+    gap: '16px',
+    margin: '24px',
+    padding: '24px',
+    overflowX: 'auto',
+    color: tokens.colorNeutralForeground1,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: '10px',
+    boxShadow: tokens.shadow4,
+  },
+  contentHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    paddingBottom: '16px',
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  section: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    '& > button': { alignSelf: 'flex-start' },
+  },
+  tableHeaderLabel: {
+    display: 'block',
+    minWidth: 0,
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere',
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: tokens.lineHeightBase200,
+  },
   muted: { color: tokens.colorNeutralForeground3 },
+  '@media (max-width: 900px)': {
+    root: { gridTemplateColumns: '208px minmax(0, 1fr)' },
+    nav: { position: 'static', height: 'auto' },
+    content: { width: 'calc(100% - 24px)', margin: '12px', padding: '16px' },
+  },
 });
 
 async function callJson<T>(apiBase: string, method: string, path: string, body?: unknown): Promise<T> {
@@ -408,7 +497,7 @@ function planSummaryLines(steps: readonly PlanStepView[], planHash: string): str
 /** A08 Scan plans。探索・診断計画の構築 (上限編集) → 確認 → 実行を 1 画面で行う。 */
 function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const styles = useStyles();
-  const [seeds, setSeeds] = useState('http://fixture.target.test/');
+  const [seeds, setSeeds] = useState('');
   const [exploreRole, setExploreRole] = useState('');
   const [hintLabel, setHintLabel] = useState('');
   const [hintUrls, setHintUrls] = useState('');
@@ -439,6 +528,7 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const [scanResult, setScanResult] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [newCaseOrigin, setNewCaseOrigin] = useState('');
 
   const run = useCallback(
     async (action: () => Promise<void>): Promise<void> => {
@@ -935,17 +1025,19 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
     setBusy(true);
     setError('');
     try {
+      const origin = new URL(newCaseOrigin).origin;
+      const now = Date.now();
       await callJson(apiBase, 'POST', '/api/case', {
         name: 'ScopePilot2 案件',
-        allowedOrigins: ['http://fixture.target.test'],
+        allowedOrigins: [origin],
         deniedOrigins: [],
         limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
       });
       await callJson(apiBase, 'POST', '/api/authorization', {
         allowedOperationClasses: ['Browse', 'ActiveScan'],
         targetRoles: ['unauthenticated'],
-        validFrom: '2026-10-18T00:00:00.000Z',
-        validUntil: '2026-10-19T00:00:00.000Z',
+        validFrom: new Date(now - 60_000).toISOString(),
+        validUntil: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(),
         evidenceLabel: '認可 (デスクトップ)',
         evidenceContent: 'desktop advanced evidence',
       });
@@ -956,12 +1048,17 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
     } finally {
       setBusy(false);
     }
-  }, [apiBase, refreshAudit, refreshCase]);
+  }, [apiBase, newCaseOrigin, refreshAudit, refreshCase]);
 
   const activeItem = items.find((item) => item.route === activeRoute);
   return (
     <div className={styles.root}>
       <nav className={styles.nav} aria-label={t('nav.aria')}>
+        <div className={styles.navHeader}>
+          <span className={styles.navEyebrow}>{t('app.mode.advanced')}</span>
+          <Text size={400} weight="semibold">{t('advanced.workspace')}</Text>
+          <Text size={200} className={styles.muted}>{t('advanced.workspaceHint')}</Text>
+        </div>
         {items.map((item) => (
           <button
             key={item.screenId}
@@ -974,9 +1071,12 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         ))}
       </nav>
       <div className={styles.content}>
-        <Text size={400} weight="semibold">
-          {activeItem === undefined ? '' : `${activeItem.screenId} ${activeItem.label}`}
-        </Text>
+        <header className={styles.contentHeader}>
+          <span className={styles.navEyebrow}>{activeItem?.screenId ?? ''}</span>
+          <Text as="h1" size={600} weight="semibold">
+            {activeItem?.label ?? ''}
+          </Text>
+        </header>
         {error !== '' && (
           <MessageBar intent="error">
             {`Error: ${error}`}
@@ -995,7 +1095,10 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
               ) : caseMissing ? (
                 <>
                   <Text>{t('a01.caseMissing')}</Text>
-                  <Button disabled={busy} onClick={() => void createCase()}>
+                  <Field label={t('wizard.s01.allowedOrigins')} required>
+                    <Input value={newCaseOrigin} onChange={(_event, data) => setNewCaseOrigin(data.value)} placeholder="https://target.example" />
+                  </Field>
+                  <Button disabled={busy || newCaseOrigin.trim() === ''} onClick={() => void createCase()}>
                     {t('a01.createCase')}
                   </Button>
                 </>
@@ -1012,7 +1115,9 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
                     <TableHeaderCell>{t('common.col.version')}</TableHeaderCell>
                     <TableHeaderCell>{t('a01.col.source')}</TableHeaderCell>
                     {CONTROL_ASPECTS.map((aspect) => (
-                      <TableHeaderCell key={aspect}>{aspect}</TableHeaderCell>
+                      <TableHeaderCell key={aspect} title={aspect}>
+                        <span className={styles.tableHeaderLabel}>{CONTROL_ASPECT_LABELS[aspect]}</span>
+                      </TableHeaderCell>
                     ))}
                   </TableRow>
                 </TableHeader>

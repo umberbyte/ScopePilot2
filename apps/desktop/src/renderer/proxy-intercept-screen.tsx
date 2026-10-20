@@ -49,7 +49,7 @@ export function ProxyInterceptScreen({ apiBase }: { apiBase: string }): React.Re
   const [queue, setQueue] = useState<QueueState>({ items: [], events: [] });
   const [direction, setDirection] = useState<'request' | 'response'>('request');
   const [messageReference, setMessageReference] = useState('');
-  const [targetUrl, setTargetUrl] = useState('http://fixture.target.test/');
+  const [targetUrl, setTargetUrl] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');

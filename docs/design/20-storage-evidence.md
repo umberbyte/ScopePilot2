@@ -11,16 +11,23 @@ SQLite を索引・状態・関係に、ファイルを大きい本文と証拠�
 ```text
 case/
   scopepilot.db
+  inputs/                     受領資料の不変コピー（原名・SHA-256・取込日時はDB）
   evidence/
     blobs/<sha256>          暗号化した原本または派生物
   runs/<run-id>/
     manifest.json           計画、認可、runtime bundle、停止理由への参照
     engine/                 上限付き stdout/stderr と engine 固有成果物
   exports/                  利用者が明示生成した共有用成果物
+  reports/                  Markdown / Word の報告成果物
+  backups/                  利用者が明示生成した案件バックアップ
   locks/
 ```
 
 DB と manifest は相対参照を使う。書き込みは一つの storage service に集約し、SQLite transaction と temp file→fsync→atomic rename の順で DB と blob の不整合を避ける。案件は writer 一つ、reader 複数とし、異常終了後は WAL と blob index を検査する。
+
+Desktop の案件開始は「新規案件」と「既存案件」を分ける。新規は空フォルダーだけに作成し、既存は
+`scopepilot.db` があるフォルダーだけを開く。受領資料は外部原本を変更せず `inputs/` へ一時ファイル経由で
+コピーし、コピー前後の SHA-256 を照合する。renderer へ任意 filesystem API は渡さない。
 
 ## 3. 主要モデル
 
@@ -34,6 +41,7 @@ DB と manifest は相対参照を使う。書き込みは一つの storage serv
 | evidence_links | 原本、表示用派生物、共有用派生物の関係 |
 | payload_sets / rule_packages / runtimes | 供給元、版、hash、審査状態 |
 | document_sources / document_hints | 文書原本と未確認ヒント |
+| ai_invocations | task、provider/model、入出力hash、検証後提案、成功/失敗。秘密値を含み得る生出力は保存しない |
 | audit_events | 秘密表示、export、認可変更、実行、削除 |
 
 ## 4. 原本、表示、共有

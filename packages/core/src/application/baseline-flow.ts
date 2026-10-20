@@ -122,6 +122,8 @@ export interface BaselineFlowDeps {
   readonly runSink?: import('../ports/infra.ts').RunSinkPort;
   /** 案件記録の永続化 (任意)。作成・scope 更新時に保存する (runs FK の参照先)。 */
   readonly caseSink?: { save(record: CaseRecord): void };
+  /** 認可記録の永続化 (任意)。案件再オープン時に最新の認可を復元する。 */
+  readonly authorizationSink?: { save(record: AuthorizationRecord): void };
   /** 実 engine 診断の完了後、alert 生成の遅れを待つ時間 (ms)。fixture では 0。 */
   readonly scanAlertSettleMs?: number;
   /** Repeater の実 transport (design/f04)。未構成なら fixture 応答を使う。 */
@@ -338,6 +340,35 @@ export class BaselineFlowService {
 
   constructor(deps: BaselineFlowDeps) {
     this.deps = deps;
+  }
+
+  /**
+   * 案件ワークスペースを開くとき、SQLite に保存済みの正本を in-memory aggregate へ戻す。
+   * 外部入力用 API ではなく desktop/CLI の構成層だけが使用する。復元時に新しい監査 event は
+   * 作らず、以後の更新・実行は通常 command と同じ検証を通す。
+   */
+  restoreWorkspace(record: CaseRecord, authorization?: AuthorizationRecord): void {
+    this.requirePositiveLimits(record.scope.limits, 'case');
+    if (record.name.trim() === '' || record.caseId.trim() === '') {
+      throw domainError('ValidationFailed', 'stored case is invalid');
+    }
+    const allowed = record.scope.allowedOrigins.map((origin) => this.canonicalOriginOrThrow(origin));
+    const denied = record.scope.deniedOrigins.map((origin) => this.canonicalOriginOrThrow(origin));
+    if (allowed.length === 0) {
+      throw domainError('ValidationFailed', 'stored case must have at least one allowed origin');
+    }
+    if (authorization !== undefined && authorization.caseId !== record.caseId) {
+      throw domainError('ValidationFailed', 'stored authorization belongs to another case');
+    }
+    this.aggregate = CaseAggregate.open({
+      ...record,
+      scope: {
+        allowedOrigins: [...new Set(allowed)],
+        deniedOrigins: [...new Set(denied)],
+        limits: record.scope.limits,
+      },
+    });
+    this.authorization = authorization ?? null;
   }
 
   events(): readonly BaselineFlowEvent[] {
@@ -1886,6 +1917,7 @@ export class BaselineFlowService {
       validUntil: input.validUntil,
       evidenceRef: { evidenceId: stored.evidenceId, sha256: stored.sha256, label: stored.label },
     };
+    this.deps.authorizationSink?.save(this.authorization);
     this.record({
       type: 'AuthorizationGranted',
       at: this.deps.clock.now().toISOString(),
@@ -2407,7 +2439,6 @@ export class BaselineFlowService {
         limitations: [
           '外部 engine (Delegated 経路) の個々の送信は送信前に拒否できない。入力 scope・停止・版ごとの実測で管理する。',
           'engine 由来の所見は実影響未確認であり、人の確認なしに確定扱いにしない。',
-          '本報告は固定 fixture に基づく workflow 検証であり、実対象の診断結果ではない。',
         ],
       },
     });

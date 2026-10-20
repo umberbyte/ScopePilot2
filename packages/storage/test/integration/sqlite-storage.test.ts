@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
 import type { Finding, RunRecord } from '@scopepilot2/contracts';
-import { CaseRepository, FindingRepository, migrate, openDatabase, RunRepository, SqliteEvidenceStore } from '../../src/index.ts';
+import { AiInvocationRepository, AuthorizationRepository, CaseRepository, FindingRepository, migrate, openDatabase, RunRepository, SqliteEvidenceStore } from '../../src/index.ts';
 
 // IT: 局所的な SQLite I/O は許可する (docs/detailed-design/03-unit-test-strategy.md §2)。
 describe('SQLite storage', () => {
@@ -12,10 +12,10 @@ describe('SQLite storage', () => {
     const db = openDatabase(':memory:');
     const first = migrate(db);
     const second = migrate(db);
-    assert.deepEqual(first.appliedVersions, [1]);
-    assert.deepEqual(second.appliedVersions, [1]);
+    assert.deepEqual(first.appliedVersions, [1, 2, 3]);
+    assert.deepEqual(second.appliedVersions, [1, 2, 3]);
     const rows = db.prepare('SELECT COUNT(*) AS c FROM schema_migrations').get() as { c: number };
-    assert.equal(rows.c, 1);
+    assert.equal(rows.c, 3);
     db.close();
   });
 
@@ -88,6 +88,49 @@ describe('SQLite storage', () => {
     db.close();
   });
 
+  test('案件の最新認可を対象role・証拠参照付きで再オープンできる', () => {
+    const db = openDatabase(':memory:');
+    migrate(db);
+    new CaseRepository(db).save({ caseId: 'case-auth', name: 'auth', revision: 1, scope: { allowedOrigins: ['https://a.test'], deniedOrigins: [], limits: { maxRequests: 10, maxPages: 10, maxDurationMinutes: 10 } }, createdAt: '2026-10-20T00:00:00.000Z' });
+    const repository = new AuthorizationRepository(db);
+    repository.save({
+      authorizationId: 'authz-1',
+      caseId: 'case-auth',
+      allowedOperationClasses: ['Browse', 'ActiveScan'],
+      targetRoles: ['member'],
+      validFrom: '2026-10-20T00:00:00.000Z',
+      validUntil: '2026-11-20T00:00:00.000Z',
+      evidenceRef: { evidenceId: 'evidence-1', sha256: 'a'.repeat(64), label: '診断依頼書' },
+    });
+    assert.deepEqual(repository.latest('case-auth'), {
+      authorizationId: 'authz-1',
+      caseId: 'case-auth',
+      allowedOperationClasses: ['Browse', 'ActiveScan'],
+      targetRoles: ['member'],
+      validFrom: '2026-10-20T00:00:00.000Z',
+      validUntil: '2026-11-20T00:00:00.000Z',
+      evidenceRef: { evidenceId: 'evidence-1', sha256: 'a'.repeat(64), label: '診断依頼書' },
+    });
+    db.close();
+  });
+
+  test('AI支援はprovider/model/hashと検証済み提案を監査記録へ保存する', () => {
+    const db = openDatabase(':memory:');
+    migrate(db);
+    const repository = new AiInvocationRepository(db);
+    repository.save({
+      invocationId: 'ai-1', taskKind: 'DocumentExtract', provider: 'codex', model: 'configured-default',
+      inputHash: 'a'.repeat(64), outputHash: 'b'.repeat(64), status: 'succeeded',
+      proposal: { documents: [] }, startedAt: '2026-10-20T00:00:00.000Z', completedAt: '2026-10-20T00:00:01.000Z',
+    });
+    assert.deepEqual(repository.list(), [{
+      invocationId: 'ai-1', taskKind: 'DocumentExtract', provider: 'codex', model: 'configured-default',
+      inputHash: 'a'.repeat(64), outputHash: 'b'.repeat(64), status: 'succeeded',
+      proposal: { documents: [] }, startedAt: '2026-10-20T00:00:00.000Z', completedAt: '2026-10-20T00:00:01.000Z',
+    }]);
+    db.close();
+  });
+
   test('ファイル DB は再オープン後も状態を保持する', () => {
     const dir = mkdtempSync(join(tmpdir(), 'scopepilot2-storage-'));
     try {
@@ -99,7 +142,7 @@ describe('SQLite storage', () => {
 
       const second = openDatabase(path);
       const result = migrate(second);
-      assert.deepEqual(result.appliedVersions, [1]);
+      assert.deepEqual(result.appliedVersions, [1, 2, 3]);
       assert.equal(new CaseRepository(second).get('case-0001')?.name, 'persist');
       second.close();
     } finally {

@@ -714,6 +714,80 @@ test('OS の明暗設定にテーマが追従する (design/28 §8.1 MUST 3)', a
     .toBe(light);
 });
 
+test('明示テーマを選択でき、dark で純黒文字や未着色 viewport を残さない', async () => {
+  const themeSelect = page.getByRole('combobox', { name: 'テーマ' });
+  await themeSelect.selectOption('dark');
+  await expect(themeSelect).toHaveValue('dark');
+
+  const audit = await page.evaluate(() => {
+    const provider = document.querySelector<HTMLElement>('.fui-FluentProvider');
+    const blackText: string[] = [];
+    for (const element of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+      if (element.offsetParent === null) {
+        continue;
+      }
+      const ownsText = Array.from(element.childNodes).some(
+        (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '',
+      );
+      if (!ownsText) {
+        continue;
+      }
+      const color = getComputedStyle(element).color.replaceAll(' ', '').toLowerCase();
+      if (color === 'rgb(0,0,0)' || color === 'rgba(0,0,0,1)') {
+        blackText.push((element.textContent ?? '').trim().slice(0, 80));
+      }
+    }
+    return {
+      blackText,
+      colorScheme: document.documentElement.style.colorScheme,
+      providerHeight: provider?.getBoundingClientRect().height ?? 0,
+      viewportHeight: window.innerHeight,
+      savedTheme: window.localStorage.getItem('scopepilot.theme'),
+    };
+  });
+
+  expect(audit.blackText).toEqual([]);
+  expect(audit.colorScheme).toBe('dark');
+  expect(audit.providerHeight).toBeGreaterThanOrEqual(audit.viewportHeight);
+  expect(audit.savedTheme).toBe('dark');
+
+  const visibleBlackText = async (): Promise<readonly string[]> =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('body *'))
+        .filter((element) => element.offsetParent !== null)
+        .filter((element) => Array.from(element.childNodes).some(
+          (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '',
+        ))
+        .filter((element) => {
+          const color = getComputedStyle(element).color.replaceAll(' ', '').toLowerCase();
+          return color === 'rgb(0,0,0)' || color === 'rgba(0,0,0,1)';
+        })
+        .map((element) => (element.textContent ?? '').trim().slice(0, 80)),
+    );
+  const violations: { screen: string; text: readonly string[] }[] = [];
+
+  await page.getByRole('button', { name: 'シンプル' }).click();
+  const simpleBlackText = await visibleBlackText();
+  if (simpleBlackText.length > 0) {
+    violations.push({ screen: 'Simple', text: simpleBlackText });
+  }
+
+  await page.getByRole('button', { name: 'アドバンスド' }).click();
+  for (let index = 1; index <= 13; index += 1) {
+    const screenId = `A${String(index).padStart(2, '0')}`;
+    await page.getByRole('button', { name: new RegExp(`^${screenId} `) }).click();
+    const screenBlackText = await visibleBlackText();
+    if (screenBlackText.length > 0) {
+      violations.push({ screen: screenId, text: screenBlackText });
+    }
+  }
+  expect(violations).toEqual([]);
+
+  // 後続テストと次回起動は OS 追従へ戻す。
+  await themeSelect.selectOption('system');
+  await expect(themeSelect).toHaveValue('system');
+});
+
 test('未実装プレースホルダはもう残っていない (全 Advanced 画面が実装済み)', async () => {
   await expect(page.getByText('この画面は未実装です (後続増分で提供します)。')).toHaveCount(0);
 });

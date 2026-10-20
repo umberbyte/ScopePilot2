@@ -71,7 +71,6 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
     this.scanPolicy = options.scanPolicy ?? '';
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.mutableEngineVersion = 'zap-api (未確認)';
-    this.versionPromise = this.fetchVersion();
   }
 
   private async api<T>(path: string, params: Readonly<Record<string, string>> = {}): Promise<T> {
@@ -108,7 +107,10 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
         this.mutableEngineVersion = `zap ${body.version}`;
         return this.mutableEngineVersion;
       })
-      .catch(() => 'zap (version unknown)');
+      .catch((cause: unknown) => {
+        this.mutableEngineVersion = 'zap (unavailable)';
+        throw cause;
+      });
   }
 
   /** engine 版の確認 (能力表の source=measured 化は版取得が前提)。 */

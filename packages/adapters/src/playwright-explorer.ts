@@ -21,7 +21,7 @@ export interface StubBrowserContext {
 export interface StubPage {
   goto(url: string): Promise<{ status(): number; headers(): Record<string, string> } | null>;
   title(): Promise<string>;
-  $$eval(selector: string, fn: (elements: readonly unknown[]) => readonly string[]): Promise<readonly string[]>;
+  $$eval(selector: string, fn: (elements: readonly unknown[]) => readonly unknown[]): Promise<readonly unknown[]>;
   close(): Promise<void>;
 }
 
@@ -61,10 +61,10 @@ const createDefaultLauncher = (fixedCookies?: readonly BrowserCookie[]): Browser
         return {
           goto: async (url: string) => await page.goto(url, { waitUntil: 'domcontentloaded' }),
           title: async () => await page.title(),
-          $$eval: async (selector: string, fn: (elements: readonly unknown[]) => readonly string[]) =>
-            await page.$$eval(selector, fn as never),
+          $$eval: async (selector: string, fn: (elements: readonly unknown[]) => readonly unknown[]): Promise<readonly unknown[]> =>
+            await page.$$eval(selector, fn as never) as readonly unknown[],
           close: async () => {
-            await page.close();
+            await context.close();
           },
         } satisfies StubPage;
       },
@@ -83,8 +83,8 @@ export interface PlaywrightExplorerOptions {
 }
 
 export class PlaywrightExplorerAdapter implements ExplorationPort {
-  readonly engineVersion = 'playwright (未起動)';
-  private readonly scope: PlaywrightExplorerOptions['scope'];
+  readonly engineVersion = 'playwright-chromium';
+  private scope: PlaywrightExplorerOptions['scope'];
   private readonly launcher: BrowserLauncher;
   private contextPromise: Promise<StubBrowserContext> | null = null;
   private resolvedVersion = 'playwright (未起動)';
@@ -92,6 +92,14 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
   constructor(options: PlaywrightExplorerOptions) {
     this.scope = options.scope;
     this.launcher = options.launcher ?? createDefaultLauncher(options.cookies);
+  }
+
+  /** 案件の作成・切替時に、送信前強制へ使う scope を更新する。 */
+  updateScope(scope: PlaywrightExplorerOptions['scope']): void {
+    this.scope = {
+      allowedOrigins: [...new Set(scope.allowedOrigins.map((origin) => new URL(origin).origin))],
+      deniedOrigins: [...new Set(scope.deniedOrigins.map((origin) => new URL(origin).origin))],
+    };
   }
 
   private ensureContext(): Promise<StubBrowserContext> {
@@ -157,6 +165,24 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
           return typeof href === 'string' ? href : '';
         }),
       );
+      const forms = await page.$$eval('form', (elements) => elements.map((element) => {
+        const form = element as HTMLFormElement;
+        const fields = Array.from(form.elements)
+          .filter((field): field is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement =>
+            field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement)
+          .map((field) => ({ name: field.name, type: field instanceof HTMLInputElement ? field.type : field.tagName.toLowerCase() }))
+          .filter((field) => field.name !== '');
+        const fieldTypes = fields.map((field) => field.type.toLowerCase());
+        const method = (form.method || 'GET').toUpperCase();
+        const classification = fieldTypes.includes('password')
+          ? 'login'
+          : method !== 'GET'
+            ? 'data-write'
+            : fields.some((field) => /^(q|query|search|keyword)$/i.test(field.name))
+              ? 'search'
+              : fields.length > 0 ? 'filter' : 'unknown';
+        return { actionUrl: form.action || location.href, method, fields, classification };
+      }));
       return {
         url,
         status,
@@ -165,12 +191,11 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
         discoveredFrom: null,
         depth: 0,
         originType: 'crawl',
-        links: links.filter((link) => link.startsWith('http://') || link.startsWith('https://')),
-        forms: [],
+        links: (links as readonly string[]).filter((link) => link.startsWith('http://') || link.startsWith('https://')),
+        forms: forms as PageObservation['forms'],
       };
-    } catch {
-      // navigation 失敗 (接続拒否・timeout 等) は観測なしとして扱う。
-      return null;
+    } catch (cause) {
+      throw new Error(`Playwright exploration failed for ${url}: ${cause instanceof Error ? cause.message : String(cause)}`);
     } finally {
       await page.close();
     }
