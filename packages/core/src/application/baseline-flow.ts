@@ -1225,7 +1225,7 @@ export class BaselineFlowService {
    * 実 port 構成時は bounded request probe を行い、未構成時は URL に h1-only を含む
    * fixture peer だけが h2 を offer しない。結果は ALPN/runtime を保持する (F15-UT-007)。
    */
-  async negotiateTransportFor(operator: OperatorProfile, input: { readonly targetUrl: string; readonly allowFallback: boolean; readonly requested?: 'h2' | 'http/1.1' | 'h3' }): Promise<{ protocol: 'h2' | 'http/1.1'; downgraded: boolean; alpn: string; runtime: string }> {
+  async negotiateTransportFor(operator: OperatorProfile, input: { readonly targetUrl: string; readonly allowFallback: boolean; readonly requested?: 'h2' | 'http/1.1' | 'h3' }): Promise<{ protocol: 'h2' | 'http/1.1'; downgraded: boolean; alpn: string; runtime: string; response?: import('../ports/engines.ts').TransportProbeResponseEvidence }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -1261,7 +1261,12 @@ export class BaselineFlowService {
       protocol: negotiated.protocol,
       downgraded: negotiated.downgraded,
     });
-    return { protocol: negotiated.protocol, downgraded: negotiated.downgraded, ...evidence };
+    return {
+      protocol: negotiated.protocol,
+      downgraded: negotiated.downgraded,
+      ...evidence,
+      ...(probe.response === undefined ? {} : { response: probe.response }),
+    };
   }
 
   /**

@@ -38,6 +38,10 @@ describe('NodeHttp2Transport', () => {
       assert.deepEqual(result.offered, ['h2']);
       assert.equal(result.alpn, 'h2c');
       assert.match(result.runtime, /^node \S+ \(node:http2\)$/);
+      assert.equal(result.response?.statusCode, 204);
+      assert.equal(result.response?.streamId, 1);
+      assert.equal(result.response?.remoteSettings?.maxFrameSize, 16_384);
+      assert.ok((result.response?.elapsedMs ?? -1) >= 0);
       assert.deepEqual(paths, ['/probe?x=1']);
     } finally {
       await close(server);
@@ -58,6 +62,7 @@ describe('NodeHttp2Transport', () => {
       const transport = new NodeHttp2Transport({ timeoutMs: 2_000 });
       const unavailable = await transport.probe({ targetUrl: `http://127.0.0.1:${port}/probe`, requested: 'h2', allowFallback: false });
       assert.deepEqual(unavailable.offered, ['http/1.1']);
+      assert.equal(unavailable.response, undefined);
       assert.equal(requests, 0);
 
       const fallback = await transport.probe({ targetUrl: `http://127.0.0.1:${port}/probe`, requested: 'h2', allowFallback: true });
@@ -90,6 +95,9 @@ describe('NodeHttp2Transport', () => {
       });
       assert.deepEqual(result.offered, ['http/1.1']);
       assert.equal(result.alpn, 'http/1.1 (cleartext)');
+      assert.equal(result.response?.statusCode, 204);
+      assert.equal(result.response?.streamId, undefined);
+      assert.ok((result.response?.elapsedMs ?? -1) >= 0);
       assert.equal(requests, 1);
       assert.equal(clientErrors, 0);
     } finally {
@@ -130,6 +138,9 @@ describe('NodeHttp2Transport', () => {
       });
       assert.deepEqual(h2.offered, ['h2']);
       assert.equal(h2.alpn, 'h2');
+      assert.equal(h2.response?.statusCode, 204);
+      assert.equal(h2.response?.streamId, 1);
+      assert.equal(h2.response?.remoteSettings?.maxFrameSize, 16_384);
 
       const h1 = await transport.probe({
         targetUrl: `https://localhost:${port}/h1`,
@@ -138,6 +149,8 @@ describe('NodeHttp2Transport', () => {
       });
       assert.deepEqual(h1.offered, ['http/1.1']);
       assert.equal(h1.alpn, 'http/1.1');
+      assert.equal(h1.response?.statusCode, 204);
+      assert.equal(h1.response?.streamId, undefined);
       assert.deepEqual(versions, ['2.0', '1.1']);
       assert.deepEqual(paths, ['/h2?x=1', '/h1']);
     } finally {
@@ -163,6 +176,7 @@ describe('NodeHttp2Transport', () => {
       });
       assert.deepEqual(unavailable.offered, ['http/1.1']);
       assert.equal(unavailable.alpn, 'http/1.1');
+      assert.equal(unavailable.response, undefined);
       assert.equal(requests, 0);
 
       const fallback = await transport.probe({
@@ -172,6 +186,7 @@ describe('NodeHttp2Transport', () => {
       });
       assert.deepEqual(fallback.offered, ['http/1.1']);
       assert.equal(fallback.alpn, 'http/1.1');
+      assert.equal(fallback.response?.statusCode, 204);
       assert.equal(requests, 1);
     } finally {
       await close(server);

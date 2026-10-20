@@ -2525,6 +2525,43 @@
                     },
                     "runtime": {
                       "type": "string"
+                    },
+                    "response": {
+                      "type": "object",
+                      "description": "requestを送信しbounded responseを完了した場合だけ返す実測証跡。response body/header値は含めない",
+                      "required": [
+                        "statusCode",
+                        "elapsedMs"
+                      ],
+                      "properties": {
+                        "statusCode": {
+                          "type": "integer",
+                          "minimum": 100,
+                          "maximum": 599
+                        },
+                        "elapsedMs": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "streamId": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "HTTP/2 response streamでのみ返す"
+                        },
+                        "remoteSettings": {
+                          "type": "object",
+                          "properties": {
+                            "headerTableSize": { "type": "integer", "minimum": 0 },
+                            "enablePush": { "type": "boolean" },
+                            "initialWindowSize": { "type": "integer", "minimum": 0 },
+                            "maxFrameSize": { "type": "integer", "minimum": 0 },
+                            "maxConcurrentStreams": { "type": "integer", "minimum": 0 },
+                            "maxHeaderListSize": { "type": "integer", "minimum": 0 }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false

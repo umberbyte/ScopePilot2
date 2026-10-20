@@ -56,5 +56,7 @@ Node HTTP/2 adapter と TLS/ALPN server の IT、Windows/macOS runtime matrix、
 - 所有TLS fixtureは実行時生成のlocalhost証明書を明示trust anchorとしてadapterへ渡し、ALPN `h2`、
   明示 `http/1.1`、H1-only peerのfallback許可/未許可を常時ITで検証する。trust anchor未指定時は
   自己署名証明書を拒否し、fixtureのために証明書検証を無効化しない。
-- 現行UI/APIは capability probe に限定する。任意method/body/header、stream ID/settings/timing証跡、connect先・
+- 完了したbounded responseはstatusと経過時間を返す。H2では実stream IDとremote settingsのうち
+  header table、push、initial window、frame、concurrent stream、header list上限を追加し、本文/header値は保持しない。
+- 現行UI/APIは capability probe に限定する。任意method/body/header、connect先・
   `:authority`・SNIの独立指定、connection reuseは未実装であり、完全なsemantic request editorとは表示しない。

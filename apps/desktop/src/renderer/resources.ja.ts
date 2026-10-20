@@ -176,6 +176,8 @@ export const jaStrings = {
   'a10.transportFallbackLabel': 'HTTP/1.1 fallback を許可する',
   'a10.transportNegotiate': 'transport を probe する',
   'a10.transportResult': 'protocol {protocol} ({downgraded})・ALPN {alpn}・runtime {runtime}',
+  'a10.transportResponse': 'response status {status}・完了まで {elapsed} ms・stream {stream}',
+  'a10.transportSettings': 'remote settings: max frame {maxFrame}・max concurrent {maxConcurrent}・initial window {initialWindow}',
   'a10.transportDowngraded': 'downgrade あり',
   'a10.transportNoDowngrade': 'downgrade なし',
   'a10.transportHeadersLabel': 'header (1行1件・Name: Value)',

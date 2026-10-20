@@ -5,7 +5,7 @@ import * as https from 'node:https';
 import * as tls from 'node:tls';
 import type { ClientHttp2Session } from 'node:http2';
 import type { SecureContextOptions, TLSSocket } from 'node:tls';
-import type { AdvancedTransportPort } from '@scopepilot2/core';
+import type { AdvancedTransportPort, TransportProbeResponseEvidence } from '@scopepilot2/core';
 
 const DEFAULT_MAX_RESPONSE_BYTES = 1_000_000;
 
@@ -56,25 +56,26 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
 
     const runtime = `node ${process.versions.node} (node:http2)`;
     if (input.requested === 'http/1.1') {
-      const alpn = await this.requestHttp1(target);
-      return { offered: ['http/1.1'], alpn, runtime };
+      const h1 = await this.requestHttp1(target);
+      return { offered: ['http/1.1'], alpn: h1.alpn, runtime, response: h1.response };
     }
     const h2 = target.protocol === 'https:'
       ? await this.tryTlsHttp2(target)
       : await this.tryCleartextHttp2(target);
     if (h2.available) {
-      return { offered: ['h2'], alpn: h2.alpn, runtime };
+      return { offered: ['h2'], alpn: h2.alpn, runtime, response: h2.response };
     }
     if (input.allowFallback) {
-      await this.requestHttp1(target);
+      const h1 = await this.requestHttp1(target);
+      return { offered: ['http/1.1'], alpn: h2.alpn, runtime, response: h1.response };
     }
     return { offered: ['http/1.1'], alpn: h2.alpn, runtime };
   }
 
-  private async tryCleartextHttp2(target: URL): Promise<{ available: boolean; alpn: string }> {
+  private async tryCleartextHttp2(target: URL): Promise<{ available: true; alpn: string; response: TransportProbeResponseEvidence } | { available: false; alpn: string }> {
     try {
-      await this.requestHttp2(target);
-      return { available: true, alpn: 'h2c' };
+      const response = await this.requestHttp2(target);
+      return { available: true, alpn: 'h2c', response };
     } catch (cause) {
       if (isProtocolUnavailable(cause)) {
         return { available: false, alpn: 'h2c-unavailable' };
@@ -83,7 +84,7 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
     }
   }
 
-  private async tryTlsHttp2(target: URL): Promise<{ available: boolean; alpn: string }> {
+  private async tryTlsHttp2(target: URL): Promise<{ available: true; alpn: string; response: TransportProbeResponseEvidence } | { available: false; alpn: string }> {
     const socket = await this.connectTls(target);
     const alpn = socket.alpnProtocol || 'none';
     if (socket.alpnProtocol !== 'h2') {
@@ -91,8 +92,8 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
       return { available: false, alpn };
     }
     try {
-      await this.requestHttp2(target, socket);
-      return { available: true, alpn };
+      const response = await this.requestHttp2(target, socket);
+      return { available: true, alpn, response };
     } catch (cause) {
       if (isProtocolUnavailable(cause)) {
         return { available: false, alpn };
@@ -125,25 +126,27 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
     });
   }
 
-  private async requestHttp2(target: URL, tlsSocket?: TLSSocket): Promise<void> {
+  private async requestHttp2(target: URL, tlsSocket?: TLSSocket): Promise<TransportProbeResponseEvidence> {
     const origin = target.origin;
     const session = http2.connect(origin, tlsSocket === undefined ? {} : { createConnection: () => tlsSocket });
-    await new Promise<void>((resolve, reject) => {
+    const startedAt = process.hrtime.bigint();
+    return await new Promise<TransportProbeResponseEvidence>((resolve, reject) => {
       let settled = false;
       let responseStarted = false;
+      let statusCode: number | undefined;
       let total = 0;
       let stream: ReturnType<ClientHttp2Session['request']> | undefined;
       const timer = setTimeout(() => finish(new Error(`HTTP/2 request timeout after ${this.timeoutMs}ms`)), this.timeoutMs);
-      const finish = (cause?: unknown): void => {
+      const finish = (cause?: unknown, response?: TransportProbeResponseEvidence): void => {
         if (settled) {
           return;
         }
         settled = true;
         clearTimeout(timer);
-        if (cause === undefined) {
-          resolve();
+        if (cause === undefined && response !== undefined) {
+          resolve(response);
         } else {
-          reject(cause);
+          reject(cause ?? new Error('HTTP/2 response evidence was unavailable'));
         }
         stream?.close();
         session.destroy();
@@ -161,8 +164,14 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
           ':authority': target.host,
           ':path': `${target.pathname}${target.search}`,
         });
-        stream.once('response', () => {
+        stream.once('response', (headers) => {
+          const measuredStatus = headers[':status'];
+          if (typeof measuredStatus !== 'number') {
+            finish(new Error('HTTP/2 response did not include a numeric :status'));
+            return;
+          }
           responseStarted = true;
+          statusCode = measuredStatus;
         });
         stream.on('data', (chunk: Buffer) => {
           total += chunk.length;
@@ -175,7 +184,25 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
             finish(new Http2UnavailableError('HTTP/2 stream ended before response headers'));
             return;
           }
-          finish();
+          if (statusCode === undefined) {
+            finish(new Error('HTTP/2 response status was unavailable'));
+            return;
+          }
+          const settings = session.remoteSettings;
+          const streamId = stream?.id;
+          finish(undefined, {
+            statusCode,
+            elapsedMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
+            ...(typeof streamId === 'number' ? { streamId } : {}),
+            remoteSettings: {
+              ...(settings.headerTableSize === undefined ? {} : { headerTableSize: settings.headerTableSize }),
+              ...(settings.enablePush === undefined ? {} : { enablePush: settings.enablePush }),
+              ...(settings.initialWindowSize === undefined ? {} : { initialWindowSize: settings.initialWindowSize }),
+              ...(settings.maxFrameSize === undefined ? {} : { maxFrameSize: settings.maxFrameSize }),
+              ...(settings.maxConcurrentStreams === undefined ? {} : { maxConcurrentStreams: settings.maxConcurrentStreams }),
+              ...(settings.maxHeaderListSize === undefined ? {} : { maxHeaderListSize: settings.maxHeaderListSize }),
+            },
+          });
         });
         stream.once('error', finish);
         stream.end();
@@ -185,9 +212,10 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
     });
   }
 
-  private async requestHttp1(target: URL): Promise<string> {
+  private async requestHttp1(target: URL): Promise<{ readonly alpn: string; readonly response: TransportProbeResponseEvidence }> {
     const client = target.protocol === 'https:' ? https : http;
-    return await new Promise<string>((resolve, reject) => {
+    const startedAt = process.hrtime.bigint();
+    return await new Promise<{ readonly alpn: string; readonly response: TransportProbeResponseEvidence }>((resolve, reject) => {
       const request = client.request(target, {
         method: 'GET',
         headers: { Connection: 'close' },
@@ -195,6 +223,11 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
         ...(target.protocol === 'https:' && this.trustedCa !== undefined ? { ca: this.trustedCa } : {}),
       }, (response) => {
         let total = 0;
+        const statusCode = response.statusCode;
+        if (statusCode === undefined) {
+          request.destroy(new Error('HTTP/1.1 response status was unavailable'));
+          return;
+        }
         const alpn = target.protocol === 'https:'
           ? (response.socket as TLSSocket).alpnProtocol || 'none'
           : 'http/1.1 (cleartext)';
@@ -204,7 +237,13 @@ export class NodeHttp2Transport implements AdvancedTransportPort {
             request.destroy(new Error(`HTTP/1.1 response exceeds ${this.maxResponseBytes} bytes`));
           }
         });
-        response.once('end', () => resolve(alpn));
+        response.once('end', () => resolve({
+          alpn,
+          response: {
+            statusCode,
+            elapsedMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
+          },
+        }));
         response.once('error', reject);
       });
       request.setTimeout(this.timeoutMs, () => request.destroy(new Error(`HTTP/1.1 request timeout after ${this.timeoutMs}ms`)));

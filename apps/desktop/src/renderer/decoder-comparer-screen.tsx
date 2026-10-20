@@ -23,6 +23,23 @@ interface CompareResult {
   readonly provenance: { leftHash: string; rightHash: string; options: { normalizeNewlines?: boolean } };
 }
 
+interface TransportResult {
+  readonly protocol: string;
+  readonly downgraded: boolean;
+  readonly alpn: string;
+  readonly runtime: string;
+  readonly response?: {
+    readonly statusCode: number;
+    readonly elapsedMs: number;
+    readonly streamId?: number;
+    readonly remoteSettings?: {
+      readonly maxFrameSize?: number;
+      readonly maxConcurrentStreams?: number;
+      readonly initialWindowSize?: number;
+    };
+  };
+}
+
 const useStyles = makeStyles({
   section: { display: 'flex', flexDirection: 'column', gap: '4px' },
   muted: { color: tokens.colorNeutralForeground3 },
@@ -65,7 +82,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [transportTarget, setTransportTarget] = useState('http://fixture.target.test/api');
   const [transportRequested, setTransportRequested] = useState<'h2' | 'http/1.1'>('h2');
   const [transportAllowFallback, setTransportAllowFallback] = useState(true);
-  const [transportResult, setTransportResult] = useState<{ protocol: string; downgraded: boolean; alpn: string; runtime: string } | null>(null);
+  const [transportResult, setTransportResult] = useState<TransportResult | null>(null);
   const [headerText, setHeaderText] = useState(':method: GET\n:scheme: http\n:authority: fixture.target.test\n:path: /');
   const [headerResult, setHeaderResult] = useState('');
   const [domTarget, setDomTarget] = useState('http://fixture.target.test/app');
@@ -150,7 +167,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     setError('');
     setTransportResult(null);
     try {
-      setTransportResult(await callJson<{ protocol: string; downgraded: boolean; alpn: string; runtime: string }>(apiBase, '/api/tools/transport/negotiate', {
+      setTransportResult(await callJson<TransportResult>(apiBase, '/api/tools/transport/negotiate', {
         targetUrl: transportTarget,
         requested: transportRequested,
         allowFallback: transportAllowFallback,
@@ -419,6 +436,20 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       </Button>
       {transportResult !== null && (
         <Text role="status">{t('a10.transportResult', { protocol: transportResult.protocol, downgraded: transportResult.downgraded ? t('a10.transportDowngraded') : t('a10.transportNoDowngrade'), alpn: transportResult.alpn, runtime: transportResult.runtime })}</Text>
+      )}
+      {transportResult?.response !== undefined && (
+        <Text>{t('a10.transportResponse', {
+          status: transportResult.response.statusCode,
+          elapsed: transportResult.response.elapsedMs.toFixed(2),
+          stream: transportResult.response.streamId ?? '—',
+        })}</Text>
+      )}
+      {transportResult?.response?.remoteSettings !== undefined && (
+        <Text className={styles.muted}>{t('a10.transportSettings', {
+          maxFrame: transportResult.response.remoteSettings.maxFrameSize ?? '—',
+          maxConcurrent: transportResult.response.remoteSettings.maxConcurrentStreams ?? '—',
+          initialWindow: transportResult.response.remoteSettings.initialWindowSize ?? '—',
+        })}</Text>
       )}
       <Field label={t('a10.transportHeadersLabel')}>
         <Textarea value={headerText} onChange={(_, data) => setHeaderText(data.value)} rows={4} />

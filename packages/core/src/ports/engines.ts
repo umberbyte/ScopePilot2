@@ -135,6 +135,23 @@ export interface WebSocketTransportPort {
 }
 
 /** HTTP/2 capability probe. Scope is enforced by core before this port is called. */
+export interface TransportProbeResponseEvidence {
+  readonly statusCode: number;
+  /** Elapsed time through the bounded response body, measured by the adapter. */
+  readonly elapsedMs: number;
+  /** Present only for an HTTP/2 response stream. */
+  readonly streamId?: number;
+  /** Selected peer settings; absent for HTTP/1.1. */
+  readonly remoteSettings?: {
+    readonly headerTableSize?: number;
+    readonly enablePush?: boolean;
+    readonly initialWindowSize?: number;
+    readonly maxFrameSize?: number;
+    readonly maxConcurrentStreams?: number;
+    readonly maxHeaderListSize?: number;
+  };
+}
+
 export interface AdvancedTransportPort {
   probe(input: {
     readonly targetUrl: string;
@@ -148,6 +165,8 @@ export interface AdvancedTransportPort {
     /** TLS ALPN result, or an explicit h2c marker for cleartext HTTP/2. */
     readonly alpn: string;
     readonly runtime: string;
+    /** Present only when this probe sent a request and received a complete bounded response. */
+    readonly response?: TransportProbeResponseEvidence;
   }>;
 }
 

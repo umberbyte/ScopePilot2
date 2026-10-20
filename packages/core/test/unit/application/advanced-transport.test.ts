@@ -53,7 +53,17 @@ describe('advanced transport (service)', () => {
       advancedTransport: {
         async probe(input) {
           calls.push(input);
-          return { offered: ['h2'], alpn: 'h2', runtime: 'node-test-runtime' };
+          return {
+            offered: ['h2'],
+            alpn: 'h2',
+            runtime: 'node-test-runtime',
+            response: {
+              statusCode: 204,
+              elapsedMs: 12.5,
+              streamId: 1,
+              remoteSettings: { maxFrameSize: 16_384, maxConcurrentStreams: 100 },
+            },
+          };
         },
       },
     });
@@ -63,7 +73,18 @@ describe('advanced transport (service)', () => {
       allowFallback: false,
     });
     assert.deepEqual(calls, [{ targetUrl: 'http://fixture.target.test/real-h2?x=1', requested: 'h2', allowFallback: false }]);
-    assert.deepEqual(result, { protocol: 'h2', downgraded: false, alpn: 'h2', runtime: 'node-test-runtime' });
+    assert.deepEqual(result, {
+      protocol: 'h2',
+      downgraded: false,
+      alpn: 'h2',
+      runtime: 'node-test-runtime',
+      response: {
+        statusCode: 204,
+        elapsedMs: 12.5,
+        streamId: 1,
+        remoteSettings: { maxFrameSize: 16_384, maxConcurrentStreams: 100 },
+      },
+    });
   });
 
   test('header 検証は pseudo header 規則・CRLF・:authority scope を強制する', async () => {

@@ -89,5 +89,7 @@ channel・方向を指定したtext送信を公開する。binary送信等は文
   UI/APIで選択を保持し、結果はdowngradeではなく明示選択として記録する。
 - 所有TLS fixtureでは明示したlocalhost CAを信頼して実ALPNを検証する。通常経路の証明書検証は維持し、
   trust anchorなしの自己署名証明書は拒否する。
-- これはtransport capabilityの確認経路であり、任意のpseudo-header/body、stream metadata、settings/timing、
+- bounded responseのstatus・完了までの経過時間を返し、H2ではstream IDと選択したremote settingsも証跡化する。
+  response bodyやheader値はこの経路では保持しない。
+- これはtransport capabilityの確認経路であり、任意のpseudo-header/body、
   connect先・authority・SNIの独立編集、connection reuse、wire表現は未対応である。

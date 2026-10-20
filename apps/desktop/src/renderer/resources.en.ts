@@ -289,6 +289,8 @@ export const enStrings: Readonly<Record<StringKey, string>> = {
   'a10.transportFallbackLabel': 'Allow HTTP/1.1 fallback',
   'a10.transportNegotiate': 'Probe transport',
   'a10.transportResult': 'protocol {protocol} ({downgraded})・ALPN {alpn}・runtime {runtime}',
+  'a10.transportResponse': 'response status {status}・{elapsed} ms to completion・stream {stream}',
+  'a10.transportSettings': 'remote settings: max frame {maxFrame}・max concurrent {maxConcurrent}・initial window {initialWindow}',
   'a10.transportDowngraded': 'downgraded',
   'a10.transportNoDowngrade': 'no downgrade',
   'a10.transportHeadersLabel': 'headers (one per line・Name: Value)',
