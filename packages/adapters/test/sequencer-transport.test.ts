@@ -58,10 +58,10 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
       receivedCookies.push(request.headers.cookie);
       sequence += 1;
       response.writeHead(200, {
-        'Content-Type': 'text/plain',
+        'Content-Type': 'text/html; charset=utf-8',
         'Set-Cookie': `SEQ_TOKEN=cookie-secret-${sequence.toString(36)}; Path=/; HttpOnly`,
       });
-      response.end(`token=secret-token-${sequence.toString(36)}`);
+      response.end(`token=secret-token-${sequence.toString(36)}<input value="hidden-secret-${sequence.toString(36)}" name="csrf_token" type="hidden">`);
     });
     const base = await listen(server);
     try {
@@ -92,19 +92,22 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
         deniedOrigins: [],
         limits: { maxRequests: 100, maxPages: 10, maxDurationMinutes: 5 },
       });
-      const result = await service.runSequencerSession(OPERATOR, { targetUrl: `${base}/token`, samples: 30, tokenSource: 'cookie', tokenCookieName: 'SEQ_TOKEN' });
+      const result = await service.runSequencerSession(OPERATOR, { targetUrl: `${base}/token`, samples: 30, tokenSource: 'hidden', tokenFieldName: 'csrf_token' });
       assert.equal(result.verdict, 'assessed');
       assert.equal(result.sampleCount, 30);
       assert.equal(result.duplicates, 0);
       assert.equal(result.missing, 0);
-      assert.equal(result.tokenSource, 'cookie');
-      assert.equal(result.tokenCookieName, 'SEQ_TOKEN');
+      assert.equal(result.tokenSource, 'hidden');
+      assert.equal(result.tokenFieldName, 'csrf_token');
       assert.equal(JSON.stringify(result).includes('secret-token'), false, '結果に token 原文を出さない');
       assert.equal(JSON.stringify(result).includes('cookie-secret'), false, '結果に cookie token 原文を出さない');
+      assert.equal(JSON.stringify(result).includes('hidden-secret'), false, '結果に hidden token 原文を出さない');
       assert.equal(JSON.stringify(service.events()).includes('secret-token'), false, '監査に token 原文を出さない');
       assert.equal(JSON.stringify(service.events()).includes('cookie-secret'), false, '監査に cookie token 原文を出さない');
+      assert.equal(JSON.stringify(service.events()).includes('hidden-secret'), false, '監査に hidden token 原文を出さない');
       assert.equal(JSON.stringify(service.listSequencerSessions()).includes('secret-token'), false, '台帳に token 原文を出さない');
       assert.equal(JSON.stringify(service.listSequencerSessions()).includes('cookie-secret'), false, '台帳に cookie token 原文を出さない');
+      assert.equal(JSON.stringify(service.listSequencerSessions()).includes('hidden-secret'), false, '台帳に hidden token 原文を出さない');
       const traffic = service.listTraffic(100);
       assert.equal(traffic.total, 30);
       assert.ok(traffic.entries?.every((entry) => entry.source === 'sequencer' && entry.status === 200));

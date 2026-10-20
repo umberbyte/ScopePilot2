@@ -379,6 +379,14 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await expect(page.getByText('抽出元: 応答 Set-Cookie (SEQ_TOKEN)')).toBeVisible();
   await expect(page.getByText(/sample-[a-z0-9-]+/)).toHaveCount(0);
 
+  // 応答HTMLのhidden inputも指定field名で抽出できる。
+  await page.getByLabel('token 抽出元').selectOption('hidden');
+  await page.getByLabel('hidden input の token field 名').fill('csrf_token');
+  await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
+  await expect(page.getByText(/結果: assessed \(sample 40・重複 39・欠落 0\)/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('抽出元: 応答 HTML の hidden input (csrf_token)')).toBeVisible();
+  await expect(page.getByText(/sample-[a-z0-9-]+/)).toHaveCount(0);
+
   // OAST: token を発行し、callback を記録すると相関として数えられる (design/f13)。
   await page.getByRole('button', { name: 'OAST token を発行する' }).click();
   const tokenText = page.getByText(/token: oast-[0-9a-f]+/);

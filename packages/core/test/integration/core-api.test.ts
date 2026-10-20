@@ -1352,6 +1352,18 @@ describe('Core API server (node:http)', () => {
     assert.equal(cookieResult.sampleCount, 30);
     assert.equal(JSON.stringify(cookieResult).includes('sample-'), false, 'cookie token 原文は応答に出ない');
 
+    const hiddenRun = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30, tokenSource: 'hidden', tokenFieldName: 'csrf_token' }),
+    });
+    assert.equal(hiddenRun.status, 200);
+    const hiddenResult = (await hiddenRun.json()) as { tokenSource: string; tokenFieldName?: string; sampleCount: number };
+    assert.equal(hiddenResult.tokenSource, 'hidden');
+    assert.equal(hiddenResult.tokenFieldName, 'csrf_token');
+    assert.equal(hiddenResult.sampleCount, 30);
+    assert.equal(JSON.stringify(hiddenResult).includes('sample-'), false, 'hidden token 原文は応答に出ない');
+
     const invalidCookieName = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1365,6 +1377,13 @@ describe('Core API server (node:http)', () => {
       body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30, tokenSource: 'cookie', tokenCookieName: 123 }),
     });
     assert.equal(invalidCookieNameType.status, 400);
+
+    const invalidFieldName = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30, tokenSource: 'hidden', tokenFieldName: 'bad field' }),
+    });
+    assert.equal(invalidFieldName.status, 400);
 
     const invalidSource = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
       method: 'POST',
@@ -1387,9 +1406,10 @@ describe('Core API server (node:http)', () => {
     });
     assert.equal(missingRole.status, 400, 'role field is forwarded and requires a completed login session');
 
-    const list = (await (await fetch(`${baseUrl}/api/tools/sequencer/runs`)).json()) as { sessions: readonly { sessionId: string; tokenSource: string; tokenCookieName?: string }[] };
+    const list = (await (await fetch(`${baseUrl}/api/tools/sequencer/runs`)).json()) as { sessions: readonly { sessionId: string; tokenSource: string; tokenCookieName?: string; tokenFieldName?: string }[] };
     assert.ok(list.sessions.length >= 1);
     assert.ok(list.sessions.some((session) => session.tokenSource === 'cookie' && session.tokenCookieName === 'SEQ_TOKEN'));
+    assert.ok(list.sessions.some((session) => session.tokenSource === 'hidden' && session.tokenFieldName === 'csrf_token'));
     const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
     assert.match(eventsText, /SequencerSessionCompleted/);
   });

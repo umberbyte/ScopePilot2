@@ -1691,13 +1691,18 @@
                             "type": "string",
                             "enum": [
                               "body",
-                              "cookie"
+                              "cookie",
+                              "hidden"
                             ],
                             "description": "token の抽出元。token 値は保持しない"
                           },
                           "tokenCookieName": {
                             "type": "string",
                             "description": "tokenSource が cookie の場合に使用した応答 cookie 名"
+                          },
+                          "tokenFieldName": {
+                            "type": "string",
+                            "description": "tokenSource が hidden の場合に使用した input field 名"
                           },
                           "verdict": {
                             "type": "string",
@@ -1783,7 +1788,8 @@
                     "type": "string",
                     "enum": [
                       "body",
-                      "cookie"
+                      "cookie",
+                      "hidden"
                     ],
                     "default": "body",
                     "description": "token の抽出元"
@@ -1793,6 +1799,12 @@
                     "maxLength": 128,
                     "pattern": "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$",
                     "description": "tokenSource が cookie の場合に抽出する応答 cookie 名"
+                  },
+                  "tokenFieldName": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "pattern": "^[0-9A-Za-z_.:\\[\\]\\-]+$",
+                    "description": "tokenSource が hidden の場合に抽出する input field 名"
                   },
                   "role": {
                     "type": "string",
@@ -1822,13 +1834,18 @@
                       "type": "string",
                       "enum": [
                         "body",
-                        "cookie"
+                        "cookie",
+                        "hidden"
                       ],
                       "description": "token の抽出元。token 値は返さない"
                     },
                     "tokenCookieName": {
                       "type": "string",
                       "description": "tokenSource が cookie の場合に使用した応答 cookie 名"
+                    },
+                    "tokenFieldName": {
+                      "type": "string",
+                      "description": "tokenSource が hidden の場合に使用した input field 名"
                     },
                     "verdict": {
                       "type": "string",

@@ -23,22 +23,42 @@ export type SampleOutcome =
 
 export type SequencerExtractor =
   | { readonly source: 'body' }
-  | { readonly source: 'cookie'; readonly cookieName: string };
+  | { readonly source: 'cookie'; readonly cookieName: string }
+  | { readonly source: 'hidden'; readonly fieldName: string };
 
 const COOKIE_NAME_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const HIDDEN_FIELD_NAME = /^[0-9A-Za-z_.:[\]-]+$/;
+const MAX_HIDDEN_INPUTS = 1024;
+const MAX_INPUT_TAG_LENGTH = 8192;
 
 /** 抽出条件をboundedに固定し、未使用fieldを暗黙に無視しない。 */
-export function createSequencerExtractor(source: 'body' | 'cookie', cookieName?: string): SequencerExtractor {
+export function createSequencerExtractor(
+  source: 'body' | 'cookie' | 'hidden',
+  cookieName?: string,
+  fieldName?: string,
+): SequencerExtractor {
   if (source === 'body') {
-    if (cookieName !== undefined) {
-      throw domainError('ValidationFailed', 'tokenCookieName is only supported when tokenSource is cookie');
+    if (cookieName !== undefined || fieldName !== undefined) {
+      throw domainError('ValidationFailed', 'tokenCookieName and tokenFieldName are not supported when tokenSource is body');
     }
     return { source };
   }
-  if (cookieName === undefined || cookieName.length === 0 || cookieName.length > 128 || !COOKIE_NAME_TOKEN.test(cookieName)) {
-    throw domainError('ValidationFailed', 'tokenCookieName must be a valid cookie name of at most 128 characters');
+  if (source === 'cookie') {
+    if (fieldName !== undefined) {
+      throw domainError('ValidationFailed', 'tokenFieldName is only supported when tokenSource is hidden');
+    }
+    if (cookieName === undefined || cookieName.length === 0 || cookieName.length > 128 || !COOKIE_NAME_TOKEN.test(cookieName)) {
+      throw domainError('ValidationFailed', 'tokenCookieName must be a valid cookie name of at most 128 characters');
+    }
+    return { source, cookieName };
   }
-  return { source, cookieName };
+  if (cookieName !== undefined) {
+    throw domainError('ValidationFailed', 'tokenCookieName is only supported when tokenSource is cookie');
+  }
+  if (fieldName === undefined || fieldName.length === 0 || fieldName.length > 128 || !HIDDEN_FIELD_NAME.test(fieldName)) {
+    throw domainError('ValidationFailed', 'tokenFieldName must be a valid form field name of at most 128 characters');
+  }
+  return { source, fieldName };
 }
 
 /** token 欠落は missing outcome として数える (F07-UT-002)。 */
@@ -66,14 +86,94 @@ export function extractCookieToken(response: { readonly setCookieHeaders?: reado
   return { kind: 'missing', reason: `cookie '${cookieName}' not found in response` };
 }
 
+function decodeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&#x([0-9a-fA-F]{1,6});/g, (entity, hex: string) => {
+      const codePoint = Number.parseInt(hex, 16);
+      return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : entity;
+    })
+    .replace(/&#(\d{1,7});/g, (entity, decimal: string) => {
+      const codePoint = Number.parseInt(decimal, 10);
+      return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : entity;
+    })
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function inputTags(body: string): readonly string[] {
+  const tags: string[] = [];
+  const lower = body.toLowerCase();
+  let cursor = 0;
+  while (tags.length < MAX_HIDDEN_INPUTS) {
+    const start = lower.indexOf('<input', cursor);
+    if (start === -1) {
+      break;
+    }
+    const boundary = lower[start + 6];
+    if (boundary !== undefined && !/[\s/>]/.test(boundary)) {
+      cursor = start + 6;
+      continue;
+    }
+    let quote: '"' | "'" | undefined;
+    let end = start + 6;
+    for (; end < body.length && end - start <= MAX_INPUT_TAG_LENGTH; end += 1) {
+      const character = body[end];
+      if (quote === undefined && (character === '"' || character === "'")) {
+        quote = character;
+      } else if (character === quote) {
+        quote = undefined;
+      } else if (quote === undefined && character === '>') {
+        end += 1;
+        break;
+      }
+    }
+    if (end - start <= MAX_INPUT_TAG_LENGTH && body[end - 1] === '>') {
+      tags.push(body.slice(start, end));
+    }
+    cursor = Math.max(end, start + 6);
+  }
+  return tags;
+}
+
+/** hidden inputの属性順や引用符に依存せず、指定nameの値だけをboundedに読む。 */
+export function extractHiddenInputToken(response: { readonly body: string }, fieldName: string): SampleOutcome {
+  const attributePattern = /([^\s"'=<>`]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  for (const tag of inputTags(response.body)) {
+    const attributes = new Map<string, string>();
+    attributePattern.lastIndex = 6;
+    for (let match = attributePattern.exec(tag); match !== null; match = attributePattern.exec(tag)) {
+      const name = match[1]?.toLowerCase();
+      if (name !== undefined && !attributes.has(name)) {
+        attributes.set(name, match[2] ?? match[3] ?? match[4] ?? '');
+      }
+    }
+    if (attributes.get('type')?.toLowerCase() !== 'hidden' || attributes.get('name') !== fieldName) {
+      continue;
+    }
+    const value = attributes.get('value');
+    if (value !== undefined && value !== '') {
+      return { kind: 'collected', token: decodeHtmlAttribute(value) };
+    }
+  }
+  return { kind: 'missing', reason: `hidden field '${fieldName}' not found in response body` };
+}
+
 export function extractSequencerToken(
   response: { readonly body: string; readonly setCookieHeaders?: readonly string[] },
   extractor: SequencerExtractor,
   bodyPattern: RegExp,
 ): SampleOutcome {
-  return extractor.source === 'body'
-    ? extractToken(response, bodyPattern)
-    : extractCookieToken(response, extractor.cookieName);
+  switch (extractor.source) {
+    case 'body':
+      return extractToken(response, bodyPattern);
+    case 'cookie':
+      return extractCookieToken(response, extractor.cookieName);
+    case 'hidden':
+      return extractHiddenInputToken(response, extractor.fieldName);
+  }
 }
 
 export interface SampleCollection {

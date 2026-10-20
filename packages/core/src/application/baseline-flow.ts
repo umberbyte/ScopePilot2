@@ -256,7 +256,7 @@ export class BaselineFlowService {
   private readonly apiSpecImports: readonly { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[] = [];
 
   /** Sequencer session の台帳 (design/f07)。token 原文は保存しない (統計のみ)。 */
-  private readonly sequencerSessions: readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie'; tokenCookieName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] = [];
+  private readonly sequencerSessions: readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden'; tokenCookieName?: string; tokenFieldName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] = [];
 
   /** Repeater の draft 台帳 (design/f04)。tab 上限は domain (20)。 */
   private readonly repeaterDrafts = new DraftRegistry();
@@ -887,8 +887,8 @@ export class BaselineFlowService {
    */
   async runSequencerSession(
     operator: OperatorProfile,
-    input: { readonly targetUrl: string; readonly samples: number; readonly role?: string; readonly tokenSource?: 'body' | 'cookie'; readonly tokenCookieName?: string },
-  ): Promise<{ sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie'; tokenCookieName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }> {
+    input: { readonly targetUrl: string; readonly samples: number; readonly role?: string; readonly tokenSource?: 'body' | 'cookie' | 'hidden'; readonly tokenCookieName?: string; readonly tokenFieldName?: string },
+  ): Promise<{ sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden'; tokenCookieName?: string; tokenFieldName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -906,7 +906,7 @@ export class BaselineFlowService {
     }
     const plan = createSamplePlan(input.samples);
     const collector = new SampleCollector();
-    const extractor = createSequencerExtractor(input.tokenSource ?? 'body', input.tokenCookieName);
+    const extractor = createSequencerExtractor(input.tokenSource ?? 'body', input.tokenCookieName, input.tokenFieldName);
     const pattern = /token=([A-Za-z0-9_-]+)/;
     if (this.deps.sequencerTransport === undefined) {
       for (let index = 0; index < plan.target; index += 1) {
@@ -918,12 +918,14 @@ export class BaselineFlowService {
         } else {
           token = `sample-${index.toString(36)}-${(index * 7 + 3).toString(36)}`;
         }
-        const response = extractor.source === 'body'
-          ? { body: token === undefined ? 'no token in this response' : `token=${token}` }
-          : {
+        const response = extractor.source === 'cookie'
+          ? {
               body: 'cookie token response',
               ...(token === undefined ? {} : { setCookieHeaders: [`${extractor.cookieName}=${token}; Path=/; HttpOnly`] }),
-            };
+            }
+          : extractor.source === 'hidden'
+            ? { body: token === undefined ? '<form></form>' : `<form><input value="${token}" name="${extractor.fieldName}" type="hidden"></form>` }
+            : { body: token === undefined ? 'no token in this response' : `token=${token}` };
         collector.record(extractSequencerToken(response, extractor, pattern));
       }
     } else {
@@ -958,6 +960,7 @@ export class BaselineFlowService {
       targetUrl: canonical,
       tokenSource: extractor.source,
       ...(extractor.source === 'cookie' ? { tokenCookieName: extractor.cookieName } : {}),
+      ...(extractor.source === 'hidden' ? { tokenFieldName: extractor.fieldName } : {}),
       verdict,
       ...projection,
       ...(verdict === 'assessed' ? { shannonEntropyBitsPerByte: assessment.entropy.shannonEntropyBitsPerByte, distinctByteValues: assessment.entropy.distinctByteValues } : { minimum: assessment.minimum }),
@@ -979,7 +982,7 @@ export class BaselineFlowService {
     return result;
   }
 
-  listSequencerSessions(): readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie'; tokenCookieName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] {
+  listSequencerSessions(): readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden'; tokenCookieName?: string; tokenFieldName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] {
     return [...this.sequencerSessions];
   }
 

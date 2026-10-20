@@ -6,6 +6,7 @@ import {
   createSamplePlan,
   createSequencerExtractor,
   extractCookieToken,
+  extractHiddenInputToken,
   extractSequencerToken,
   extractToken,
   reportProjection,
@@ -52,7 +53,25 @@ describe('Sequencer', () => {
     assert.equal(extractCookieToken({ setCookieHeaders: ['OTHER=value'] }, 'SEQ_TOKEN').kind, 'missing');
     assert.throws(() => createSequencerExtractor('cookie', 'bad name'), /valid cookie name/);
     assert.throws(() => createSequencerExtractor('cookie'), /valid cookie name/);
-    assert.throws(() => createSequencerExtractor('body', 'unused'), /only supported/);
+    assert.throws(() => createSequencerExtractor('body', 'unused'), /not supported/);
+  });
+
+  test('[F07-UT-009] hidden input は属性順に依存せず指定fieldのHTML decode済み値だけを抽出する', () => {
+    const extractor = createSequencerExtractor('hidden', undefined, 'csrf_token');
+    const response = {
+      body: [
+        '<input type="hidden" name="other" value="ignored">',
+        '<INPUT value="abc&gt;123&amp;x=1" NAME="csrf_token" TYPE="HIDDEN">',
+      ].join(''),
+    };
+    assert.deepEqual(extractHiddenInputToken(response, 'csrf_token'), { kind: 'collected', token: 'abc>123&x=1' });
+    assert.deepEqual(extractSequencerToken(response, extractor, /token=([a-z-]+)/), { kind: 'collected', token: 'abc>123&x=1' });
+    assert.equal(extractHiddenInputToken({ body: '<input type="text" name="csrf_token" value="ignored">' }, 'csrf_token').kind, 'missing');
+    assert.equal(extractHiddenInputToken({ body: '<input type="hidden" name="csrf_token" value="">' }, 'csrf_token').kind, 'missing');
+    assert.throws(() => createSequencerExtractor('hidden', undefined, 'bad field'), /valid form field name/);
+    assert.throws(() => createSequencerExtractor('hidden'), /valid form field name/);
+    assert.throws(() => createSequencerExtractor('hidden', 'unused', 'csrf_token'), /only supported/);
+    assert.throws(() => createSequencerExtractor('cookie', 'SEQ_TOKEN', 'unused'), /only supported/);
   });
 
   test('[F07-UT-003] duplicate token も sample として保持し重複数を数える', () => {
