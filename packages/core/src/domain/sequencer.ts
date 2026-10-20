@@ -223,21 +223,30 @@ export class SampleCollector {
 export interface EntropyResult {
   readonly shannonEntropyBitsPerByte: number;
   readonly distinctByteValues: number;
+  /** 0x00..0xff を上位 nibble ごとの 16 区間にまとめた出現数。token 原文は含まない。 */
+  readonly byteFrequencyBuckets: readonly number[];
 }
 
 /** 固定 bytes には決定的な低 entropy を返す (F07-UT-007 ではなく F07-UT-004)。 */
 export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
-  const bytes = tokens.join('');
+  const bytes = Buffer.from(tokens.join(''), 'utf8');
   const counts = new Map<number, number>();
-  for (const byte of Buffer.from(bytes, 'utf8')) {
+  const byteFrequencyBuckets = Array.from({ length: 16 }, () => 0);
+  for (const byte of bytes) {
     counts.set(byte, (counts.get(byte) ?? 0) + 1);
+    const bucket = Math.floor(byte / 16);
+    byteFrequencyBuckets[bucket] = (byteFrequencyBuckets[bucket] ?? 0) + 1;
   }
   let entropy = 0;
   for (const count of counts.values()) {
     const p = count / bytes.length;
     entropy -= p * Math.log2(p);
   }
-  return { shannonEntropyBitsPerByte: Number(entropy.toFixed(4)), distinctByteValues: counts.size };
+  return {
+    shannonEntropyBitsPerByte: Number(entropy.toFixed(4)),
+    distinctByteValues: counts.size,
+    byteFrequencyBuckets: Object.freeze(byteFrequencyBuckets),
+  };
 }
 
 export type SequencerAssessment =

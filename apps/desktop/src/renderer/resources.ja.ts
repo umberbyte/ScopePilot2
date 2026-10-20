@@ -154,6 +154,8 @@ export const jaStrings = {
   'a10.sequencerExtractorUsed': '抽出元: {source}',
   'a10.sequencerSessionApplied': 'session cookie 適用: {cookies}',
   'a10.sequencerEntropy': 'entropy {entropy} bits/byte・出現 byte 種 {distinct}',
+  'a10.sequencerByteChart': 'byte 出現頻度 (16区間・最大値に対する相対表示)',
+  'a10.sequencerByteBucket': 'byte {range}: {count} / 全 {total}',
   'a10.sequencerInsufficient': 'sample 不足のため断定しません (最小 {minimum} 件が必要)。',
   'a10.oastTitle': 'OAST (out-of-band 検出)',
   'a10.oastIntro':

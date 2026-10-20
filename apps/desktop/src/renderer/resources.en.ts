@@ -270,6 +270,8 @@ export const enStrings: Readonly<Record<StringKey, string>> = {
   'a10.sequencerExtractorUsed': 'Source: {source}',
   'a10.sequencerSessionApplied': 'session cookies applied: {cookies}',
   'a10.sequencerEntropy': 'entropy {entropy} bits/byte・distinct byte values {distinct}',
+  'a10.sequencerByteChart': 'Byte frequency (16 ranges, relative to the largest count)',
+  'a10.sequencerByteBucket': 'Bytes {range}: {count} of {total}',
   'a10.sequencerInsufficient': 'Insufficient samples; no verdict (minimum {minimum} required).',
   'a10.oastTitle': 'OAST (out-of-band detection)',
   'a10.oastIntro': 'Issues a unique token and waits (design/f13). Embed the token in requests and record callbacks from external interactions. Correlations only become finding candidates. The fixture provider supports http/dns only.',

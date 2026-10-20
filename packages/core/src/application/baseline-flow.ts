@@ -256,7 +256,7 @@ export class BaselineFlowService {
   private readonly apiSpecImports: readonly { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[] = [];
 
   /** Sequencer session の台帳 (design/f07)。token 原文は保存しない (統計のみ)。 */
-  private readonly sequencerSessions: readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] = [];
+  private readonly sequencerSessions: readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; byteFrequencyBuckets?: readonly number[]; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] = [];
 
   /** Repeater の draft 台帳 (design/f04)。tab 上限は domain (20)。 */
   private readonly repeaterDrafts = new DraftRegistry();
@@ -888,7 +888,7 @@ export class BaselineFlowService {
   async runSequencerSession(
     operator: OperatorProfile,
     input: { readonly targetUrl: string; readonly samples: number; readonly role?: string; readonly tokenSource?: 'body' | 'cookie' | 'hidden' | 'bearer'; readonly tokenCookieName?: string; readonly tokenFieldName?: string; readonly signal?: AbortSignal },
-  ): Promise<{ sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }> {
+  ): Promise<{ sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; byteFrequencyBuckets?: readonly number[]; minimum?: number; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -985,7 +985,11 @@ export class BaselineFlowService {
       ...(extractor.source === 'hidden' ? { tokenFieldName: extractor.fieldName } : {}),
       verdict,
       ...projection,
-      ...(verdict === 'assessed' ? { shannonEntropyBitsPerByte: assessment.entropy.shannonEntropyBitsPerByte, distinctByteValues: assessment.entropy.distinctByteValues } : { minimum: assessment.minimum }),
+      ...(verdict === 'assessed' ? {
+        shannonEntropyBitsPerByte: assessment.entropy.shannonEntropyBitsPerByte,
+        distinctByteValues: assessment.entropy.distinctByteValues,
+        byteFrequencyBuckets: assessment.entropy.byteFrequencyBuckets,
+      } : { minimum: assessment.minimum }),
       ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
       executedAt: this.deps.clock.now().toISOString(),
     };
@@ -1004,7 +1008,7 @@ export class BaselineFlowService {
     return result;
   }
 
-  listSequencerSessions(): readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] {
+  listSequencerSessions(): readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; byteFrequencyBuckets?: readonly number[]; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] {
     return [...this.sequencerSessions];
   }
 

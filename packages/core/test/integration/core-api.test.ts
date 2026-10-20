@@ -1335,10 +1335,12 @@ describe('Core API server (node:http)', () => {
       body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 40 }),
     });
     assert.equal(run.status, 200);
-    const result = (await run.json()) as { tokenSource: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number };
+    const result = (await run.json()) as { tokenSource: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; byteFrequencyBuckets?: readonly number[] };
     assert.equal(result.verdict, 'assessed');
     assert.equal(result.tokenSource, 'body');
     assert.equal(result.sampleCount, 40);
+    assert.equal(result.byteFrequencyBuckets?.length, 16);
+    assert.ok((result.byteFrequencyBuckets?.reduce((sum, count) => sum + count, 0) ?? 0) > 0);
     assert.equal(JSON.stringify(result).includes('token=sample-'), false, 'token 原文は応答に出ない');
 
     const cookieRun = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {

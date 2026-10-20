@@ -4,7 +4,7 @@
 
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { MessageBar, Button, Checkbox, Field, Input, makeStyles, Select, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { MessageBar, Button, Checkbox, Field, Input, makeStyles, ProgressBar, Select, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 import { t } from './resources.ts';
 
 const CODECS = ['base64', 'url', 'hex', 'html-entity', 'gzip', 'deflate-raw'] as const;
@@ -40,10 +40,27 @@ interface TransportResult {
   };
 }
 
+interface SequencerResult {
+  readonly tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer';
+  readonly tokenCookieName?: string;
+  readonly tokenFieldName?: string;
+  readonly verdict: string;
+  readonly sampleCount: number;
+  readonly duplicates: number;
+  readonly missing: number;
+  readonly shannonEntropyBitsPerByte?: number;
+  readonly distinctByteValues?: number;
+  readonly byteFrequencyBuckets?: readonly number[];
+  readonly minimum?: number;
+  readonly sessionCookieNames?: readonly string[];
+}
+
 const useStyles = makeStyles({
   section: { display: 'flex', flexDirection: 'column', gap: '4px' },
   muted: { color: tokens.colorNeutralForeground3 },
   chips: { display: 'flex', gap: '4px', flexWrap: 'wrap' },
+  byteChart: { display: 'grid', gridTemplateColumns: 'max-content minmax(120px, 1fr) max-content', gap: '4px 8px', alignItems: 'center', maxWidth: '640px' },
+  byteChartTitle: { gridColumn: '1 / -1' },
 });
 
 async function callJson<T>(apiBase: string, path: string, body?: unknown, method: 'GET' | 'POST' = 'POST', signal?: AbortSignal): Promise<T> {
@@ -74,7 +91,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [sequencerTokenCookieName, setSequencerTokenCookieName] = useState('SEQ_TOKEN');
   const [sequencerTokenFieldName, setSequencerTokenFieldName] = useState('csrf_token');
   const [sequencerRole, setSequencerRole] = useState('');
-  const [sequencerResult, setSequencerResult] = useState<{ tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] } | null>(null);
+  const [sequencerResult, setSequencerResult] = useState<SequencerResult | null>(null);
   const [sequencerRunning, setSequencerRunning] = useState(false);
   const [sequencerNotice, setSequencerNotice] = useState('');
   const sequencerAbort = useRef<AbortController | null>(null);
@@ -140,7 +157,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     setSequencerResult(null);
     try {
       const samples = Number(sequencerSamples);
-      setSequencerResult(await callJson<{ tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }>(apiBase, '/api/tools/sequencer/runs', {
+      setSequencerResult(await callJson<SequencerResult>(apiBase, '/api/tools/sequencer/runs', {
         targetUrl: sequencerTarget,
         samples,
         tokenSource: sequencerTokenSource,
@@ -463,6 +480,30 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
           {sequencerResult.shannonEntropyBitsPerByte !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerEntropy', { entropy: sequencerResult.shannonEntropyBitsPerByte, distinct: sequencerResult.distinctByteValues })}</Text>
           )}
+          {sequencerResult.byteFrequencyBuckets !== undefined && (() => {
+            const maximum = Math.max(1, ...sequencerResult.byteFrequencyBuckets);
+            const total = sequencerResult.byteFrequencyBuckets.reduce((sum, count) => sum + count, 0);
+            return (
+              <div className={styles.byteChart} role="group" aria-label={t('a10.sequencerByteChart')}>
+                <Text weight="semibold" className={styles.byteChartTitle}>{t('a10.sequencerByteChart')}</Text>
+                {sequencerResult.byteFrequencyBuckets.map((count, index) => {
+                  const start = (index * 16).toString(16).padStart(2, '0').toUpperCase();
+                  const end = (index * 16 + 15).toString(16).padStart(2, '0').toUpperCase();
+                  const range = `${start}–${end}`;
+                  return (
+                    <React.Fragment key={range}>
+                      <Text>{range}</Text>
+                      <ProgressBar
+                        value={count / maximum}
+                        aria-label={t('a10.sequencerByteBucket', { range, count, total })}
+                      />
+                      <Text>{count}</Text>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            );
+          })()}
           {sequencerResult.minimum !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerInsufficient', { minimum: sequencerResult.minimum })}</Text>
           )}

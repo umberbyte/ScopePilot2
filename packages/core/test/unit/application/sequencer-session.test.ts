@@ -17,8 +17,11 @@ describe('sequencer session (service)', () => {
     assert.equal(result.missing, 0);
     assert.ok((result.shannonEntropyBitsPerByte ?? 0) > 3, '変化する token は高い entropy');
     assert.ok((result.distinctByteValues ?? 0) > 10);
+    assert.equal(result.byteFrequencyBuckets?.length, 16);
+    assert.ok((result.byteFrequencyBuckets?.reduce((sum, count) => sum + count, 0) ?? 0) > 0);
     assert.equal(JSON.stringify(result).includes('sample-'), false, 'token 原文は応答に出ない');
     assert.equal(service.listSequencerSessions().length, 1);
+    assert.deepEqual(service.listSequencerSessions()[0]?.byteFrequencyBuckets, result.byteFrequencyBuckets);
 
     const hidden = await service.runSequencerSession(operator, {
       targetUrl: 'http://fixture.target.test/session-token',

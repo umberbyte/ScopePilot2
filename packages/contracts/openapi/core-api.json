@@ -1734,6 +1734,16 @@
                             "minimum": 0,
                             "description": "assessed 時のみ"
                           },
+                          "byteFrequencyBuckets": {
+                            "type": "array",
+                            "minItems": 16,
+                            "maxItems": 16,
+                            "description": "assessed 時のみ。0x00–0xFF を上位 nibble ごとの16区間にまとめた出現数。token 原文は含まない",
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
                           "minimum": {
                             "type": "integer",
                             "minimum": 1,
@@ -1878,6 +1888,16 @@
                       "type": "integer",
                       "minimum": 0,
                       "description": "assessed 時のみ"
+                    },
+                    "byteFrequencyBuckets": {
+                      "type": "array",
+                      "minItems": 16,
+                      "maxItems": 16,
+                      "description": "assessed 時のみ。0x00–0xFF を上位 nibble ごとの16区間にまとめた出現数。token 原文は含まない",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
                     },
                     "minimum": {
                       "type": "integer",

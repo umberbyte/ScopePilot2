@@ -110,6 +110,16 @@ describe('Sequencer', () => {
     assert.ok(mixed.shannonEntropyBitsPerByte > 0);
   });
 
+  test('[F07-UT-011] byte 頻度を固定16区間へ集約し、UTF-8のbyte数で entropy を計算する', () => {
+    const distribution = analyzeEntropy(['09AZaz']);
+    assert.deepEqual(distribution.byteFrequencyBuckets, [0, 0, 0, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert.equal(distribution.byteFrequencyBuckets.reduce((sum, count) => sum + count, 0), 6);
+
+    const utf8 = analyzeEntropy(['é']);
+    assert.equal(utf8.shannonEntropyBitsPerByte, 1, 'UTF-8 の2 byteを母数にする');
+    assert.equal(utf8.byteFrequencyBuckets.reduce((sum, count) => sum + count, 0), 2);
+  });
+
   test('[F07-UT-005] sample 不足は断定せず insufficient を返す', () => {
     const result = assess(Array.from({ length: 29 }, (_, i) => `t${i}`));
     assert.deepEqual(result, { verdict: 'insufficient', collected: 29, minimum: 30 });
