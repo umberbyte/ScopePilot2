@@ -73,6 +73,7 @@ gated('BaselineFlowService 縦断 (実 ZAP + 実 playwright)', () => {
           scanEngine: zap as ActiveScanEnginePort,
           capabilities,
           runtimeBundleHash: 'it-real-engines',
+        scanAlertSettleMs: 4_000,
         });
 
         // 1. 案件と認可。

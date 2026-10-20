@@ -29,6 +29,8 @@ import { loginDvwaDirect, loginDvwaViaZapProxy } from './dvwa-login.ts';
  *   SCOPEPILOT_ZAP_BASE_URL=http://127.0.0.1:8090 \
  *   SCOPEPILOT_ZAP_API_KEY=... SCOPEPILOT_DVWA_USERNAME=... SCOPEPILOT_DVWA_PASSWORD=... \
  *   npm test -w @scopepilot2/adapters
+ * ※実 ZAP を共有する gated test は並列実行すると newSession が他 test の
+ * scan/alert/login jar を消し合うため必ず直列で: npm run test:gated -w @scopepilot2/adapters
  *
  * 認証付き test では login 後に security.php で Low へ変更してから診断する
  * (利用者運用手順どおり。Low でなければ診断が通らない)。
@@ -81,6 +83,7 @@ gated('DVWA ワークフロー確認 (探索・診断連携・結果取込・報
           scanEngine: zap as ActiveScanEnginePort,
           capabilities,
           runtimeBundleHash: 'acceptance-dvwa',
+        scanAlertSettleMs: 4_000,
         });
 
         // 1. 案件と認可 (許可 Origin は DVWA の origin のみ)。
@@ -227,6 +230,7 @@ gatedAuthenticated('DVWA 認証付きワークフロー確認 (login → securit
           scanEngine: zap as ActiveScanEnginePort,
           capabilities,
           runtimeBundleHash: 'acceptance-dvwa-auth',
+        scanAlertSettleMs: 4_000,
         });
         service.createCase(ACCEPTANCE_OPERATOR, {
           name: 'dvwa-acceptance-auth',
@@ -348,6 +352,7 @@ gatedAuthenticated('DVWA 製品経路 login (f09) → role session 探索', () =
         scanEngine: zap as ActiveScanEnginePort,
         capabilities,
         runtimeBundleHash: 'acceptance-dvwa-login',
+        scanAlertSettleMs: 4_000,
         loginExecutor,
       });
       service.createCase(ACCEPTANCE_OPERATOR, {

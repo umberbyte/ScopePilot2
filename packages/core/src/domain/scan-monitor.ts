@@ -19,12 +19,15 @@ export class ScanMonitor {
   private readonly engineRunId: string;
   private readonly maxIterations: number;
   private readonly pollIntervalMs: number;
+  /** 完了後も alert が遅れて現れる engine 向けの落ち着き待ち (実 ZAP の pscan 遅延)。 */
+  private readonly alertSettleMs: number;
 
-  constructor(engine: ActiveScanEnginePort, engineRunId: string, maxIterations = 1000, pollIntervalMs = 2_000) {
+  constructor(engine: ActiveScanEnginePort, engineRunId: string, maxIterations = 1000, pollIntervalMs = 2_000, alertSettleMs = 0) {
     this.engine = engine;
     this.engineRunId = engineRunId;
     this.maxIterations = maxIterations;
     this.pollIntervalMs = pollIntervalMs;
+    this.alertSettleMs = alertSettleMs;
   }
 
   /** 停止要求は冪等。engine.stop を呼ぶのは初回だけ。 */
@@ -72,6 +75,21 @@ export class ScanMonitor {
     if (status === 'running') {
       status = 'failed';
       failureReason = failureReason ?? 'scan monitor reached the poll iteration limit';
+    }
+    // 実 engine では完了直後の alert 生成が非同期に遅れることがある (ZAP の passive
+    // scan)。落ち着き待ちを指定された場合、完了後も alert 追加分を短く poll する。
+    if (this.alertSettleMs > 0) {
+      const settleDeadline = Date.now() + this.alertSettleMs;
+      let quiet = 0;
+      while (Date.now() < settleDeadline && quiet < 2) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 500);
+        });
+        const late = await this.engine.alerts(this.engineRunId, cursor);
+        cursor = late.nextCursor;
+        alerts.push(...late.alerts);
+        quiet = late.alerts.length === 0 ? quiet + 1 : 0;
+      }
     }
     return {
       status: status === 'failed' ? 'failed' : 'complete',

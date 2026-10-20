@@ -11,6 +11,7 @@
     "@scopepilot2/simulation": "*"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.ts\""
+    "test": "node --test \"test/**/*.test.ts\"",
+    "test:gated": "node --test --test-concurrency=1 \"test/*.integration.test.ts\""
   }
 }

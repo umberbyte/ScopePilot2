@@ -121,6 +121,9 @@ export interface BaselineFlowDeps {
   readonly runSink?: import('../ports/infra.ts').RunSinkPort;
   /** 案件記録の永続化 (任意)。作成・scope 更新時に保存する (runs FK の参照先)。 */
   readonly caseSink?: { save(record: CaseRecord): void };
+  /** 実 engine 診断の完了後、alert 生成の遅れを待つ時間 (ms)。fixture では 0。 */
+  readonly scanAlertSettleMs?: number;
+
   /** login 実行器 (design/f09)。未構成の service では runLogin が ValidationFailed。 */
   readonly loginExecutor?: LoginExecutorPort;
 }
@@ -1905,7 +1908,7 @@ export class BaselineFlowService {
     };
 
     const engineRunId = await this.deps.scanEngine.start(scanRequest);
-    const monitor = new ScanMonitor(this.deps.scanEngine, engineRunId, MAX_POLL_ITERATIONS);
+    const monitor = new ScanMonitor(this.deps.scanEngine, engineRunId, MAX_POLL_ITERATIONS, 2_000, this.deps.scanAlertSettleMs ?? 0);
     const monitored = await monitor.collectUntilDone();
     const collectedAlerts = monitored.alerts;
 

@@ -10,6 +10,8 @@ import { startVulnerableTarget, type VulnerableTarget } from './vulnerable-targe
  *   SCOPEPILOT_ZAP_BASE_URL=http://127.0.0.1:8090 \
  *   SCOPEPILOT_ZAP_API_KEY=scopepilot2-test \
  *   npm test -w @scopepilot2/adapters
+ * ※実 ZAP を共有する gated test は並列実行すると newSession が他 test の
+ * scan/alert/login jar を消し合うため必ず直列で: npm run test:gated -w @scopepilot2/adapters
  *
  * 検証するのは adapter の入出力写像のみ (design/22: engine の内部挙動は制御しない)。
  * 対象は所有している vulnerable-target (127.0.0.1) だけ。
@@ -28,6 +30,11 @@ gated('ZAP adapter (実 ZAP 結合)', () => {
         // 版の確認 (能力表 source=measured の前提)。
         const version = await adapter.resolvedVersion();
         assert.match(version, /^zap \d+\.\d+/);
+
+        // 他の gated test と同じく、過去 run の site・alert を混入させないため
+        // session を作り直してから診断する (work log 2026-10-19 の流儀)。
+        const apiKey = process.env['SCOPEPILOT_ZAP_API_KEY'] ?? '';
+        await fetch(`${zapBaseUrl}/JSON/core/action/newSession/?apikey=${apiKey}`);
 
         // start: accessUrl → ascan。URL Does not Exist が出ないこと自体が検証対象。
         const scanId = await adapter.start({
@@ -55,8 +62,18 @@ gated('ZAP adapter (実 ZAP 結合)', () => {
         assert.ok(lastProgress.progress >= 0 && lastProgress.progress <= 100);
 
         // alerts: paging して打切り。passive scan (header なし) で必ず何かしら出る。
+        // pscan の alert 生成は非同期で遅れることがあるため、空なら最大 10 秒待つ。
         const seen: string[] = [];
         let cursor = 0;
+        for (let settle = 0; settle < 10; settle += 1) {
+          const probe = await adapter.alerts(scanId, cursor);
+          if (probe.alerts.length > 0 || settle === 9) {
+            break;
+          }
+          await new Promise((resolve) => {
+            setTimeout(resolve, 1_000);
+          });
+        }
         for (let page = 0; page < 10; page += 1) {
           const result = await adapter.alerts(scanId, cursor);
           for (const alert of result.alerts) {

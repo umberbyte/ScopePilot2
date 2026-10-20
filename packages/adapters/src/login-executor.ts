@@ -28,7 +28,7 @@ export interface StubLoginPage {
 }
 
 export interface StubLoginBrowser {
-  newPage(options: { readonly proxyServer?: string }): Promise<StubLoginPage>;
+  newPage(options: { readonly proxyServer?: string; readonly bypass?: string }): Promise<StubLoginPage>;
   close(): Promise<void>;
 }
 
@@ -103,7 +103,10 @@ export class PlaywrightLoginExecutor implements LoginExecutorPort {
   async execute(input: LoginExecutionInput): Promise<LoginExecutionResult> {
     const browser = await this.ensureBrowser();
     const page = await browser.newPage(
-      input.proxyServer === undefined ? {} : { proxyServer: input.proxyServer },
+      // Chromium は既定で localhost を proxy bypass する。loopback の所有ターゲットも
+      // proxy 経由にするため bypass 除外の特殊規則 <-loopback> を渡す (DVWA 等
+      // 非 loopback 対象では影響しない)。
+      input.proxyServer === undefined ? {} : { proxyServer: input.proxyServer, bypass: '<-loopback>' },
     );
     try {
       const variables = new Map<string, string>();

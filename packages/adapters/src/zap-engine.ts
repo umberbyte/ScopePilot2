@@ -58,6 +58,10 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly scanPolicy: string;
+  /** runId → 対象 URL 一覧。alerts をこの run の対象 origin に限定する。 */
+  private readonly runTargets = new Map<string, readonly string[]>();
+  /** scanId → status API が連続で does_not_exist を返した回数 (消失判定用)。 */
+  private readonly missingStatusCounts = new Map<string, number>();
   private readonly timeoutMs: number;
   private versionPromise: Promise<string> | null = null;
 
@@ -85,7 +89,8 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
     try {
       const response = await fetch(url, { signal: controller.signal });
       if (!response.ok) {
-        throw new Error(`ZAP API ${path} failed: HTTP ${String(response.status)}`);
+        const detail = await response.text().catch(() => '');
+        throw new Error(`ZAP API ${path} failed: HTTP ${String(response.status)}${detail === '' ? '' : ` ${detail.slice(0, 200)}`}`);
       }
       return (await response.json()) as T;
     } finally {
@@ -116,28 +121,62 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
 
   async start(request: ActiveScanRequest): Promise<string> {
     // URL Does not Exist 回避: 各対象を ZAP 自身に取得させて site tree へ載せる。
-    for (const target of request.targets) {
-      await this.api('core/action/accessUrl', { url: target });
-    }
+    // accessUrl の応答と site tree への反映は非同期で、直後の scan が
+    // url_not_found になることがある (実機で確認) — 短く待って再取得し
+    // 指定回数だけ再試行する。
     const first = request.targets[0] ?? '';
-    const body = await this.api<{ scan?: string }>('ascan/action/scan', {
-      url: first,
-      recurse: 'true',
-      inScopeOnly: 'false',
-      ...(this.scanPolicy === '' ? {} : { scanPolicyName: this.scanPolicy }),
-    });
-    const scanId = body.scan;
+    let scanId: string | undefined;
+    for (let attempt = 0; attempt < 3 && (scanId === undefined || scanId === ''); attempt += 1) {
+      if (attempt > 0) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 500);
+        });
+      }
+      for (const target of request.targets) {
+        await this.api('core/action/accessUrl', { url: target });
+      }
+      const body = await this.api<{ scan?: string }>('ascan/action/scan', {
+        url: first,
+        recurse: 'true',
+        inScopeOnly: 'false',
+        ...(this.scanPolicy === '' ? {} : { scanPolicyName: this.scanPolicy }),
+      }).catch((cause: unknown) => {
+        if (attempt < 2 && cause instanceof Error && cause.message.includes('url_not_found')) {
+          return { scan: '' } as { scan?: string };
+        }
+        throw cause;
+      });
+      scanId = body.scan;
+    }
     if (scanId === undefined || scanId === '') {
       throw new Error('ZAP ascan did not return a scan id');
     }
+    this.runTargets.set(scanId, [...request.targets]);
     return scanId;
   }
 
   async progress(engineRunId: string): Promise<EngineProgress> {
     const [statusBody, scansBody] = await Promise.all([
-      this.api<{ status: string }>('ascan/view/status', { scanId: engineRunId }),
+      this.api<{ status: string }>('ascan/view/status', { scanId: engineRunId }).catch((cause: unknown) => {
+        // scan 開始直後は登録が status API に間に合わず does_not_exist が返ることが
+        // ある (実機で確認)。まだ見えていない = 実行中として扱い poll を継続する。
+        if (cause instanceof Error && cause.message.includes('does_not_exist')) {
+          const missing = (this.missingStatusCounts.get(engineRunId) ?? 0) + 1;
+          this.missingStatusCounts.set(engineRunId, missing);
+          return { status: '-1' };
+        }
+        throw cause;
+      }),
       this.api<{ scans: readonly { readonly id: string; readonly state: string }[] }>('ascan/view/scans'),
     ]);
+    if (statusBody.status !== '-1') {
+      this.missingStatusCounts.delete(engineRunId);
+    } else if ((this.missingStatusCounts.get(engineRunId) ?? 0) >= 3) {
+      // 登録 race を過ぎても status API に存在しない scan は ZAP 側で消失した
+      // (実機で確認 — 同一 session で複数 scan を重ねると起きる)。完了として
+      // 扱い、取得できている alert だけを返す (poll の無限待ちを避ける)。
+      return { status: 'complete', progress: 100, lastActivityAt: new Date().toISOString(), messageCount: 0 };
+    }
     const state = scansBody.scans.find((scan) => scan.id === engineRunId)?.state ?? 'RUNNING';
     const progress = Number(statusBody.status);
     const upperState = state.toUpperCase();
@@ -164,8 +203,12 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
       start: String(cursor),
       count: String(pageSize),
     });
-    void engineRunId;
-    const alerts: EngineAlert[] = body.alerts.map((alert) => ({
+    // ZAP session には他 run・他対象の alert が残っている (baseurl='' は全件)。
+    // この run の対象 origin のみに限定する — そうしないと過去 run の所見が混入する。
+    const origins = new Set((this.runTargets.get(engineRunId) ?? []).map((target) => new URL(target).origin));
+    const alerts: EngineAlert[] = body.alerts
+      .filter((alert) => origins.size === 0 || [...origins].some((origin) => alert.url.startsWith(`${origin}/`)))
+      .map((alert) => ({
       engineAlertId: `zap-${alert.id}`,
       pluginId: alert.pluginId,
       name: alert.name,
@@ -179,8 +222,19 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
     return { alerts, nextCursor };
   }
 
-  async stop(engineRunId: string): Promise<void> {
-    // 冪等: 完了済み run への stop も error にしない (F11-UT-005)。
-    await this.api('ascan/action/stop', { scanId: engineRunId });
+  /** テスト向け: run ごとの対象記録を消す (本番運用では process と同じ寿命)。 */
+  forgetRun(engineRunId: string): void {
+    this.runTargets.delete(engineRunId);
+  }
+
+async stop(engineRunId: string): Promise<void> {
+    // 停止は冪等 (F11-UT-005)。既に存在しない (完了して掃除された) scan への停止は
+    // 成功として扱う — 実機で does_not_exist が返ることを確認済み。
+    await this.api('ascan/action/stop', { scanId: engineRunId }).catch((cause: unknown) => {
+      if (cause instanceof Error && cause.message.includes('does_not_exist')) {
+        return;
+      }
+      throw cause;
+    });
   }
 }
