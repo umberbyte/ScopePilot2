@@ -5,6 +5,7 @@
  */
 import * as http from 'node:http';
 import * as https from 'node:https';
+import { setTimeout as delay } from 'node:timers/promises';
 import { RateGovernor, type SequencerTransportPort, type SequencerTransportResponse } from '@scopepilot2/core';
 
 const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -36,19 +37,20 @@ export class NodeSequencerTransport implements SequencerTransportPort {
     }
     const governor = new RateGovernor(this.requestsPerSecond);
     for (let index = 0; index < input.samples; index += 1) {
+      input.signal?.throwIfAborted();
       const waitMs = governor.tryAcquire(Date.now());
       if (waitMs > 0) {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, waitMs);
-        });
+        await delay(waitMs, undefined, input.signal === undefined ? undefined : { signal: input.signal });
       }
-      input.onResponse(await this.requestOnce(target, input.sessionCookies));
+      input.signal?.throwIfAborted();
+      input.onResponse(await this.requestOnce(target, input.sessionCookies, input.signal));
     }
   }
 
   private async requestOnce(
     target: URL,
     sessionCookies: Parameters<SequencerTransportPort['collect']>[0]['sessionCookies'],
+    signal: AbortSignal | undefined,
   ): Promise<SequencerTransportResponse> {
     const requestUrl = target.toString();
     const client = target.protocol === 'https:' ? https : http;
@@ -64,6 +66,7 @@ export class NodeSequencerTransport implements SequencerTransportPort {
           path: `${target.pathname}${target.search}`,
           headers: { Host: target.host, ...(cookieHeader === undefined ? {} : { Cookie: cookieHeader }) },
           setHost: false,
+          ...(signal === undefined ? {} : { signal }),
         },
         (response) => {
           const chunks: Buffer[] = [];

@@ -126,4 +126,38 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
       await close(server);
     }
   });
+
+  test('cancel は進行中の収集を止め、次のHTTP requestを送らない', async () => {
+    let requests = 0;
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const server = createServer(() => {
+      requests += 1;
+      markStarted?.();
+      // 応答待ちのままにし、AbortSignalが進行中requestを破棄することを確認する。
+    });
+    const base = await listen(server);
+    const cancellation = new AbortController();
+    try {
+      const transport = new NodeSequencerTransport({ timeoutMs: 5_000, requestsPerSecond: 1000 });
+      const pending = transport.collect({
+        targetUrl: `${base}/token`,
+        samples: 30,
+        signal: cancellation.signal,
+        onResponse: () => assert.fail('cancelled in-flight request must not produce a response'),
+      });
+      await started;
+      cancellation.abort();
+      await assert.rejects(
+        pending,
+        (error: unknown) => {
+          assert.equal((error as Error).name, 'AbortError');
+          return true;
+        },
+      );
+      assert.equal(requests, 1);
+    } finally {
+      await close(server);
+    }
+  });
 });

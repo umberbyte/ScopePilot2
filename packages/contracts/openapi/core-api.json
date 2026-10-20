@@ -1764,7 +1764,7 @@
       },
       "post": {
         "operationId": "runSequencerSession",
-        "summary": "token sample を収集して乱数性の統計を返す (design/f07)。token 原文は応答に出さない",
+        "summary": "token sample を収集して乱数性の統計を返す (design/f07)。token 原文は応答に出さず、client切断時は収集をcancelする",
         "requestBody": {
           "required": true,
           "content": {

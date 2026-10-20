@@ -394,6 +394,20 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await expect(page.getByText('抽出元: 応答 Authorization の Bearer token')).toBeVisible();
   await expect(page.getByText(/sample-[a-z0-9-]+/)).toHaveCount(0);
 
+  // 長時間収集は画面から停止でき、cancel後の完了結果を表示しない。
+  await page.route('**/api/tools/sequencer/runs', async (route) => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ tokenSource: 'bearer', verdict: 'assessed', sampleCount: 40, duplicates: 39, missing: 0 }),
+    }).catch(() => undefined);
+  });
+  await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
+  await expect(page.getByRole('button', { name: '収集を停止する' })).toBeVisible();
+  await page.getByRole('button', { name: '収集を停止する' }).click();
+  await expect(page.getByText('収集を停止しました。停止後の追加 request は送信していません。')).toBeVisible();
+
   // OAST: token を発行し、callback を記録すると相関として数えられる (design/f13)。
   await page.getByRole('button', { name: 'OAST token を発行する' }).click();
   const tokenText = page.getByText(/token: oast-[0-9a-f]+/);

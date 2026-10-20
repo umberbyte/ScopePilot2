@@ -259,6 +259,14 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       if (body === undefined) {
         return;
       }
+      const cancellation = new AbortController();
+      const cancelOnDisconnect = (): void => {
+        if (!response.writableEnded) {
+          cancellation.abort();
+        }
+      };
+      request.once('aborted', cancelOnDisconnect);
+      response.once('close', cancelOnDisconnect);
       try {
         const tokenSource = body.tokenSource ?? 'body';
         if (tokenSource !== 'body' && tokenSource !== 'cookie' && tokenSource !== 'hidden' && tokenSource !== 'bearer') {
@@ -271,10 +279,17 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           tokenSource,
           ...(body.tokenCookieName === undefined ? {} : { tokenCookieName: stringField(body, 'tokenCookieName') }),
           ...(body.tokenFieldName === undefined ? {} : { tokenFieldName: stringField(body, 'tokenFieldName') }),
+          signal: cancellation.signal,
         });
         return respondJson(response, 200, result);
       } catch (cause) {
+        if (cancellation.signal.aborted) {
+          return;
+        }
         return respondDomainError(response, cause);
+      } finally {
+        request.off('aborted', cancelOnDisconnect);
+        response.off('close', cancelOnDisconnect);
       }
     }
     if (route === 'GET /api/import/api-spec') {

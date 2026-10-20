@@ -6,10 +6,11 @@ import {
   type LoginExecutionInput,
   type LoginExecutorPort,
   type LoginSessionCookie,
+  type SequencerTransportPort,
 } from '@scopepilot2/core';
 import type { PageObservation } from '@scopepilot2/contracts';
 import { createCoreApiServer } from '../../src/application/api-server.ts';
-import { createTestService, TEST_OPERATOR } from '../unit/support/test-flow.ts';
+import { bootstrapFlow, createTestService, TEST_OPERATOR } from '../unit/support/test-flow.ts';
 
 // IT: 127.0.0.1 の ephemeral port への loopback 通信のみ (docs/detailed-design/03 §2)。
 describe('Core API server (node:http)', () => {
@@ -1424,6 +1425,64 @@ describe('Core API server (node:http)', () => {
     assert.ok(list.sessions.some((session) => session.tokenSource === 'bearer'));
     const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
     assert.match(eventsText, /SequencerSessionCompleted/);
+  });
+
+  test('tools/sequencer は client 切断を収集cancelへ伝播し、完了sessionを作らない', async () => {
+    let markStarted: (() => void) | undefined;
+    let markFinished: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const finished = new Promise<void>((resolve) => { markFinished = resolve; });
+    const sequencerTransport: SequencerTransportPort = {
+      async collect(input) {
+        markStarted?.();
+        try {
+          await new Promise<void>((_resolve, reject) => {
+            const signal = input.signal;
+            if (signal === undefined) {
+              reject(new Error('expected cancellation signal'));
+              return;
+            }
+            if (signal.aborted) {
+              reject(signal.reason);
+              return;
+            }
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+          });
+        } finally {
+          markFinished?.();
+        }
+      },
+    };
+    const flow = await bootstrapFlow({ sequencerTransport });
+    const cancellationServer = createCoreApiServer({ service: flow.service, operator: flow.operator });
+    await new Promise<void>((resolve) => cancellationServer.listen(0, '127.0.0.1', resolve));
+    const address = cancellationServer.address();
+    assert.ok(address !== null && typeof address !== 'string');
+    const cancellationBase = `http://127.0.0.1:${address.port}`;
+    const cancellation = new AbortController();
+    try {
+      const pending = fetch(`${cancellationBase}/api/tools/sequencer/runs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30 }),
+        signal: cancellation.signal,
+      });
+      await started;
+      cancellation.abort();
+      await assert.rejects(pending, (error: unknown) => {
+        assert.equal((error as Error).name, 'AbortError');
+        return true;
+      });
+      await finished;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(flow.service.listSequencerSessions().length, 0);
+      assert.equal(JSON.stringify(flow.service.events()).includes('SequencerSessionCompleted'), false);
+    } finally {
+      await new Promise<void>((resolve) => {
+        cancellationServer.close(() => resolve());
+        cancellationServer.closeAllConnections?.();
+      });
+    }
   });
 
   test('documents/hints は hint を登録し、探索計画と観測の由来へ統合する (AGENTS.md)', async () => {

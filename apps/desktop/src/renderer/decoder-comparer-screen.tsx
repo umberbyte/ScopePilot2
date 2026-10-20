@@ -3,7 +3,7 @@
  * 標準 codec の chain 復号とテキスト行差分 (+ provenance hash) を API 経由で提供する。
 
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { MessageBar, Button, Checkbox, Field, Input, makeStyles, Select, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 import { t } from './resources.ts';
 
@@ -46,10 +46,11 @@ const useStyles = makeStyles({
   chips: { display: 'flex', gap: '4px', flexWrap: 'wrap' },
 });
 
-async function callJson<T>(apiBase: string, path: string, body?: unknown, method: 'GET' | 'POST' = 'POST'): Promise<T> {
+async function callJson<T>(apiBase: string, path: string, body?: unknown, method: 'GET' | 'POST' = 'POST', signal?: AbortSignal): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method,
     ...(body === undefined && method === 'GET' ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    ...(signal === undefined ? {} : { signal }),
   });
   if (!response.ok) {
     const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
@@ -74,6 +75,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [sequencerTokenFieldName, setSequencerTokenFieldName] = useState('csrf_token');
   const [sequencerRole, setSequencerRole] = useState('');
   const [sequencerResult, setSequencerResult] = useState<{ tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] } | null>(null);
+  const [sequencerRunning, setSequencerRunning] = useState(false);
+  const [sequencerNotice, setSequencerNotice] = useState('');
+  const sequencerAbort = useRef<AbortController | null>(null);
   const [oastTarget, setOastTarget] = useState('http://fixture.target.test/callback');
   const [oastProtocol, setOastProtocol] = useState('http');
   const [oastToken, setOastToken] = useState('');
@@ -127,8 +131,12 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   }, [apiBase, left, normalizeNewlines, right]);
 
   const runSequencer = useCallback(async () => {
+    const controller = new AbortController();
+    sequencerAbort.current = controller;
     setBusy(true);
+    setSequencerRunning(true);
     setError('');
+    setSequencerNotice('');
     setSequencerResult(null);
     try {
       const samples = Number(sequencerSamples);
@@ -139,13 +147,33 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         ...(sequencerTokenSource === 'cookie' ? { tokenCookieName: sequencerTokenCookieName } : {}),
         ...(sequencerTokenSource === 'hidden' ? { tokenFieldName: sequencerTokenFieldName } : {}),
         ...(sequencerRole.trim() === '' ? {} : { role: sequencerRole.trim() }),
-      }));
+      }, 'POST', controller.signal));
     } catch (cause) {
-      setError(String(cause));
+      if (controller.signal.aborted) {
+        setSequencerNotice(t('a10.sequencerCancelled'));
+      } else {
+        setError(String(cause));
+      }
     } finally {
-      setBusy(false);
+      if (sequencerAbort.current === controller) {
+        sequencerAbort.current = null;
+        setSequencerRunning(false);
+        setBusy(false);
+      }
     }
   }, [apiBase, sequencerRole, sequencerSamples, sequencerTarget, sequencerTokenCookieName, sequencerTokenFieldName, sequencerTokenSource]);
+
+  const stopSequencer = useCallback(() => {
+    const controller = sequencerAbort.current;
+    if (controller !== null && !controller.signal.aborted) {
+      setSequencerNotice(t('a10.sequencerCancelRequested'));
+      controller.abort();
+    }
+  }, []);
+
+  useEffect(() => () => {
+    sequencerAbort.current?.abort();
+  }, []);
 
   const analyzeDomFlowsAction = useCallback(async () => {
     setBusy(true);
@@ -408,9 +436,15 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       <Field label={t('a10.sequencerRoleLabel')}>
         <Input value={sequencerRole} onChange={(_, data) => setSequencerRole(data.value)} />
       </Field>
-      <Button appearance="primary" disabled={busy} onClick={() => void runSequencer()}>
-        {t('a10.sequencerRun')}
-      </Button>
+      <div className={styles.chips}>
+        <Button appearance="primary" disabled={busy} onClick={() => void runSequencer()}>
+          {t('a10.sequencerRun')}
+        </Button>
+        {sequencerRunning && (
+          <Button onClick={stopSequencer}>{t('a10.sequencerStop')}</Button>
+        )}
+      </div>
+      {sequencerNotice !== '' && <Text role="status">{sequencerNotice}</Text>}
       {sequencerResult !== null && (
         <div className={styles.section}>
           <Text role="status">{t('a10.sequencerResult', { verdict: sequencerResult.verdict, samples: sequencerResult.sampleCount, duplicates: sequencerResult.duplicates, missing: sequencerResult.missing })}</Text>

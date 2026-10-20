@@ -103,6 +103,8 @@ export interface SequencerTransportPort {
   collect(input: {
     readonly targetUrl: string;
     readonly samples: number;
+    /** Stop before the next request and abort an in-flight request when signalled. */
+    readonly signal?: AbortSignal;
     /** Core-filtered role cookies for this target. Values must stay inside the transport. */
     readonly sessionCookies?: readonly LoginSessionCookie[];
     readonly onResponse: (response: SequencerTransportResponse) => void;

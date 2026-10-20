@@ -887,7 +887,7 @@ export class BaselineFlowService {
    */
   async runSequencerSession(
     operator: OperatorProfile,
-    input: { readonly targetUrl: string; readonly samples: number; readonly role?: string; readonly tokenSource?: 'body' | 'cookie' | 'hidden' | 'bearer'; readonly tokenCookieName?: string; readonly tokenFieldName?: string },
+    input: { readonly targetUrl: string; readonly samples: number; readonly role?: string; readonly tokenSource?: 'body' | 'cookie' | 'hidden' | 'bearer'; readonly tokenCookieName?: string; readonly tokenFieldName?: string; readonly signal?: AbortSignal },
   ): Promise<{ sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer'; tokenCookieName?: string; tokenFieldName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
@@ -908,8 +908,19 @@ export class BaselineFlowService {
     const collector = new SampleCollector();
     const extractor = createSequencerExtractor(input.tokenSource ?? 'body', input.tokenCookieName, input.tokenFieldName);
     const pattern = /token=([A-Za-z0-9_-]+)/;
+    const throwIfCancelled = (): void => {
+      if (input.signal?.aborted === true) {
+        throw domainError('Cancelled', 'sequencer session cancelled');
+      }
+    };
+    throwIfCancelled();
     if (this.deps.sequencerTransport === undefined) {
       for (let index = 0; index < plan.target; index += 1) {
+        throwIfCancelled();
+        if (input.signal !== undefined) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          throwIfCancelled();
+        }
         let token: string | undefined;
         if (canonical.includes('no-token') && index % 5 === 4) {
           token = undefined;
@@ -931,27 +942,36 @@ export class BaselineFlowService {
         collector.record(extractSequencerToken(response, extractor, pattern));
       }
     } else {
-      await this.deps.sequencerTransport.collect({
-        targetUrl: canonical,
-        samples: plan.target,
-        ...(appliedCookies === undefined ? {} : {
-          sessionCookies: appliedCookies.map((cookie) => ({
-            name: cookie.name,
-            value: cookie.value,
-            domain: cookie.domain,
-            path: cookie.path,
-          })),
-        }),
-        onResponse: (response) => {
-          collector.record(extractSequencerToken(response, extractor, pattern));
-          this.recordObservedExchange(
-            { url: response.requestUrl, method: 'GET', status: response.status, contentType: response.contentType },
-            this.deps.clock.now().toISOString(),
-            'sequencer',
-          );
-        },
-      });
+      try {
+        await this.deps.sequencerTransport.collect({
+          targetUrl: canonical,
+          samples: plan.target,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          ...(appliedCookies === undefined ? {} : {
+            sessionCookies: appliedCookies.map((cookie) => ({
+              name: cookie.name,
+              value: cookie.value,
+              domain: cookie.domain,
+              path: cookie.path,
+            })),
+          }),
+          onResponse: (response) => {
+            collector.record(extractSequencerToken(response, extractor, pattern));
+            this.recordObservedExchange(
+              { url: response.requestUrl, method: 'GET', status: response.status, contentType: response.contentType },
+              this.deps.clock.now().toISOString(),
+              'sequencer',
+            );
+          },
+        });
+      } catch (cause) {
+        if (input.signal?.aborted === true) {
+          throw domainError('Cancelled', 'sequencer session cancelled');
+        }
+        throw cause;
+      }
     }
+    throwIfCancelled();
     const collection = collector.snapshot();
     const projection = reportProjection(collection);
     const assessment = assess(collection.tokens);

@@ -86,6 +86,42 @@ describe('sequencer session (service)', () => {
     );
   });
 
+  test('cancel は transport へ伝播し、停止後の追加送信とsession完了記録を作らない', async () => {
+    const cancellation = new AbortController();
+    let requests = 0;
+    const sequencerTransport: SequencerTransportPort = {
+      async collect(input) {
+        for (let index = 0; index < input.samples; index += 1) {
+          input.signal?.throwIfAborted();
+          requests += 1;
+          input.onResponse({
+            requestUrl: input.targetUrl,
+            status: 200,
+            contentType: 'text/plain',
+            body: `token=cancel-sample-${index.toString(36)}`,
+          });
+          cancellation.abort();
+        }
+      },
+    };
+    const { service, operator } = await bootstrapFlow({ sequencerTransport });
+
+    await assert.rejects(
+      service.runSequencerSession(operator, {
+        targetUrl: 'http://fixture.target.test/cancel-token',
+        samples: 30,
+        signal: cancellation.signal,
+      }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, 'Cancelled');
+        return true;
+      },
+    );
+    assert.equal(requests, 1, 'cancel後に次のrequestを発行しない');
+    assert.equal(service.listSequencerSessions().length, 0, '中断した採取を完了sessionとして保存しない');
+    assert.equal(JSON.stringify(service.events()).includes('SequencerSessionCompleted'), false);
+  });
+
   test('role 指定は対象URLに適用可能なcookieだけを実transportへ渡し、値を保存しない', async () => {
     const transportCalls: Parameters<SequencerTransportPort['collect']>[0][] = [];
     const sequencerTransport: SequencerTransportPort = {
