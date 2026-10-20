@@ -137,6 +137,8 @@ export interface BootstrapOptions {
   readonly fuzzTransport?: import('../../../src/ports/engines.ts').FuzzTransportPort;
   /** OAST 実 provider 経路の検証用 fake。 */
   readonly oastProvider?: import('../../../src/ports/engines.ts').OastProviderPort;
+  /** WebSocket 実 transport 経路の検証用 fake。 */
+  readonly webSocketTransport?: import('../../../src/ports/engines.ts').WebSocketTransportPort;
 }
 
 export interface TestFlow {
@@ -148,7 +150,7 @@ export interface TestFlow {
 
 /** 案件作成前の状態から使える service を組み立てる。 */
 export function createTestService(
-  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'explorer' | 'fuzzTransport' | 'oastProvider'> & {
+  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'explorer' | 'fuzzTransport' | 'oastProvider' | 'webSocketTransport'> & {
     runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
     caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
   } = {},
@@ -166,6 +168,7 @@ export function createTestService(
     ...(options.loginExecutor === undefined ? {} : { loginExecutor: options.loginExecutor }),
     ...(options.fuzzTransport === undefined ? {} : { fuzzTransport: options.fuzzTransport }),
     ...(options.oastProvider === undefined ? {} : { oastProvider: options.oastProvider }),
+    ...(options.webSocketTransport === undefined ? {} : { webSocketTransport: options.webSocketTransport }),
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
     ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });

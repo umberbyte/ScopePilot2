@@ -62,6 +62,7 @@ export interface HarnessOptions {
     readonly fuzzTransport?: import('@scopepilot2/core').FuzzTransportPort;
     readonly sequencerTransport?: import('@scopepilot2/core').SequencerTransportPort;
     readonly oastProvider?: import('@scopepilot2/core').OastProviderPort;
+    readonly webSocketTransport?: import('@scopepilot2/core').WebSocketTransportPort;
   };
 }
 
@@ -86,6 +87,7 @@ export function createHarness(options: HarnessOptions = {}): SimulationHarness {
     ...(options.engines?.fuzzTransport === undefined ? {} : { fuzzTransport: options.engines.fuzzTransport }),
     ...(options.engines?.sequencerTransport === undefined ? {} : { sequencerTransport: options.engines.sequencerTransport }),
     ...(options.engines?.oastProvider === undefined ? {} : { oastProvider: options.engines.oastProvider }),
+    ...(options.engines?.webSocketTransport === undefined ? {} : { webSocketTransport: options.engines.webSocketTransport }),
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
     ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });

@@ -132,6 +132,8 @@ export interface BaselineFlowDeps {
   readonly sequencerTransport?: import('../ports/engines.ts').SequencerTransportPort;
   /** OAST の実 provider session (design/f13)。未構成なら fixture token を発行する。 */
   readonly oastProvider?: import('../ports/engines.ts').OastProviderPort;
+  /** WebSocket の実 text transport (design/f14)。未構成なら fixture 台帳だけを使う。 */
+  readonly webSocketTransport?: import('../ports/engines.ts').WebSocketTransportPort;
 
   /** login 実行器 (design/f09)。未構成の service では runLogin が ValidationFailed。 */
   readonly loginExecutor?: LoginExecutorPort;
@@ -1172,6 +1174,25 @@ export class BaselineFlowService {
       messages: input.messages.map((message) => ({ kind: 'text' as const, payload: message })),
       sessionRevision: this.wsSessionRevision,
     });
+    if (this.deps.webSocketTransport !== undefined) {
+      if (input.messages.some((message) => Buffer.byteLength(message, 'utf8') > 1_000_000)) {
+        this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: 0, rejected: 'size' });
+        return { planHash: plan.planHash, sent: 0, rejected: 'size' };
+      }
+      const recordFrame = (direction: 'sent' | 'received', payload: string): void => {
+        const frame: WsFrame = { frameId: this.deps.ids.next('ws'), direction, payload, receivedAtMs: this.deps.clock.now().getTime() };
+        this.wsFrames.push(frame);
+        this.wsSeenFingerprints.add(`${frame.direction}:${frame.payload}`);
+      };
+      const transported = await this.deps.webSocketTransport.exchange({
+        targetUrl: canonical,
+        messages: input.messages,
+        onSentFrame: (payload) => recordFrame('sent', payload),
+        onTextFrame: (payload) => recordFrame('received', payload),
+      });
+      this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: transported.sent });
+      return { planHash: plan.planHash, sent: transported.sent, rejected: null };
+    }
     let virtualMs = 0;
     const result = await sendWithPolicy(
       input.messages,

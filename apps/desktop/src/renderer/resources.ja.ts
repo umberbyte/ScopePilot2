@@ -155,7 +155,7 @@ export const jaStrings = {
   'a10.oastRecorded': 'callback 記録: 相関 {correlated}・未知 {uncorrelated}・重複 {duplicates}',
   'a10.wsTitle': 'WebSocket 中継',
   'a10.wsIntro':
-    'text frame のみを扱います (binary は対象外・design/f14)。frame の取込と送信は rate/size 上限の内側で行われ、同一 frame は重複として数えます。送信は fixture adapter が台帳へ sent として記録します。',
+    'text frame のみを扱います (binary は対象外・design/f14)。frame の取込と送信は rate/size 上限の内側で行われ、実engine構成では新規WebSocket接続の送受信を台帳へ記録します。',
   'a10.wsTargetLabel': '対象 URL (WebSocket・scope 内)',
   'a10.wsImportLabel': '取込 frame (1行1件・text)',
   'a10.wsImport': 'frame を取り込む',

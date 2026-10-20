@@ -123,6 +123,17 @@ export interface OastProviderPort {
   }): Promise<{ readonly token: string }>;
 }
 
+/** WebSocket text message の実送受信。scope と size は core、rate は adapter でも強制する。 */
+export interface WebSocketTransportPort {
+  exchange(input: {
+    /** 案件 scope と同じ http(s) URL。adapter 内で ws(s) へ写像する。 */
+    readonly targetUrl: string;
+    readonly messages: readonly string[];
+    readonly onSentFrame: (payload: string) => void;
+    readonly onTextFrame: (payload: string) => void;
+  }): Promise<{ readonly sent: number }>;
+}
+
 /** Repeater の実 transport (実 HTTP 送信)。未構成の service は fixture 応答を使う。 */
 export interface RepeaterTransportPort {
   send(input: {

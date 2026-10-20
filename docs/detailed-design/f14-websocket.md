@@ -41,3 +41,13 @@ observed message は append-only。resend は元 message から新 plan を作�
 ## 8. 非単体テスト
 
 ZAP WebSocket API CT、echo fixture で send/receive/stop IT、proxy 観測から resend までを FT で検証する。
+
+### 現行 adapter
+
+`NodeWebSocketTransport` はscope確認済みのHTTP(S) URLをWS(S)へ写像し、新規connectionで
+text messageを逐次送信する。既定10 message/s、text 1 MiB上限、接続timeout、短い受信待機を
+持ち、受信textをCoreのframe台帳へ返す。常時ITは所有raw WebSocket echo serverでhandshake、
+mask解除、送信間隔、echo受信を検証する。
+
+binary、fragmentation、extension、ping/pong証跡、ZAP channel paging/reuse、role cookie、
+subprotocol、長寿命connection管理は後続増分である。

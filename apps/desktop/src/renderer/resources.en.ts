@@ -269,7 +269,7 @@ export const enStrings: Readonly<Record<StringKey, string>> = {
   'a10.oastWaiting': 'Polling the self-hosted provider in the background. Callbacks are correlated automatically.',
   'a10.oastRecorded': 'Callbacks recorded: correlated {correlated}・unknown {uncorrelated}・duplicates {duplicates}',
   'a10.wsTitle': 'WebSocket relay',
-  'a10.wsIntro': 'Handles text frames only (binary is out of scope・design/f14). Frame import and sending stay within rate/size limits and identical frames are counted as duplicates. Sends are recorded into the ledger by the fixture adapter.',
+  'a10.wsIntro': 'Handles text frames only (binary is out of scope・design/f14). Frame import and sending stay within rate/size limits; real-engine mode records a new WebSocket connection\'s sent and received frames in the ledger.',
   'a10.wsTargetLabel': 'Target URL (WebSocket・in scope)',
   'a10.wsImportLabel': 'Frames to import (one per line・text)',
   'a10.wsImport': 'Import frames',

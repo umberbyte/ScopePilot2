@@ -59,4 +59,39 @@ describe('websocket (service)', () => {
       /at least one frame/,
     );
   });
+
+  test('実 transport の送信数と受信 text frame を台帳へ反映する', async () => {
+    let calls = 0;
+    const { service, operator } = await bootstrapFlow({
+      webSocketTransport: {
+        async exchange(input) {
+          calls += 1;
+          for (const message of input.messages) {
+            input.onSentFrame(message);
+            input.onTextFrame(`echo:${message}`);
+          }
+          return { sent: input.messages.length };
+        },
+      },
+    });
+    const result = await service.sendWsMessages(operator, {
+      targetUrl: 'http://fixture.target.test/ws',
+      messages: ['one', 'two'],
+    });
+    assert.match(result.planHash, /^[0-9a-f]{64}$/);
+    assert.equal(result.sent, 2);
+    assert.equal(result.rejected, null);
+    assert.equal(calls, 1);
+    assert.deepEqual(
+      service.listWsFrames().map((frame) => [frame.direction, frame.text]),
+      [['sent', 'one'], ['received', 'echo:one'], ['sent', 'two'], ['received', 'echo:two']],
+    );
+
+    const oversized = await service.sendWsMessages(operator, {
+      targetUrl: 'http://fixture.target.test/ws',
+      messages: ['x'.repeat(1_000_001)],
+    });
+    assert.equal(oversized.rejected, 'size');
+    assert.equal(calls, 1, 'size 超過は接続前に拒否する');
+  });
 });

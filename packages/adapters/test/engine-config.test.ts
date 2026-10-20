@@ -8,6 +8,7 @@ import { InteractshCliProvider } from '../src/interactsh-provider.ts';
 import { PlaywrightExplorerAdapter } from '../src/playwright-explorer.ts';
 import { NodeRepeaterTransport } from '../src/repeater-transport.ts';
 import { NodeSequencerTransport } from '../src/sequencer-transport.ts';
+import { NodeWebSocketTransport } from '../src/websocket-transport.ts';
 import { ZapEngineAdapter } from '../src/zap-engine.ts';
 
 /**
@@ -89,6 +90,7 @@ describe('engine selection (env)', () => {
       assert.ok(engines.repeaterTransport instanceof NodeRepeaterTransport);
       assert.ok(engines.fuzzTransport instanceof NodeFuzzTransport);
       assert.ok(engines.sequencerTransport instanceof NodeSequencerTransport);
+      assert.ok(engines.webSocketTransport instanceof NodeWebSocketTransport);
       assert.deepEqual(engines.oastProvider?.supportedProtocols, [], 'OAST 未設定を fixture 対応として公開しない');
       // 版が未解決のままだと runActiveScan の能力表一致検査に落ちるため、
       // compose 時点で解決済みであることを検証する。
