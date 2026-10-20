@@ -57,6 +57,17 @@ interface SequencerResult {
   readonly tokenLengthBucketMinimums?: readonly number[];
   readonly tokenByteLengthBuckets?: readonly number[];
   readonly tokenCharacterLengthBuckets?: readonly number[];
+  readonly observedAlphabetSize?: number;
+  readonly alphabetClassCounts?: {
+    readonly digit: number;
+    readonly lowerAscii: number;
+    readonly upperAscii: number;
+    readonly base64UrlPunctuation: number;
+    readonly base64StandardPunctuation: number;
+    readonly padding: number;
+    readonly otherAscii: number;
+    readonly nonAscii: number;
+  };
   readonly minimum?: number;
   readonly sessionCookieNames?: readonly string[];
 }
@@ -564,6 +575,36 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
                 </div>
               );
             })}
+          {sequencerResult.observedAlphabetSize !== undefined && sequencerResult.alphabetClassCounts !== undefined && (() => {
+            const rows = [
+              { label: t('a10.sequencerAlphabetClass.digit'), count: sequencerResult.alphabetClassCounts.digit },
+              { label: t('a10.sequencerAlphabetClass.lowerAscii'), count: sequencerResult.alphabetClassCounts.lowerAscii },
+              { label: t('a10.sequencerAlphabetClass.upperAscii'), count: sequencerResult.alphabetClassCounts.upperAscii },
+              { label: t('a10.sequencerAlphabetClass.base64UrlPunctuation'), count: sequencerResult.alphabetClassCounts.base64UrlPunctuation },
+              { label: t('a10.sequencerAlphabetClass.base64StandardPunctuation'), count: sequencerResult.alphabetClassCounts.base64StandardPunctuation },
+              { label: t('a10.sequencerAlphabetClass.padding'), count: sequencerResult.alphabetClassCounts.padding },
+              { label: t('a10.sequencerAlphabetClass.otherAscii'), count: sequencerResult.alphabetClassCounts.otherAscii },
+              { label: t('a10.sequencerAlphabetClass.nonAscii'), count: sequencerResult.alphabetClassCounts.nonAscii },
+            ];
+            const maximum = Math.max(1, ...rows.map(({ count }) => count));
+            const total = rows.reduce((sum, { count }) => sum + count, 0);
+            return (
+              <div className={styles.byteChart} role="group" aria-label={t('a10.sequencerAlphabetChart')}>
+                <Text weight="semibold" className={styles.byteChartTitle}>{t('a10.sequencerAlphabetChart')}</Text>
+                <Text className={styles.byteChartTitle}>{t('a10.sequencerAlphabetSummary', { size: sequencerResult.observedAlphabetSize })}</Text>
+                {rows.map(({ label, count }) => (
+                  <React.Fragment key={label}>
+                    <Text>{label}</Text>
+                    <ProgressBar
+                      value={count / maximum}
+                      aria-label={t('a10.sequencerAlphabetBucket', { class: label, count, total })}
+                    />
+                    <Text>{count}</Text>
+                  </React.Fragment>
+                ))}
+              </div>
+            );
+          })()}
           {sequencerResult.minimum !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerInsufficient', { minimum: sequencerResult.minimum })}</Text>
           )}

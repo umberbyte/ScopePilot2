@@ -290,6 +290,34 @@ export interface EntropyResult {
   readonly tokenByteLengthBuckets: readonly number[];
   /** 各 token の Unicode code point 数を固定16区間へまとめた sample 数。 */
   readonly tokenCharacterLengthBuckets: readonly number[];
+  /** 観測した Unicode code point の種類数。文字そのものは返さない。 */
+  readonly observedAlphabetSize: number;
+  /** 文字集合を固定classへ集約した出現数。順序や個々の文字は含まない。 */
+  readonly alphabetClassCounts: AlphabetClassCounts;
+}
+
+export interface AlphabetClassCounts {
+  readonly digit: number;
+  readonly lowerAscii: number;
+  readonly upperAscii: number;
+  readonly base64UrlPunctuation: number;
+  readonly base64StandardPunctuation: number;
+  readonly padding: number;
+  readonly otherAscii: number;
+  readonly nonAscii: number;
+}
+
+type AlphabetClass = keyof AlphabetClassCounts;
+
+function alphabetClassOf(symbol: string): AlphabetClass {
+  const codePoint = symbol.codePointAt(0) ?? 0;
+  if (codePoint >= 0x30 && codePoint <= 0x39) return 'digit';
+  if (codePoint >= 0x61 && codePoint <= 0x7a) return 'lowerAscii';
+  if (codePoint >= 0x41 && codePoint <= 0x5a) return 'upperAscii';
+  if (symbol === '-' || symbol === '_') return 'base64UrlPunctuation';
+  if (symbol === '+' || symbol === '/') return 'base64StandardPunctuation';
+  if (symbol === '=') return 'padding';
+  return codePoint <= 0x7f ? 'otherAscii' : 'nonAscii';
 }
 
 const TOKEN_LENGTH_BUCKET_MINIMUMS = Object.freeze([0, 1, 2, 3, 5, 9, 17, 33, 65, 129, 257, 513, 1025, 2049, 4097, 8193]);
@@ -310,11 +338,27 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
   const byteFrequencyBuckets = Array.from({ length: 16 }, () => 0);
   const tokenByteLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
   const tokenCharacterLengthBuckets = Array.from({ length: TOKEN_LENGTH_BUCKET_MINIMUMS.length }, () => 0);
+  const observedAlphabet = new Set<string>();
+  const alphabetClassCounts: Record<AlphabetClass, number> = {
+    digit: 0,
+    lowerAscii: 0,
+    upperAscii: 0,
+    base64UrlPunctuation: 0,
+    base64StandardPunctuation: 0,
+    padding: 0,
+    otherAscii: 0,
+    nonAscii: 0,
+  };
   for (const token of tokens) {
     const byteBucket = tokenLengthBucketIndex(Buffer.byteLength(token, 'utf8'));
     const characterBucket = tokenLengthBucketIndex(Array.from(token).length);
     tokenByteLengthBuckets[byteBucket] = (tokenByteLengthBuckets[byteBucket] ?? 0) + 1;
     tokenCharacterLengthBuckets[characterBucket] = (tokenCharacterLengthBuckets[characterBucket] ?? 0) + 1;
+    for (const symbol of token) {
+      observedAlphabet.add(symbol);
+      const alphabetClass = alphabetClassOf(symbol);
+      alphabetClassCounts[alphabetClass] += 1;
+    }
   }
   for (const byte of bytes) {
     counts.set(byte, (counts.get(byte) ?? 0) + 1);
@@ -333,6 +377,8 @@ export function analyzeEntropy(tokens: readonly string[]): EntropyResult {
     tokenLengthBucketMinimums: TOKEN_LENGTH_BUCKET_MINIMUMS,
     tokenByteLengthBuckets: Object.freeze(tokenByteLengthBuckets),
     tokenCharacterLengthBuckets: Object.freeze(tokenCharacterLengthBuckets),
+    observedAlphabetSize: observedAlphabet.size,
+    alphabetClassCounts: Object.freeze(alphabetClassCounts),
   };
 }
 

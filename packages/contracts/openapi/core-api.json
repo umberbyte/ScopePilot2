@@ -1783,6 +1783,36 @@
                               "minimum": 0
                             }
                           },
+                          "observedAlphabetSize": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "assessed 時のみ。観測したUnicode code pointの種類数。文字自体は返さない"
+                          },
+                          "alphabetClassCounts": {
+                            "type": "object",
+                            "description": "assessed 時のみ。文字を復元できない固定classへ集約した出現数",
+                            "required": [
+                              "digit",
+                              "lowerAscii",
+                              "upperAscii",
+                              "base64UrlPunctuation",
+                              "base64StandardPunctuation",
+                              "padding",
+                              "otherAscii",
+                              "nonAscii"
+                            ],
+                            "properties": {
+                              "digit": { "type": "integer", "minimum": 0 },
+                              "lowerAscii": { "type": "integer", "minimum": 0 },
+                              "upperAscii": { "type": "integer", "minimum": 0 },
+                              "base64UrlPunctuation": { "type": "integer", "minimum": 0 },
+                              "base64StandardPunctuation": { "type": "integer", "minimum": 0 },
+                              "padding": { "type": "integer", "minimum": 0 },
+                              "otherAscii": { "type": "integer", "minimum": 0 },
+                              "nonAscii": { "type": "integer", "minimum": 0 }
+                            },
+                            "additionalProperties": false
+                          },
                           "minimum": {
                             "type": "integer",
                             "minimum": 1,
@@ -1989,6 +2019,36 @@
                         "type": "integer",
                         "minimum": 0
                       }
+                    },
+                    "observedAlphabetSize": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "assessed 時のみ。観測したUnicode code pointの種類数。文字自体は返さない"
+                    },
+                    "alphabetClassCounts": {
+                      "type": "object",
+                      "description": "assessed 時のみ。文字を復元できない固定classへ集約した出現数",
+                      "required": [
+                        "digit",
+                        "lowerAscii",
+                        "upperAscii",
+                        "base64UrlPunctuation",
+                        "base64StandardPunctuation",
+                        "padding",
+                        "otherAscii",
+                        "nonAscii"
+                      ],
+                      "properties": {
+                        "digit": { "type": "integer", "minimum": 0 },
+                        "lowerAscii": { "type": "integer", "minimum": 0 },
+                        "upperAscii": { "type": "integer", "minimum": 0 },
+                        "base64UrlPunctuation": { "type": "integer", "minimum": 0 },
+                        "base64StandardPunctuation": { "type": "integer", "minimum": 0 },
+                        "padding": { "type": "integer", "minimum": 0 },
+                        "otherAscii": { "type": "integer", "minimum": 0 },
+                        "nonAscii": { "type": "integer", "minimum": 0 }
+                      },
+                      "additionalProperties": false
                     },
                     "minimum": {
                       "type": "integer",

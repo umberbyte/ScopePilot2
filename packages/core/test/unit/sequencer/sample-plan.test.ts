@@ -146,6 +146,23 @@ describe('Sequencer', () => {
     assert.equal(distribution.tokenCharacterLengthBuckets.reduce((sum, count) => sum + count, 0), 5);
   });
 
+  test('[F07-UT-014] alphabet は文字を返さず固定classと種類数へ集約する', () => {
+    const distribution = analyzeEntropy(['aA0-_', '/+=?', 'é😀', 'a']);
+    assert.equal(distribution.observedAlphabetSize, 11);
+    assert.deepEqual(distribution.alphabetClassCounts, {
+      digit: 1,
+      lowerAscii: 2,
+      upperAscii: 1,
+      base64UrlPunctuation: 2,
+      base64StandardPunctuation: 2,
+      padding: 1,
+      otherAscii: 1,
+      nonAscii: 2,
+    });
+    assert.equal(JSON.stringify(distribution).includes('é'), false, '個々の文字は統計へ残さない');
+    assert.equal(JSON.stringify(distribution).includes('😀'), false, '個々の文字は統計へ残さない');
+  });
+
   test('[F07-UT-005] sample 不足は断定せず insufficient を返す', () => {
     const result = assess(Array.from({ length: 29 }, (_, i) => `t${i}`));
     assert.deepEqual(result, { verdict: 'insufficient', collected: 29, minimum: 30 });
