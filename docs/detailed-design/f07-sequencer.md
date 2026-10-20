@@ -50,5 +50,6 @@ token sample の収集、品質統計、可視化、再現可能な判定を提�
   適用可能なcookieを選び、`NodeSequencerTransport`へ渡す。未login roleは送信前に拒否する。
 - transportは各逐次GETへCookie headerを付けるが、値を応答・session台帳・監査・通信logへ返さない。
   結果と台帳には取得条件としてcookie名だけを残す。roleなしの非認証収集も維持する。
-- 現行extractorは引き続き本文 `token=...` だけである。response Cookie、hidden field、bearer、任意規則、
-  stop/cancel、chart表示を含む完全な採取専用再送計画とは区別する。
+- 現行extractorは本文 `token=...` と、名前を明示した応答 `Set-Cookie` を選択できる。cookie名はRFC token文字に限定し、
+  値は収集中だけ扱って結果・session台帳・監査・通信logへ残さない。結果には抽出元とcookie名だけを残す。
+- hidden field、bearer、任意規則、stop/cancel、chart表示を含む完全な採取専用再送計画とは区別する。

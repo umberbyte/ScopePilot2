@@ -69,8 +69,10 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
   const [sequencerTarget, setSequencerTarget] = useState('http://fixture.target.test/session-token');
   const [sequencerSamples, setSequencerSamples] = useState('100');
+  const [sequencerTokenSource, setSequencerTokenSource] = useState<'body' | 'cookie'>('body');
+  const [sequencerTokenCookieName, setSequencerTokenCookieName] = useState('SEQ_TOKEN');
   const [sequencerRole, setSequencerRole] = useState('');
-  const [sequencerResult, setSequencerResult] = useState<{ verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] } | null>(null);
+  const [sequencerResult, setSequencerResult] = useState<{ tokenSource: 'body' | 'cookie'; tokenCookieName?: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] } | null>(null);
   const [oastTarget, setOastTarget] = useState('http://fixture.target.test/callback');
   const [oastProtocol, setOastProtocol] = useState('http');
   const [oastToken, setOastToken] = useState('');
@@ -129,9 +131,11 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     setSequencerResult(null);
     try {
       const samples = Number(sequencerSamples);
-      setSequencerResult(await callJson<{ verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }>(apiBase, '/api/tools/sequencer/runs', {
+      setSequencerResult(await callJson<{ tokenSource: 'body' | 'cookie'; tokenCookieName?: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }>(apiBase, '/api/tools/sequencer/runs', {
         targetUrl: sequencerTarget,
         samples,
+        tokenSource: sequencerTokenSource,
+        ...(sequencerTokenSource === 'cookie' ? { tokenCookieName: sequencerTokenCookieName } : {}),
         ...(sequencerRole.trim() === '' ? {} : { role: sequencerRole.trim() }),
       }));
     } catch (cause) {
@@ -139,7 +143,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
     } finally {
       setBusy(false);
     }
-  }, [apiBase, sequencerRole, sequencerSamples, sequencerTarget]);
+  }, [apiBase, sequencerRole, sequencerSamples, sequencerTarget, sequencerTokenCookieName, sequencerTokenSource]);
 
   const analyzeDomFlowsAction = useCallback(async () => {
     setBusy(true);
@@ -381,6 +385,17 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       <Field label={t('a10.sequencerSamplesLabel')}>
         <Input value={sequencerSamples} onChange={(_, data) => setSequencerSamples(data.value)} />
       </Field>
+      <Field label={t('a10.sequencerTokenSourceLabel')}>
+        <Select value={sequencerTokenSource} onChange={(_, data) => setSequencerTokenSource(data.value as 'body' | 'cookie')}>
+          <option value="body">{t('a10.sequencerTokenSource.body')}</option>
+          <option value="cookie">{t('a10.sequencerTokenSource.cookie')}</option>
+        </Select>
+      </Field>
+      {sequencerTokenSource === 'cookie' && (
+        <Field label={t('a10.sequencerTokenCookieNameLabel')}>
+          <Input value={sequencerTokenCookieName} onChange={(_, data) => setSequencerTokenCookieName(data.value)} />
+        </Field>
+      )}
       <Field label={t('a10.sequencerRoleLabel')}>
         <Input value={sequencerRole} onChange={(_, data) => setSequencerRole(data.value)} />
       </Field>
@@ -390,6 +405,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       {sequencerResult !== null && (
         <div className={styles.section}>
           <Text role="status">{t('a10.sequencerResult', { verdict: sequencerResult.verdict, samples: sequencerResult.sampleCount, duplicates: sequencerResult.duplicates, missing: sequencerResult.missing })}</Text>
+          <Text className={styles.muted}>{t('a10.sequencerExtractorUsed', { source: sequencerResult.tokenSource === 'body' ? t('a10.sequencerTokenSource.body') : `${t('a10.sequencerTokenSource.cookie')} (${sequencerResult.tokenCookieName ?? '—'})` })}</Text>
           {sequencerResult.sessionCookieNames !== undefined && (
             <Text className={styles.muted}>{t('a10.sequencerSessionApplied', { cookies: sequencerResult.sessionCookieNames.join(', ') || '—' })}</Text>
           )}

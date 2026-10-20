@@ -96,7 +96,7 @@ import {
   type SendAttemptRecord,
 } from '../domain/repeater.ts';
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
-import { assess, createSamplePlan, extractToken, reportProjection, SampleCollector } from '../domain/sequencer.ts';
+import { assess, createSamplePlan, createSequencerExtractor, extractSequencerToken, reportProjection, SampleCollector } from '../domain/sequencer.ts';
 import { parseOpenApiDocument } from '../domain/api-scanning.ts';
 import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, TokenIssuer, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
 import { buildWsSendPlan, importFrames, sendWithPolicy, validateWsSubprotocols, wsEvidence, type WsFrame } from '../domain/websocket.ts';
@@ -256,7 +256,7 @@ export class BaselineFlowService {
   private readonly apiSpecImports: readonly { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[] = [];
 
   /** Sequencer session の台帳 (design/f07)。token 原文は保存しない (統計のみ)。 */
-  private readonly sequencerSessions: readonly { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] = [];
+  private readonly sequencerSessions: readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie'; tokenCookieName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] = [];
 
   /** Repeater の draft 台帳 (design/f04)。tab 上限は domain (20)。 */
   private readonly repeaterDrafts = new DraftRegistry();
@@ -887,8 +887,8 @@ export class BaselineFlowService {
    */
   async runSequencerSession(
     operator: OperatorProfile,
-    input: { readonly targetUrl: string; readonly samples: number; readonly role?: string },
-  ): Promise<{ sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }> {
+    input: { readonly targetUrl: string; readonly samples: number; readonly role?: string; readonly tokenSource?: 'body' | 'cookie'; readonly tokenCookieName?: string },
+  ): Promise<{ sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie'; tokenCookieName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -906,18 +906,25 @@ export class BaselineFlowService {
     }
     const plan = createSamplePlan(input.samples);
     const collector = new SampleCollector();
+    const extractor = createSequencerExtractor(input.tokenSource ?? 'body', input.tokenCookieName);
     const pattern = /token=([A-Za-z0-9_-]+)/;
     if (this.deps.sequencerTransport === undefined) {
       for (let index = 0; index < plan.target; index += 1) {
-        let body: string;
+        let token: string | undefined;
         if (canonical.includes('no-token') && index % 5 === 4) {
-          body = 'no token in this response';
+          token = undefined;
         } else if (canonical.includes('fixed')) {
-          body = 'token=fixed-token-value';
+          token = 'fixed-token-value';
         } else {
-          body = `token=sample-${index.toString(36)}-${(index * 7 + 3).toString(36)}`;
+          token = `sample-${index.toString(36)}-${(index * 7 + 3).toString(36)}`;
         }
-        collector.record(extractToken({ body }, pattern));
+        const response = extractor.source === 'body'
+          ? { body: token === undefined ? 'no token in this response' : `token=${token}` }
+          : {
+              body: 'cookie token response',
+              ...(token === undefined ? {} : { setCookieHeaders: [`${extractor.cookieName}=${token}; Path=/; HttpOnly`] }),
+            };
+        collector.record(extractSequencerToken(response, extractor, pattern));
       }
     } else {
       await this.deps.sequencerTransport.collect({
@@ -932,7 +939,7 @@ export class BaselineFlowService {
           })),
         }),
         onResponse: (response) => {
-          collector.record(extractToken({ body: response.body }, pattern));
+          collector.record(extractSequencerToken(response, extractor, pattern));
           this.recordObservedExchange(
             { url: response.requestUrl, method: 'GET', status: response.status, contentType: response.contentType },
             this.deps.clock.now().toISOString(),
@@ -949,6 +956,8 @@ export class BaselineFlowService {
     const record = {
       sessionId,
       targetUrl: canonical,
+      tokenSource: extractor.source,
+      ...(extractor.source === 'cookie' ? { tokenCookieName: extractor.cookieName } : {}),
       verdict,
       ...projection,
       ...(verdict === 'assessed' ? { shannonEntropyBitsPerByte: assessment.entropy.shannonEntropyBitsPerByte, distinctByteValues: assessment.entropy.distinctByteValues } : { minimum: assessment.minimum }),
@@ -970,7 +979,7 @@ export class BaselineFlowService {
     return result;
   }
 
-  listSequencerSessions(): readonly { sessionId: string; targetUrl: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] {
+  listSequencerSessions(): readonly { sessionId: string; targetUrl: string; tokenSource: 'body' | 'cookie'; tokenCookieName?: string; verdict: 'assessed' | 'insufficient'; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number; distinctByteValues?: number; minimum?: number; sessionCookieNames?: readonly string[]; executedAt: string }[] {
     return [...this.sequencerSessions];
   }
 

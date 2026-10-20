@@ -371,6 +371,14 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
   await expect(page.getByText('session cookie 適用: PHPSESSID')).toBeVisible({ timeout: 30_000 });
 
+  // 応答 Set-Cookie から指定名の token を抽出でき、値そのものは表示しない。
+  await page.getByLabel('token 抽出元').selectOption('cookie');
+  await page.getByLabel('応答 Set-Cookie の token cookie 名').fill('SEQ_TOKEN');
+  await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
+  await expect(page.getByText(/結果: assessed \(sample 40・重複 39・欠落 0\)/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('抽出元: 応答 Set-Cookie (SEQ_TOKEN)')).toBeVisible();
+  await expect(page.getByText(/sample-[a-z0-9-]+/)).toHaveCount(0);
+
   // OAST: token を発行し、callback を記録すると相関として数えられる (design/f13)。
   await page.getByRole('button', { name: 'OAST token を発行する' }).click();
   const tokenText = page.getByText(/token: oast-[0-9a-f]+/);

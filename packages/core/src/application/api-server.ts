@@ -260,10 +260,16 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return;
       }
       try {
+        const tokenSource = body.tokenSource ?? 'body';
+        if (tokenSource !== 'body' && tokenSource !== 'cookie') {
+          throw new DomainError('ValidationFailed', 'tokenSource must be body or cookie');
+        }
         const result = await service.runSequencerSession(operator, {
           targetUrl: stringField(body, 'targetUrl'),
           samples: numberField(body, 'samples'),
           ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
+          tokenSource,
+          ...(body.tokenCookieName === undefined ? {} : { tokenCookieName: stringField(body, 'tokenCookieName') }),
         });
         return respondJson(response, 200, result);
       } catch (cause) {

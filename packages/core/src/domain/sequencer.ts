@@ -21,6 +21,26 @@ export type SampleOutcome =
   | { readonly kind: 'collected'; readonly token: string }
   | { readonly kind: 'missing'; readonly reason: string };
 
+export type SequencerExtractor =
+  | { readonly source: 'body' }
+  | { readonly source: 'cookie'; readonly cookieName: string };
+
+const COOKIE_NAME_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/** 抽出条件をboundedに固定し、未使用fieldを暗黙に無視しない。 */
+export function createSequencerExtractor(source: 'body' | 'cookie', cookieName?: string): SequencerExtractor {
+  if (source === 'body') {
+    if (cookieName !== undefined) {
+      throw domainError('ValidationFailed', 'tokenCookieName is only supported when tokenSource is cookie');
+    }
+    return { source };
+  }
+  if (cookieName === undefined || cookieName.length === 0 || cookieName.length > 128 || !COOKIE_NAME_TOKEN.test(cookieName)) {
+    throw domainError('ValidationFailed', 'tokenCookieName must be a valid cookie name of at most 128 characters');
+  }
+  return { source, cookieName };
+}
+
 /** token 欠落は missing outcome として数える (F07-UT-002)。 */
 export function extractToken(response: { body: string }, pattern: RegExp): SampleOutcome {
   const match = pattern.exec(response.body);
@@ -28,6 +48,32 @@ export function extractToken(response: { body: string }, pattern: RegExp): Sampl
     return { kind: 'missing', reason: 'token pattern not found in response body' };
   }
   return { kind: 'collected', token: match[1] };
+}
+
+/** Set-Cookieの先頭name=valueだけを読み、属性や他cookieをtokenへ混入させない。 */
+export function extractCookieToken(response: { readonly setCookieHeaders?: readonly string[] }, cookieName: string): SampleOutcome {
+  for (const header of response.setCookieHeaders ?? []) {
+    const pair = header.split(';', 1)[0] ?? '';
+    const separator = pair.indexOf('=');
+    if (separator <= 0 || pair.slice(0, separator).trim() !== cookieName) {
+      continue;
+    }
+    const token = pair.slice(separator + 1).trim();
+    if (token !== '') {
+      return { kind: 'collected', token };
+    }
+  }
+  return { kind: 'missing', reason: `cookie '${cookieName}' not found in response` };
+}
+
+export function extractSequencerToken(
+  response: { readonly body: string; readonly setCookieHeaders?: readonly string[] },
+  extractor: SequencerExtractor,
+  bodyPattern: RegExp,
+): SampleOutcome {
+  return extractor.source === 'body'
+    ? extractToken(response, bodyPattern)
+    : extractCookieToken(response, extractor.cookieName);
 }
 
 export interface SampleCollection {

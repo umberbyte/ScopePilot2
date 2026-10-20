@@ -4,6 +4,9 @@ import {
   analyzeEntropy,
   assess,
   createSamplePlan,
+  createSequencerExtractor,
+  extractCookieToken,
+  extractSequencerToken,
   extractToken,
   reportProjection,
   SampleCollector,
@@ -32,6 +35,24 @@ describe('Sequencer', () => {
     }
     const found = extractToken({ body: 'token=abc123;' }, /token=([a-z0-9]+)/);
     assert.deepEqual(found, { kind: 'collected', token: 'abc123' });
+  });
+
+  test('[F07-UT-008] response Set-Cookie は指定名だけを抽出し、値中の = を保持する', () => {
+    const extractor = createSequencerExtractor('cookie', 'SEQ_TOKEN');
+    const response = {
+      body: 'token=body-value',
+      setCookieHeaders: [
+        'OTHER=ignored; Path=/',
+        'SEQ_TOKEN=abc==; Path=/; HttpOnly',
+      ],
+    };
+    assert.deepEqual(extractCookieToken(response, 'SEQ_TOKEN'), { kind: 'collected', token: 'abc==' });
+    assert.deepEqual(extractSequencerToken(response, extractor, /token=([a-z-]+)/), { kind: 'collected', token: 'abc==' });
+    assert.equal(extractCookieToken({ setCookieHeaders: ['SEQ_TOKEN=; Path=/'] }, 'SEQ_TOKEN').kind, 'missing');
+    assert.equal(extractCookieToken({ setCookieHeaders: ['OTHER=value'] }, 'SEQ_TOKEN').kind, 'missing');
+    assert.throws(() => createSequencerExtractor('cookie', 'bad name'), /valid cookie name/);
+    assert.throws(() => createSequencerExtractor('cookie'), /valid cookie name/);
+    assert.throws(() => createSequencerExtractor('body', 'unused'), /only supported/);
   });
 
   test('[F07-UT-003] duplicate token も sample として保持し重複数を数える', () => {

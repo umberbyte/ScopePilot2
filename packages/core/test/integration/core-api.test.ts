@@ -1334,10 +1334,44 @@ describe('Core API server (node:http)', () => {
       body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 40 }),
     });
     assert.equal(run.status, 200);
-    const result = (await run.json()) as { verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number };
+    const result = (await run.json()) as { tokenSource: string; verdict: string; sampleCount: number; duplicates: number; missing: number; shannonEntropyBitsPerByte?: number };
     assert.equal(result.verdict, 'assessed');
+    assert.equal(result.tokenSource, 'body');
     assert.equal(result.sampleCount, 40);
     assert.equal(JSON.stringify(result).includes('token=sample-'), false, 'token 原文は応答に出ない');
+
+    const cookieRun = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30, tokenSource: 'cookie', tokenCookieName: 'SEQ_TOKEN' }),
+    });
+    assert.equal(cookieRun.status, 200);
+    const cookieResult = (await cookieRun.json()) as { tokenSource: string; tokenCookieName?: string; sampleCount: number };
+    assert.equal(cookieResult.tokenSource, 'cookie');
+    assert.equal(cookieResult.tokenCookieName, 'SEQ_TOKEN');
+    assert.equal(cookieResult.sampleCount, 30);
+    assert.equal(JSON.stringify(cookieResult).includes('sample-'), false, 'cookie token 原文は応答に出ない');
+
+    const invalidCookieName = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30, tokenSource: 'cookie', tokenCookieName: 'bad name' }),
+    });
+    assert.equal(invalidCookieName.status, 400);
+
+    const invalidCookieNameType = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30, tokenSource: 'cookie', tokenCookieName: 123 }),
+    });
+    assert.equal(invalidCookieNameType.status, 400);
+
+    const invalidSource = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: 'http://fixture.target.test/session-token', samples: 30, tokenSource: 'header' }),
+    });
+    assert.equal(invalidSource.status, 400);
 
     const boundary = await fetch(`${baseUrl}/api/tools/sequencer/runs`, {
       method: 'POST',
@@ -1353,8 +1387,9 @@ describe('Core API server (node:http)', () => {
     });
     assert.equal(missingRole.status, 400, 'role field is forwarded and requires a completed login session');
 
-    const list = (await (await fetch(`${baseUrl}/api/tools/sequencer/runs`)).json()) as { sessions: readonly { sessionId: string }[] };
+    const list = (await (await fetch(`${baseUrl}/api/tools/sequencer/runs`)).json()) as { sessions: readonly { sessionId: string; tokenSource: string; tokenCookieName?: string }[] };
     assert.ok(list.sessions.length >= 1);
+    assert.ok(list.sessions.some((session) => session.tokenSource === 'cookie' && session.tokenCookieName === 'SEQ_TOKEN'));
     const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
     assert.match(eventsText, /SequencerSessionCompleted/);
   });

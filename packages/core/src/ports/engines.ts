@@ -92,6 +92,8 @@ export interface SequencerTransportResponse {
   readonly status: number;
   readonly contentType: string;
   readonly body: string;
+  /** Raw Set-Cookie lines. Core extracts during the callback; adapters and ledgers must not retain them. */
+  readonly setCookieHeaders?: readonly string[];
 }
 
 /** Sequencer の実収集 transport。adapter 内で rate を守り、応答を逐次 core へ渡す。 */

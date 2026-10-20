@@ -57,20 +57,30 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
       receivedAt.push(Date.now());
       receivedCookies.push(request.headers.cookie);
       sequence += 1;
-      response.writeHead(200, { 'Content-Type': 'text/plain' });
+      response.writeHead(200, {
+        'Content-Type': 'text/plain',
+        'Set-Cookie': `SEQ_TOKEN=cookie-secret-${sequence.toString(36)}; Path=/; HttpOnly`,
+      });
       response.end(`token=secret-token-${sequence.toString(36)}`);
     });
     const base = await listen(server);
     try {
-      const rateResponses: string[] = [];
+      const rateResponses: { body: string; setCookieHeaders?: readonly string[] }[] = [];
       const normalRate = new NodeSequencerTransport({ timeoutMs: 5_000 });
       await normalRate.collect({
         targetUrl: `${base}/token`,
         samples: 2,
         sessionCookies: [{ name: 'SEQ_SESSION', value: 'transport-secret', domain: '127.0.0.1', path: '/' }],
-        onResponse: (response) => rateResponses.push(response.body),
+        onResponse: (response) => rateResponses.push({
+          body: response.body,
+          ...(response.setCookieHeaders === undefined ? {} : { setCookieHeaders: response.setCookieHeaders }),
+        }),
       });
       assert.equal(rateResponses.length, 2);
+      assert.deepEqual(rateResponses.map((response) => response.setCookieHeaders), [
+        ['SEQ_TOKEN=cookie-secret-1; Path=/; HttpOnly'],
+        ['SEQ_TOKEN=cookie-secret-2; Path=/; HttpOnly'],
+      ]);
       assert.ok((receivedAt[1] ?? 0) - (receivedAt[0] ?? 0) >= 400, '既定 2 RPS の間隔を守る');
       assert.deepEqual(receivedCookies.slice(0, 2), ['SEQ_SESSION=transport-secret', 'SEQ_SESSION=transport-secret']);
 
@@ -82,14 +92,19 @@ describe('NodeSequencerTransport (実 HTTP sample 収集)', () => {
         deniedOrigins: [],
         limits: { maxRequests: 100, maxPages: 10, maxDurationMinutes: 5 },
       });
-      const result = await service.runSequencerSession(OPERATOR, { targetUrl: `${base}/token`, samples: 30 });
+      const result = await service.runSequencerSession(OPERATOR, { targetUrl: `${base}/token`, samples: 30, tokenSource: 'cookie', tokenCookieName: 'SEQ_TOKEN' });
       assert.equal(result.verdict, 'assessed');
       assert.equal(result.sampleCount, 30);
       assert.equal(result.duplicates, 0);
       assert.equal(result.missing, 0);
+      assert.equal(result.tokenSource, 'cookie');
+      assert.equal(result.tokenCookieName, 'SEQ_TOKEN');
       assert.equal(JSON.stringify(result).includes('secret-token'), false, '結果に token 原文を出さない');
+      assert.equal(JSON.stringify(result).includes('cookie-secret'), false, '結果に cookie token 原文を出さない');
       assert.equal(JSON.stringify(service.events()).includes('secret-token'), false, '監査に token 原文を出さない');
+      assert.equal(JSON.stringify(service.events()).includes('cookie-secret'), false, '監査に cookie token 原文を出さない');
       assert.equal(JSON.stringify(service.listSequencerSessions()).includes('secret-token'), false, '台帳に token 原文を出さない');
+      assert.equal(JSON.stringify(service.listSequencerSessions()).includes('cookie-secret'), false, '台帳に cookie token 原文を出さない');
       const traffic = service.listTraffic(100);
       assert.equal(traffic.total, 30);
       assert.ok(traffic.entries?.every((entry) => entry.source === 'sequencer' && entry.status === 200));

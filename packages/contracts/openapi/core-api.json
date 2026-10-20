@@ -1673,6 +1673,7 @@
                         "required": [
                           "sessionId",
                           "targetUrl",
+                          "tokenSource",
                           "verdict",
                           "sampleCount",
                           "duplicates",
@@ -1685,6 +1686,18 @@
                           },
                           "targetUrl": {
                             "type": "string"
+                          },
+                          "tokenSource": {
+                            "type": "string",
+                            "enum": [
+                              "body",
+                              "cookie"
+                            ],
+                            "description": "token の抽出元。token 値は保持しない"
+                          },
+                          "tokenCookieName": {
+                            "type": "string",
+                            "description": "tokenSource が cookie の場合に使用した応答 cookie 名"
                           },
                           "verdict": {
                             "type": "string",
@@ -1766,6 +1779,21 @@
                     "maximum": 10000,
                     "description": "最小 30・最大 10000 (F07-UT-001)"
                   },
+                  "tokenSource": {
+                    "type": "string",
+                    "enum": [
+                      "body",
+                      "cookie"
+                    ],
+                    "default": "body",
+                    "description": "token の抽出元"
+                  },
+                  "tokenCookieName": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "pattern": "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$",
+                    "description": "tokenSource が cookie の場合に抽出する応答 cookie 名"
+                  },
                   "role": {
                     "type": "string",
                     "description": "runLogin 済みの任意role。対象URLへ適用可能なcookieだけを収集requestへ付ける"
@@ -1789,6 +1817,18 @@
                     },
                     "targetUrl": {
                       "type": "string"
+                    },
+                    "tokenSource": {
+                      "type": "string",
+                      "enum": [
+                        "body",
+                        "cookie"
+                      ],
+                      "description": "token の抽出元。token 値は返さない"
+                    },
+                    "tokenCookieName": {
+                      "type": "string",
+                      "description": "tokenSource が cookie の場合に使用した応答 cookie 名"
                     },
                     "verdict": {
                       "type": "string",
@@ -1840,6 +1880,7 @@
                   "required": [
                     "sessionId",
                     "targetUrl",
+                    "tokenSource",
                     "verdict",
                     "sampleCount",
                     "duplicates",

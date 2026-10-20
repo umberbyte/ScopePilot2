@@ -75,6 +75,7 @@ describe('sequencer session (service)', () => {
             status: 200,
             contentType: 'text/plain',
             body: `token=role-sample-${index.toString(36)}`,
+            setCookieHeaders: [`SEQ_TOKEN=cookie-sample-${index.toString(36)}; Path=/; HttpOnly`],
           });
         }
       },
@@ -110,15 +111,22 @@ describe('sequencer session (service)', () => {
       targetUrl: 'http://fixture.target.test/tokens/sample',
       samples: 30,
       role: 'analyst',
+      tokenSource: 'cookie',
+      tokenCookieName: 'SEQ_TOKEN',
     });
     assert.deepEqual(transportCalls[0]?.sessionCookies, [
       { name: 'SEQ_SESSION', value: 'sequencer-secret', domain: 'fixture.target.test', path: '/tokens' },
     ]);
     assert.deepEqual(result.sessionCookieNames, ['SEQ_SESSION']);
+    assert.equal(result.tokenSource, 'cookie');
+    assert.equal(result.tokenCookieName, 'SEQ_TOKEN');
     assert.deepEqual(service.listSequencerSessions().at(-1)?.sessionCookieNames, ['SEQ_SESSION']);
     assert.equal(JSON.stringify(result).includes('sequencer-secret'), false);
+    assert.equal(JSON.stringify(result).includes('cookie-sample-'), false);
     assert.equal(JSON.stringify(service.listSequencerSessions()).includes('sequencer-secret'), false);
+    assert.equal(JSON.stringify(service.listSequencerSessions()).includes('cookie-sample-'), false);
     assert.equal(JSON.stringify(service.events()).includes('sequencer-secret'), false);
+    assert.equal(JSON.stringify(service.events()).includes('cookie-sample-'), false);
 
     await assert.rejects(
       service.runSequencerSession(operator, { targetUrl: 'http://fixture.target.test/tokens', samples: 30, role: 'missing' }),

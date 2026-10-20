@@ -83,11 +83,13 @@ export class NodeSequencerTransport implements SequencerTransportPort {
               return;
             }
             const rawContentType = response.headers['content-type'];
+            const setCookieHeaders = response.headers['set-cookie'];
             resolve({
               requestUrl,
               status: response.statusCode ?? 0,
               contentType: Array.isArray(rawContentType) ? rawContentType[0] ?? '' : rawContentType ?? '',
               body: Buffer.concat(chunks).toString('utf8'),
+              ...(setCookieHeaders === undefined ? {} : { setCookieHeaders }),
             });
           });
           response.on('error', reject);
