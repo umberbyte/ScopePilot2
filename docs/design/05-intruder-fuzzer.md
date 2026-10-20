@@ -30,6 +30,12 @@ redirect/DNSまで送信前拒否を要求する計画は、初期FuzzerのZAP�
 将来Node管理HTTP client経路を追加する場合は別capabilityとして計画に明示し、暗黙に切り替えない。
 どちらの経路でも送る文字列は次の4.の集合管理から供給する。
 
+2026-10-20 時点の製品 API は基準要求全体ではなく `targetUrl` と query position
+（name/value）だけを受ける。この限定された経路には Node 管理 HTTP client を実装し、core の
+送信前 scope 検査・逐次 2 RPS・redirect 非追従を Enforced として扱う。raw request template、
+header/path/body range、ZAP `sendRequest` を含む上記 (a) の完全経路とは区別し、後者が実装されるまで
+「Fuzzer 全体の基準実装完了」とは表示しない。
+
 ## 4. ペイロード集合の管理（PayloadSet）
 
 ```text

@@ -3,3 +3,5 @@ export * from './engine-config.ts';
 export * from './login-executor.ts';
 export * from './nuclei-runner.ts';
 export * from './playwright-explorer.ts';
+export * from './repeater-transport.ts';
+export * from './fuzz-transport.ts';

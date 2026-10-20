@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import type { LoginExecutionInput, LoginExecutorPort, LoginSessionCookie } from '@scopepilot2/core';
+import type { FuzzTransportPort, LoginExecutionInput, LoginExecutorPort, LoginSessionCookie } from '@scopepilot2/core';
 import { bootstrapFlow } from '../support/test-flow.ts';
 
 /** fuzz session の service 経路 (design/f05)。組合せ上限・cluster 集約・供給元登録。 */
@@ -138,5 +138,63 @@ describe('fuzz session (service)', () => {
       role: 'admin',
     });
     assert.deepEqual(filtered.sessionCookieNames, [], '別 Origin の cookie は適用しない');
+  });
+
+  test('実 transport へ組合せと適用可能 cookie を渡し、実送信 URL を通信 log に残す', async () => {
+    const calls: Parameters<FuzzTransportPort['send']>[0][] = [];
+    const fuzzTransport: FuzzTransportPort = {
+      async send(input) {
+        calls.push(input);
+        return {
+          requestUrl: 'http://fixture.target.test/fuzz?user=admin',
+          status: 201,
+          contentType: 'application/json',
+          contentLength: 12,
+          bodyHash: 'response-hash',
+        };
+      },
+    };
+    const executor: LoginExecutorPort = {
+      engineVersion: 'fake-login-transport-1',
+      async execute() {
+        return {
+          authenticated: true,
+          finalUrl: 'http://fixture.target.test/',
+          cookies: [{ name: 'SESSION', value: 'secret-cookie', domain: 'fixture.target.test', path: '/' }],
+        };
+      },
+    };
+    const { service, operator } = await bootstrapFlow({ loginExecutor: executor, fuzzTransport });
+    service.registerLoginFlow(operator, {
+      role: 'admin',
+      flowVersion: 'f1',
+      steps: [
+        { kind: 'navigate', target: 'http://fixture.target.test/login' },
+        { kind: 'fill', target: '#u', secretReference: 'vault://user' },
+        { kind: 'assert', target: 'Welcome' },
+      ],
+    });
+    await service.runLogin(operator, {
+      role: 'admin',
+      baseUrl: 'http://fixture.target.test',
+      secretValues: { 'vault://user': 'admin' },
+      expectedUrlPrefix: 'http://fixture.target.test/',
+    });
+
+    const result = await service.runFuzzSession(operator, {
+      targetUrl: 'http://fixture.target.test/fuzz',
+      positions: [{ name: 'user', values: ['admin'] }],
+      role: 'admin',
+    });
+    assert.equal(result.sent, 1);
+    assert.deepEqual(result.sessionCookieNames, ['SESSION']);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0]?.combination, ['admin']);
+    assert.equal(calls[0]?.sessionCookies?.[0]?.value, 'secret-cookie', '秘密値は transport にだけ渡す');
+    assert.equal(JSON.stringify(result).includes('secret-cookie'), false, '秘密値を結果へ出さない');
+
+    const traffic = service.listTraffic(10);
+    assert.ok(traffic.entries?.some((entry) => entry.url.endsWith('/fuzz?user=admin') && entry.status === 201 && entry.source === 'fuzzer'));
+    assert.equal(JSON.stringify(traffic).includes('secret-cookie'), false, '通信 log に cookie 値を残さない');
   });
 });

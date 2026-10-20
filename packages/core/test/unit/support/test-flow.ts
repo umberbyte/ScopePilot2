@@ -133,6 +133,8 @@ export interface BootstrapOptions {
   readonly loginExecutor?: import('../../../src/ports/engines.ts').LoginExecutorPort;
   /** explorer 差替え (session 対応 explorer の検証用)。 */
   readonly explorer?: import('../../../src/ports/engines.ts').ExplorationPort;
+  /** Fuzzer 実 transport 経路の検証用 fake。 */
+  readonly fuzzTransport?: import('../../../src/ports/engines.ts').FuzzTransportPort;
 }
 
 export interface TestFlow {
@@ -144,7 +146,7 @@ export interface TestFlow {
 
 /** 案件作成前の状態から使える service を組み立てる。 */
 export function createTestService(
-  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'explorer'> & {
+  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'explorer' | 'fuzzTransport'> & {
     runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
     caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
   } = {},
@@ -160,6 +162,7 @@ export function createTestService(
     capabilities: testCapabilities(options.zapCapabilityVersion),
     runtimeBundleHash: 'test-runtime-bundle',
     ...(options.loginExecutor === undefined ? {} : { loginExecutor: options.loginExecutor }),
+    ...(options.fuzzTransport === undefined ? {} : { fuzzTransport: options.fuzzTransport }),
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
     ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });

@@ -59,6 +59,7 @@ export interface HarnessOptions {
     readonly runtimeBundleHash?: string;
     readonly loginExecutor?: LoginExecutorPort;
     readonly repeaterTransport?: import('@scopepilot2/core').RepeaterTransportPort;
+    readonly fuzzTransport?: import('@scopepilot2/core').FuzzTransportPort;
   };
 }
 
@@ -80,6 +81,7 @@ export function createHarness(options: HarnessOptions = {}): SimulationHarness {
     runtimeBundleHash,
     loginExecutor,
     ...(options.engines?.repeaterTransport === undefined ? {} : { repeaterTransport: options.engines.repeaterTransport }),
+    ...(options.engines?.fuzzTransport === undefined ? {} : { fuzzTransport: options.engines.fuzzTransport }),
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
     ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });

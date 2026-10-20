@@ -66,6 +66,26 @@ export interface RepeaterTransportResponse {
   readonly redirectLocations: readonly string[];
 }
 
+/** Fuzz 実送信の 1 件の結果 (f05)。cluster 集約の素材のみ。 */
+export interface FuzzTransportResponse {
+  /** 実際に送信した URL（position を query parameter へ適用済み）。 */
+  readonly requestUrl: string;
+  readonly status: number;
+  readonly contentType: string;
+  readonly contentLength: number;
+  readonly bodyHash: string;
+}
+
+/** Fuzz の実 transport。未構成の service は fixture 応答を使う。 */
+export interface FuzzTransportPort {
+  send(input: {
+    readonly targetUrl: string;
+    readonly combination: readonly string[];
+    readonly positions: readonly { readonly name: string; readonly values: readonly string[] }[];
+    readonly sessionCookies?: readonly { readonly name: string; readonly value: string; readonly domain: string; readonly path: string }[];
+  }): Promise<FuzzTransportResponse>;
+}
+
 /** Repeater の実 transport (実 HTTP 送信)。未構成の service は fixture 応答を使う。 */
 export interface RepeaterTransportPort {
   send(input: {

@@ -2,7 +2,7 @@
  * A07 Fuzzer。`docs/detailed-design/f05-intruder-fuzzer.md`。
  * payload 集合の登録 (供給元・版・license 必須) と position 組合せの実行
  * (組合せ上限は送信前に検証、応答は cluster 集約) を扱う。
- * 実行は fixture adapter (決定的応答・仮想時計で rate を進める)。実 adapter は後続増分。
+ * fixture 構成では決定的応答・仮想時計、実 engine 構成では HTTP transport と実時間 rate を使う。
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';

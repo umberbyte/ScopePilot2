@@ -3,7 +3,9 @@ import { describe, test } from 'node:test';
 import { createServer, type Server } from 'node:http';
 import { composeEngines, createCapabilitySnapshots, createExplorerEngine, createScanEngine, resolveEngineSelection } from '../src/engine-config.ts';
 import { FixtureExplorer, FixtureZapEngine } from '@scopepilot2/simulation';
+import { NodeFuzzTransport } from '../src/fuzz-transport.ts';
 import { PlaywrightExplorerAdapter } from '../src/playwright-explorer.ts';
+import { NodeRepeaterTransport } from '../src/repeater-transport.ts';
 import { ZapEngineAdapter } from '../src/zap-engine.ts';
 
 /**
@@ -68,6 +70,8 @@ describe('engine selection (env)', () => {
       const engines = await composeEngines({ SCOPEPILOT_ZAP_BASE_URL: `http://127.0.0.1:${address.port}` });
       assert.equal(engines.mode, 'real');
       assert.ok(engines.scanEngine instanceof ZapEngineAdapter);
+      assert.ok(engines.repeaterTransport instanceof NodeRepeaterTransport);
+      assert.ok(engines.fuzzTransport instanceof NodeFuzzTransport);
       // 版が未解決のままだと runActiveScan の能力表一致検査に落ちるため、
       // compose 時点で解決済みであることを検証する。
       assert.equal(engines.scanEngine.engineVersion, 'zap 2.17.0');

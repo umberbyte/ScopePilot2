@@ -56,6 +56,8 @@ async function bootstrap(): Promise<void> {
             capabilities: engines.capabilities,
             clock: new SystemClock(),
             ...(engines.loginExecutor === undefined ? {} : { loginExecutor: engines.loginExecutor }),
+            ...(engines.repeaterTransport === undefined ? {} : { repeaterTransport: engines.repeaterTransport }),
+            ...(engines.fuzzTransport === undefined ? {} : { fuzzTransport: engines.fuzzTransport }),
             ...(engines.runtimeBundleHash === undefined ? {} : { runtimeBundleHash: engines.runtimeBundleHash }),
           },
         }),

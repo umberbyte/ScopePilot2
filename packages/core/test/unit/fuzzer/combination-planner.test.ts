@@ -20,6 +20,12 @@ describe('CombinationPlanner', () => {
     // index 生成は全体を materialize しない。
     assert.deepEqual(combinationAt(positions, 0), ['u0', 'r0']);
     assert.deepEqual(combinationAt(positions, 899), ['u29', 'r29']);
+
+    assert.throws(() => planCombinations([{ name: '', values: ['x'] }], 1), /position name is required/);
+    assert.throws(
+      () => planCombinations([{ name: 'user', values: ['a'] }, { name: 'user', values: ['b'] }], 2),
+      /duplicate fuzz position name/,
+    );
   });
 });
 

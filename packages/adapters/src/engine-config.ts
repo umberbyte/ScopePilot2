@@ -15,6 +15,7 @@
 import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort } from '@scopepilot2/core';
 import type { EngineCapabilitySnapshot } from '@scopepilot2/contracts';
 import { FixtureExplorer, FixtureZapEngine } from '@scopepilot2/simulation';
+import { NodeFuzzTransport } from './fuzz-transport.ts';
 import { PlaywrightLoginExecutor } from './login-executor.ts';
 import { NodeRepeaterTransport } from './repeater-transport.ts';
 import { ZapEngineAdapter } from './zap-engine.ts';
@@ -118,6 +119,8 @@ export interface ComposedEngines {
   readonly loginExecutor?: LoginExecutorPort;
   /** Repeater 実 transport (design/f04)。実 engine 時のみ構成。 */
   readonly repeaterTransport?: import('@scopepilot2/core').RepeaterTransportPort;
+  /** Fuzzer 実 transport (design/f05)。実 engine 時のみ構成。 */
+  readonly fuzzTransport?: import('@scopepilot2/core').FuzzTransportPort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   /** 実 engine 時の監査記録用 hash。fixture のときは呼出側の既定を使う。 */
   readonly runtimeBundleHash?: string;
@@ -160,12 +163,15 @@ export async function composeEngines(
   const loginExecutor = new PlaywrightLoginExecutor();
   // Repeater は ZAP 不要の直接送信のため、実 engine 構成では常に実 transport を使う。
   const repeaterTransport = new NodeRepeaterTransport();
+  // Fuzzer も ZAP 不要の直接送信経路を使う。core が scope と 2 RPS を送信前に強制する。
+  const fuzzTransport = new NodeFuzzTransport();
   return {
     mode: 'real',
     explorer,
     scanEngine,
     loginExecutor,
     repeaterTransport,
+    fuzzTransport,
     capabilities: createCapabilitySnapshots({
       zap: { engineVersion: scanEngine.engineVersion, real: realZap },
       explorer: { engineVersion: explorer.engineVersion, real: realExplorer },

@@ -20,7 +20,16 @@ export const FUZZ_DEFAULTS = {
 /** 組合せ総数が plan 上限を超えたら送信前に拒否する (F05-UT-001)。 */
 export function planCombinations(positions: readonly FuzzPosition[], maxRequests: number): { total: number } {
   let total = 1;
+  const names = new Set<string>();
   for (const position of positions) {
+    const name = position.name.trim();
+    if (name === '') {
+      throw domainError('ValidationFailed', 'fuzz position name is required');
+    }
+    if (names.has(name)) {
+      throw domainError('ValidationFailed', `duplicate fuzz position name: ${name}`);
+    }
+    names.add(name);
     if (position.values.length === 0) {
       throw domainError('ValidationFailed', `fuzz position ${position.name} has no values`);
     }

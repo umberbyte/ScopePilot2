@@ -41,4 +41,7 @@ payload position、集合、組合せ、rate/lease、checkpoint、抽出、結�
 
 ## 8. 非単体テスト
 
-ZAP sendRequest の改行、binary、cookie 挙動を IT、停止・resume・計画 hash 検証を simulation FT で行う。
+現行の query position 経路は `NodeFuzzTransport` を所有 HTTP server と結合し、query 反映、
+cookie、redirect 非追従、応答 metadata/hash、2 RPS、通信 log を常時 IT で確認する。
+raw request template を追加するときは、ZAP sendRequest の改行、binary、cookie 挙動を gated IT、
+停止・resume・計画 hash 検証を simulation FT で行う。

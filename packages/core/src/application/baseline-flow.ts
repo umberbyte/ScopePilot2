@@ -126,6 +126,8 @@ export interface BaselineFlowDeps {
   readonly scanAlertSettleMs?: number;
   /** Repeater の実 transport (design/f04)。未構成なら fixture 応答を使う。 */
   readonly repeaterTransport?: import('../ports/engines.ts').RepeaterTransportPort;
+  /** Fuzz の実 transport (design/f05)。未構成なら fixture 応答を使う。 */
+  readonly fuzzTransport?: import('../ports/engines.ts').FuzzTransportPort;
 
   /** login 実行器 (design/f09)。未構成の service では runLogin が ValidationFailed。 */
   readonly loginExecutor?: LoginExecutorPort;
@@ -198,8 +200,8 @@ export class BaselineFlowService {
   /** proxy の break queue (design/f02)。deadline 経過は既定で drop (暗黙 forward しない)。 */
   private readonly breakQueue = new BreakQueue(100);
 
-  /** HTTP 通信 log と endpoint 集約 (design/f03)。探索・Repeater の観測通信を記録する。 */
-  private readonly trafficLog: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' }[] = [];
+  /** HTTP 通信 log と endpoint 集約 (design/f03)。探索・Repeater・Fuzzer の観測通信を記録する。 */
+  private readonly trafficLog: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' }[] = [];
   private readonly siteMapProjector = new SiteMapProjector();
 
   /** 業務ロジック検証の実行履歴 (design/f17)。 */
@@ -466,8 +468,8 @@ export class BaselineFlowService {
   }
 
   /** 観測通信の記録 (traffic log と endpoint 集約の両方に入れる)。 */
-  private recordObservedExchange(summary: { url: string; method: string; status: number; contentType: string }, at: string, source: 'explore' | 'repeater'): void {
-    (this.trafficLog as { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' }[]).push({
+  private recordObservedExchange(summary: { url: string; method: string; status: number; contentType: string }, at: string, source: 'explore' | 'repeater' | 'fuzzer'): void {
+    (this.trafficLog as { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' }[]).push({
       exchangeId: this.deps.ids.next('exchange'),
       ...summary,
       at,
@@ -792,13 +794,38 @@ export class BaselineFlowService {
     }
     const cap = input.maxRequests ?? Math.min(200, caseRecord.scope.limits.maxRequests);
     const { total } = planCombinations(input.positions, cap);
+    // 実 transport 構成時は rate (2 req/s) を実時間で守る。fixture は仮想時計のまま。
+    const realTransport = this.deps.fuzzTransport;
     let virtualNowMs = 0;
     const outcomes: FuzzResponseOutcome[] = [];
     const result = await runFuzz(
       {
         send: async (_index, combination) => {
+          if (realTransport !== undefined) {
+            const response = await realTransport.send({
+              targetUrl: canonical,
+              combination,
+              positions: input.positions,
+              ...(appliedCookies === undefined
+                ? {}
+                : {
+                    sessionCookies: appliedCookies.map((cookie) => ({
+                      name: cookie.name,
+                      value: cookie.value,
+                      domain: cookie.domain,
+                      path: cookie.path,
+                    })),
+                  }),
+            });
+            outcomes.push({ status: response.status, contentLength: response.contentLength, bodyHash: response.bodyHash });
+            this.recordObservedExchange(
+              { url: response.requestUrl, method: 'GET', status: response.status, contentType: response.contentType },
+              this.deps.clock.now().toISOString(),
+              'fuzzer',
+            );
+            return;
+          }
           // fixture adapter: 応答は先頭 position の値だけで決まる (cluster 集約の実演)。
-          // 実 adapter は appliedCookies を各要求へ付けて送信する。
           const body = `resp:${combination[0] ?? ''}`;
           outcomes.push({ status: 200, contentLength: body.length, bodyHash: hashStable('scopepilot2.fuzz.body', body) });
         },
@@ -807,9 +834,15 @@ export class BaselineFlowService {
       total,
       {
         isCancelled: () => false,
-        now: () => virtualNowMs,
+        now: () => (realTransport === undefined ? virtualNowMs : Date.now()),
         sleep: async (ms) => {
-          virtualNowMs += ms;
+          if (realTransport === undefined) {
+            virtualNowMs += ms;
+          } else {
+            await new Promise((resolve) => {
+              setTimeout(resolve, ms);
+            });
+          }
         },
       },
     );
