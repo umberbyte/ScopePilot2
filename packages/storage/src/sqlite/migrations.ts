@@ -110,6 +110,14 @@ export const MIGRATIONS: readonly Migration[] = [
       'CREATE INDEX IF NOT EXISTS ai_invocations_task_idx ON ai_invocations (task_kind, completed_at)',
     ],
   },
+  {
+    version: 4,
+    name: 'durable-findings',
+    statements: [
+      'ALTER TABLE findings ADD COLUMN finding_json TEXT',
+      'CREATE INDEX IF NOT EXISTS findings_case_seen_idx ON findings (case_id, last_seen_at)',
+    ],
+  },
 ];
 
 export interface MigrationResult {

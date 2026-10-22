@@ -5,6 +5,8 @@
  * 自動再開は行わない。
  */
 import type { DatabaseSync } from 'node:sqlite';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { canonicalJson, hashStable, type AuthorizationRecord, type CaseRecord, type Finding, type RunRecord, type StopReason } from '@scopepilot2/contracts';
 import type { EvidenceStorePort, StoredEvidence } from '@scopepilot2/core';
 import { RunStateMachine } from '@scopepilot2/core';
@@ -12,10 +14,12 @@ import { RunStateMachine } from '@scopepilot2/core';
 /** EvidenceStorePort の SQLite 実装。原本 hash は content hash を正本とする。 */
 export class SqliteEvidenceStore implements EvidenceStorePort {
   private readonly db: DatabaseSync;
+  private readonly blobDirectory: string | undefined;
   private sequence = 0;
 
-  constructor(db: DatabaseSync) {
+  constructor(db: DatabaseSync, blobDirectory?: string) {
     this.db = db;
+    this.blobDirectory = blobDirectory;
     const row = this.db.prepare('SELECT COUNT(*) AS c FROM evidence_objects').get() as { c: number };
     this.sequence = row.c;
   }
@@ -29,10 +33,26 @@ export class SqliteEvidenceStore implements EvidenceStorePort {
       savedAt: new Date().toISOString(),
       ...(metadata === undefined || Object.keys(metadata).length === 0 ? {} : { metadata }),
     };
+    let storedMetadata = metadata;
+    if (this.blobDirectory !== undefined) {
+      await mkdir(this.blobDirectory, { recursive: true });
+      const fileName = `${evidence.sha256}.txt`;
+      const path = join(this.blobDirectory, fileName);
+      try {
+        await writeFile(path, content, { encoding: 'utf8', flag: 'wx' });
+      } catch (cause) {
+        if (!(cause instanceof Error) || !('code' in cause) || cause.code !== 'EEXIST') throw cause;
+        const existing = await readFile(path, 'utf8');
+        if (hashStable('scopepilot2.evidence', existing) !== evidence.sha256) {
+          throw new Error(`evidence blob hash mismatch: ${fileName}`);
+        }
+      }
+      storedMetadata = { ...(metadata ?? {}), blob: `evidence/blobs/${fileName}`, mediaType: 'text/plain; charset=utf-8' };
+    }
     this.db
       .prepare('INSERT INTO evidence_objects (evidence_id, label, sha256, saved_at, metadata_json) VALUES (?, ?, ?, ?, ?)')
-      .run(evidence.evidenceId, evidence.label, evidence.sha256, evidence.savedAt, metadata === undefined ? null : canonicalJson(metadata));
-    return evidence;
+      .run(evidence.evidenceId, evidence.label, evidence.sha256, evidence.savedAt, storedMetadata === undefined ? null : canonicalJson(storedMetadata));
+    return storedMetadata === undefined ? evidence : { ...evidence, metadata: storedMetadata };
   }
 
   list(): readonly StoredEvidence[] {
@@ -162,7 +182,7 @@ export interface WorkspaceInputSource {
   readonly importedAt: string;
 }
 
-export type AiTaskKind = 'DocumentExtract' | 'ReportDraft';
+export type AiTaskKind = 'DocumentExtract' | 'ReportDraft' | 'BrowserActionPlan' | 'InteractiveDiagnosticPlan';
 export type AiInvocationStatus = 'succeeded' | 'failed';
 
 export interface AiInvocationRecord {
@@ -311,6 +331,10 @@ export class WorkspaceRepository {
       importedAt: row.imported_at,
     }));
   }
+
+  deleteInput(inputId: string): void {
+    this.db.prepare('DELETE FROM input_sources WHERE input_id = ?').run(inputId);
+  }
 }
 
 export class RunRepository {
@@ -421,9 +445,40 @@ export class FindingRepository {
     return { inserted: false, occurrences };
   }
 
+  /** Persist the aggregate exactly; unlike legacy upsert this does not invent an extra occurrence. */
+  save(caseId: string, dedupeKey: string, finding: Finding): void {
+    this.db.prepare(
+      `INSERT INTO findings (finding_id, case_id, dedupe_key, title, severity, status, url, source_json, first_seen_at, last_seen_at, occurrences, finding_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(case_id, dedupe_key) DO UPDATE SET
+         title = excluded.title,
+         severity = excluded.severity,
+         status = excluded.status,
+         url = excluded.url,
+         source_json = excluded.source_json,
+         first_seen_at = excluded.first_seen_at,
+         last_seen_at = excluded.last_seen_at,
+         occurrences = excluded.occurrences,
+         finding_json = excluded.finding_json`,
+    ).run(
+      finding.findingId,
+      caseId,
+      dedupeKey,
+      finding.title,
+      finding.severity,
+      finding.status,
+      finding.url,
+      canonicalJson(finding.source),
+      finding.firstSeenAt,
+      finding.lastSeenAt,
+      finding.occurrences,
+      canonicalJson(finding),
+    );
+  }
+
   list(caseId: string): readonly Finding[] {
     const rows = this.db
-      .prepare('SELECT finding_id, title, severity, status, url, source_json, first_seen_at, last_seen_at, occurrences FROM findings WHERE case_id = ? ORDER BY finding_id')
+      .prepare('SELECT finding_id, title, severity, status, url, source_json, first_seen_at, last_seen_at, occurrences, finding_json FROM findings WHERE case_id = ? ORDER BY finding_id')
       .all(caseId) as {
       finding_id: string;
       title: string;
@@ -434,8 +489,9 @@ export class FindingRepository {
       first_seen_at: string;
       last_seen_at: string;
       occurrences: number;
+      finding_json: string | null;
     }[];
-    return rows.map((row) => ({
+    return rows.map((row) => row.finding_json !== null ? JSON.parse(row.finding_json) as Finding : ({
       findingId: row.finding_id,
       title: row.title,
       source: JSON.parse(row.source_json) as Finding['source'],

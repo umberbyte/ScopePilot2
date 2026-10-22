@@ -63,8 +63,13 @@ export class FakeScanEngine implements ActiveScanEnginePort {
   stopCalls = 0;
   private sequence = 0;
 
-  async start(request: Parameters<ActiveScanEnginePort['start']>[0]): Promise<string> {
-    this.startCalls.push({ targets: [...request.targets], leasedMaxRequests: request.leasedLimits.maxRequests });
+  async start(request: Parameters<ActiveScanEnginePort['start']>[0], context?: Parameters<ActiveScanEnginePort['start']>[1]): Promise<string> {
+    this.startCalls.push({
+      targets: [...request.targets],
+      leasedMaxRequests: request.leasedLimits.maxRequests,
+      sessionCookies: context?.sessionCookies ?? [],
+      requestSeeds: context?.requestSeeds ?? [],
+    });
     this.sequence += 1;
     return `fake-run-${this.sequence}`;
   }
@@ -99,9 +104,16 @@ export class FailingAlertEvidenceStore extends InMemoryEvidenceStore {
 export interface ActiveScanEngineStartCall {
   readonly targets: readonly string[];
   readonly leasedMaxRequests: number;
+  readonly sessionCookies: readonly import('../../../src/ports/engines.ts').LoginSessionCookie[];
+  readonly requestSeeds: readonly {
+    readonly url: string;
+    readonly method: string;
+    readonly contentType?: string;
+    readonly inputPoints: readonly import('@scopepilot2/contracts').RequestInputPoint[];
+  }[];
 }
 
-function testCapabilities(zapVersion = 'fake-zap-1'): readonly EngineCapabilitySnapshot[] {
+function testCapabilities(zapVersion = 'fake-zap-1', nucleiVersion?: string): readonly EngineCapabilitySnapshot[] {
   const enforced = {
     preSendScopeEnforcement: 'Enforced',
     stopControl: 'Enforced',
@@ -117,6 +129,7 @@ function testCapabilities(zapVersion = 'fake-zap-1'): readonly EngineCapabilityS
   return [
     { engineKind: 'playwright', engineVersion: 'fake-explorer-1', source: 'fixture', guaranteeLevels: enforced, maxOvershootRatio: 0, measuredAt: TEST_NOW },
     { engineKind: 'zap', engineVersion: zapVersion, source: 'fixture', guaranteeLevels: delegated, maxOvershootRatio: 0.05, measuredAt: TEST_NOW },
+    ...(nucleiVersion === undefined ? [] : [{ engineKind: 'nuclei' as const, engineVersion: nucleiVersion, source: 'fixture' as const, guaranteeLevels: delegated, maxOvershootRatio: 0.05, measuredAt: TEST_NOW }]),
   ];
 }
 
@@ -131,6 +144,7 @@ export interface BootstrapOptions {
   readonly zapCapabilityVersion?: string;
   /** login 実行器 (design/f09 の runLogin 検証用 fake を渡す)。 */
   readonly loginExecutor?: import('../../../src/ports/engines.ts').LoginExecutorPort;
+  readonly loginProxyServer?: string;
   /** explorer 差替え (session 対応 explorer の検証用)。 */
   readonly explorer?: import('../../../src/ports/engines.ts').ExplorationPort;
   /** Fuzzer 実 transport 経路の検証用 fake。 */
@@ -143,6 +157,8 @@ export interface BootstrapOptions {
   readonly webSocketTransport?: import('../../../src/ports/engines.ts').WebSocketTransportPort;
   readonly advancedTransport?: import('../../../src/ports/engines.ts').AdvancedTransportPort;
   readonly domObserver?: import('../../../src/ports/engines.ts').DomObservationPort;
+  readonly interactiveBrowser?: import('../../../src/ports/engines.ts').InteractiveBrowserPort;
+  readonly nucleiRunner?: import('../../../src/ports/engines.ts').NucleiScanPort;
 }
 
 export interface TestFlow {
@@ -154,7 +170,7 @@ export interface TestFlow {
 
 /** 案件作成前の状態から使える service を組み立てる。 */
 export function createTestService(
-  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'explorer' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver'> & {
+  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'loginProxyServer' | 'explorer' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver' | 'interactiveBrowser' | 'nucleiRunner'> & {
     runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
     caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
   } = {},
@@ -167,15 +183,18 @@ export function createTestService(
     evidence: options.evidenceFailure === true ? new FailingAlertEvidenceStore() : new InMemoryEvidenceStore(),
     explorer,
     scanEngine,
-    capabilities: testCapabilities(options.zapCapabilityVersion),
+    capabilities: testCapabilities(options.zapCapabilityVersion, options.nucleiRunner?.engineVersion),
     runtimeBundleHash: 'test-runtime-bundle',
     ...(options.loginExecutor === undefined ? {} : { loginExecutor: options.loginExecutor }),
+    ...(options.loginProxyServer === undefined ? {} : { loginProxyServer: options.loginProxyServer }),
     ...(options.fuzzTransport === undefined ? {} : { fuzzTransport: options.fuzzTransport }),
     ...(options.sequencerTransport === undefined ? {} : { sequencerTransport: options.sequencerTransport }),
     ...(options.oastProvider === undefined ? {} : { oastProvider: options.oastProvider }),
     ...(options.webSocketTransport === undefined ? {} : { webSocketTransport: options.webSocketTransport }),
     ...(options.advancedTransport === undefined ? {} : { advancedTransport: options.advancedTransport }),
     ...(options.domObserver === undefined ? {} : { domObserver: options.domObserver }),
+    ...(options.interactiveBrowser === undefined ? {} : { interactiveBrowser: options.interactiveBrowser }),
+    ...(options.nucleiRunner === undefined ? {} : { nucleiRunner: options.nucleiRunner }),
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
     ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });

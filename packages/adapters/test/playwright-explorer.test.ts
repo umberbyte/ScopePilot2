@@ -13,7 +13,15 @@ interface StubResponse {
   headers(): Record<string, string>;
 }
 
-function stubPage(options: { url: string; status: number; contentType: string; title: string; hrefs: readonly string[]; fail?: boolean }): StubPage {
+function stubPage(options: {
+  url: string;
+  status: number;
+  contentType: string;
+  title: string;
+  hrefs: readonly string[];
+  javascriptSignals?: { scriptElements: number; inlineEventHandlers: number; javascriptUrls: number };
+  fail?: boolean;
+}): StubPage {
   return {
     goto: async (url: string) => {
       if (options.fail) {
@@ -29,7 +37,11 @@ function stubPage(options: { url: string; status: number; contentType: string; t
       return response;
     },
     title: async () => options.title,
-    $$eval: async (selector: string) => (selector === 'a[href]' ? [...options.hrefs] : []),
+    $$eval: async (selector: string) => selector === 'a[href]'
+      ? [...options.hrefs]
+      : selector === '*' && options.javascriptSignals !== undefined
+        ? [options.javascriptSignals]
+        : [],
     close: async () => undefined,
   };
 }
@@ -57,6 +69,24 @@ describe('Playwright explorer adapter (stub browser 契約検証)', () => {
     assert.equal(observation?.contentType, 'text/html; charset=utf-8');
     // http(s) の link だけ残す (javascript: 等は除外。scope 外 link は core 側で拒否記録になる)。
     assert.deepEqual(observation?.links, ['http://fixture.target.test/next', 'http://elsewhere.example/x']);
+    await adapter.close();
+  });
+
+  test('JavaScript実行要素を本文なしの件数として観測する', async () => {
+    const page = stubPage({
+      url: 'http://fixture.target.test/client',
+      status: 200,
+      contentType: 'text/html',
+      title: 'Client page',
+      hrefs: [],
+      javascriptSignals: { scriptElements: 2, inlineEventHandlers: 1, javascriptUrls: 1 },
+    });
+    const adapter = new PlaywrightExplorerAdapter({
+      scope: { allowedOrigins: ['http://fixture.target.test'], deniedOrigins: [] },
+      launcher: async () => ({ newPage: async () => page, close: async () => undefined }),
+    });
+    const observation = await adapter.observe('http://fixture.target.test/client');
+    assert.deepEqual(observation?.javascriptSignals, { scriptElements: 2, inlineEventHandlers: 1, javascriptUrls: 1 });
     await adapter.close();
   });
 
@@ -101,6 +131,37 @@ describe('Playwright explorer adapter (stub browser 契約検証)', () => {
     assert.equal(observation?.status, 404);
     assert.deepEqual(observation?.links, [], '4xx は page 解析 (link 抽出) を行わない');
     await notFound.close();
+  });
+
+  test('ダウンロード開始URLは探索全体を止めず非HTMLの観測結果として残す', async () => {
+    let pageClosed = false;
+    const downloadPage: StubPage = {
+      goto: async () => { throw new Error('page.goto: Download is starting'); },
+      title: async () => { throw new Error('download response must not be parsed as HTML'); },
+      $$eval: async () => { throw new Error('download response must not be parsed as HTML'); },
+      close: async () => { pageClosed = true; },
+    };
+    const adapter = new PlaywrightExplorerAdapter({
+      scope: { allowedOrigins: ['http://fixture.target.test'], deniedOrigins: [] },
+      launcher: async () => ({
+        newPage: async () => downloadPage,
+        close: async () => undefined,
+      }),
+    });
+
+    const observation = await adapter.observe('http://fixture.target.test/config.inc.php.dist');
+    assert.deepEqual(observation, {
+      url: 'http://fixture.target.test/config.inc.php.dist',
+      status: 0,
+      contentType: 'application/octet-stream',
+      discoveredFrom: null,
+      depth: 0,
+      originType: 'crawl',
+      links: [],
+      forms: [],
+    });
+    assert.equal(pageClosed, true);
+    await adapter.close();
   });
 
   test('observeWithSession は session cookie を page 生成へ渡し、scope 強制も同じ入口で効く', async () => {

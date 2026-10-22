@@ -46,8 +46,26 @@ export interface ImportAlertsResult {
   readonly duplicateCount: number;
 }
 
+export interface ObservationFindingCandidate {
+  readonly key: string;
+  readonly title: string;
+  readonly url: string;
+  readonly method?: string;
+  readonly param?: string;
+  readonly severity: FindingSeverity;
+}
+
 export class FindingImporter {
   private readonly findingsByDedupeKey = new Map<string, Finding>();
+
+  constructor(initialFindings: readonly Finding[] = []) {
+    for (const finding of initialFindings) {
+      const key = finding.source.kind === 'nuclei-match'
+        ? `nuclei|${finding.enginePluginId ?? ''}|${finding.url}`
+        : `${finding.enginePluginId ?? ''}|${finding.url}|${finding.param ?? ''}`;
+      this.findingsByDedupeKey.set(key, finding);
+    }
+  }
 
   /** 現在の全所見 (作成順)。 */
   list(): readonly Finding[] {
@@ -110,6 +128,46 @@ export class FindingImporter {
           lastSeenAt: context.now,
           occurrences: 1,
           enginePluginId: alert.pluginId,
+        };
+        this.findingsByDedupeKey.set(key, finding);
+        created.push(finding);
+      } else {
+        duplicateCount += 1;
+        const updated: Finding = { ...existing, occurrences: existing.occurrences + 1, lastSeenAt: context.now };
+        this.findingsByDedupeKey.set(key, updated);
+        reobserved.push(updated);
+      }
+    }
+    return { created, reobserved, duplicateCount };
+  }
+
+  /** Import a bounded first-party observation without pretending it came from ZAP. */
+  importObservationCandidates(
+    candidates: readonly ObservationFindingCandidate[],
+    context: ImportAlertsContext,
+  ): ImportAlertsResult {
+    const created: Finding[] = [];
+    const reobserved: Finding[] = [];
+    let duplicateCount = 0;
+
+    for (const candidate of candidates) {
+      const key = `${candidate.key}|${candidate.url}|${candidate.param ?? ''}`;
+      const existing = this.findingsByDedupeKey.get(key);
+      if (existing === undefined) {
+        const finding: Finding = {
+          findingId: context.makeFindingId(),
+          title: candidate.title,
+          source: { kind: 'observation', engineVersion: context.engineVersion, unverified: true },
+          url: candidate.url,
+          ...(candidate.method === undefined ? {} : { method: candidate.method }),
+          ...(candidate.param === undefined ? {} : { param: candidate.param }),
+          severity: candidate.severity,
+          status: 'candidate',
+          evidenceRefs: [context.evidenceRef],
+          firstSeenAt: context.now,
+          lastSeenAt: context.now,
+          occurrences: 1,
+          enginePluginId: candidate.key,
         };
         this.findingsByDedupeKey.set(key, finding);
         created.push(finding);

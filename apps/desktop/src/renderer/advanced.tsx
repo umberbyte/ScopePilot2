@@ -528,7 +528,6 @@ function ScanPlansScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const [scanResult, setScanResult] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [newCaseOrigin, setNewCaseOrigin] = useState('');
 
   const run = useCallback(
     async (action: () => Promise<void>): Promise<void> => {
@@ -988,6 +987,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
   const [events, setEvents] = useState<readonly AuditEvent[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [newCaseOrigin, setNewCaseOrigin] = useState('');
 
   const refreshCase = useCallback(async () => {
     try {

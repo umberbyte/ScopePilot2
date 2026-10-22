@@ -15,8 +15,8 @@ import { startVulnerableTarget } from './vulnerable-target.ts';
  * 対象は所有している vulnerable-target (127.0.0.1) のみ。
  */
 const nucleiCommand = process.env['SCOPEPILOT_NUCLEI_COMMAND'] ?? '';
-const templatesDir = process.env['SCOPEPILOT_NUCLEI_TEMPLATES'] ?? '';
-const gated = nucleiCommand !== '' && templatesDir !== '' ? describe : describe.skip;
+const templateManifest = process.env['SCOPEPILOT_NUCLEI_TEMPLATE_MANIFEST'] ?? '';
+const gated = nucleiCommand !== '' && templateManifest !== '' ? describe : describe.skip;
 
 const OPERATOR: OperatorProfile = {
   operatorId: 'operator-nuclei-library',
@@ -38,7 +38,7 @@ gated('nuclei templates 一式の取込 (実 library・所有ターゲット)', 
       //    本体に security header が無い vulnerable-target に必ず match する。
       const runner = new NucleiRunner({
         command: nucleiCommand,
-        argsPrefix: ['-t', `${templatesDir}/http/misconfiguration/http-missing-security-headers.yaml`],
+        templateManifestPath: templateManifest,
         timeoutMs: 240_000,
       });
       const version = await runner.version();
@@ -97,7 +97,7 @@ gated('nuclei templates 一式の取込 (実 library・所有ターゲット)', 
       // 実 library を directory 指定で走らせ、出力形式が解析可能であることの確認。
       const runner = new NucleiRunner({
         command: nucleiCommand,
-        argsPrefix: ['-t', `${templatesDir}/http/exposures/configs`, '-silent'],
+        templateManifestPath: templateManifest,
         timeoutMs: 240_000,
       });
       const result = await runner.run({ targets: [target.plainUrl] });

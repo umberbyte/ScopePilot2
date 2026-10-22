@@ -8,8 +8,9 @@
  * (実 browser での結合は実環境での確認項目)。
  */
 import type { ExplorationPort } from '@scopepilot2/core';
-import type { PageObservation } from '@scopepilot2/contracts';
+import type { ObservedHttpRequest, PageObservation, RequestInputPoint } from '@scopepilot2/contracts';
 import { ScopePolicy } from '@scopepilot2/core';
+import type { Request as PlaywrightRequest, Response as PlaywrightResponse } from 'playwright';
 
 /** テスト差替え用の最小 browser 面 (playwright の該当部分に対応)。 */
 export interface StubBrowserContext {
@@ -22,6 +23,7 @@ export interface StubPage {
   goto(url: string): Promise<{ status(): number; headers(): Record<string, string> } | null>;
   title(): Promise<string>;
   $$eval(selector: string, fn: (elements: readonly unknown[]) => readonly unknown[]): Promise<readonly unknown[]>;
+  observedRequests?(): readonly ObservedHttpRequest[];
   close(): Promise<void>;
 }
 
@@ -38,10 +40,37 @@ export interface BrowserCookie {
 }
 
 /** 既定 launcher: playwright を動的 import して chromium を起動する。 */
-const createDefaultLauncher = (fixedCookies?: readonly BrowserCookie[]): BrowserLauncher => {
+function requestInputPoints(request: PlaywrightRequest): readonly RequestInputPoint[] {
+  const parsed = new URL(request.url());
+  const points: RequestInputPoint[] = [...new Set(parsed.searchParams.keys())].map((name) => ({ name, location: 'query', type: 'string' }));
+  const postData = request.postData() ?? '';
+  const contentType = request.headers()['content-type'] ?? '';
+  if (postData !== '') {
+    if (/application\/x-www-form-urlencoded/i.test(contentType)) {
+      for (const name of new Set(new URLSearchParams(postData).keys())) points.push({ name, location: 'body', type: 'string' });
+    } else if (/multipart\/form-data/i.test(contentType)) {
+      const names = [...postData.matchAll(/\bname="([^"]+)"/g)].map((match) => match[1]).filter((name): name is string => name !== undefined);
+      for (const name of new Set(names)) points.push({ name, location: 'file', type: 'multipart' });
+    } else if (/application\/(?:[\w.+-]*\+)?json/i.test(contentType)) {
+      try {
+        const value = JSON.parse(postData) as unknown;
+        if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+          for (const name of Object.keys(value)) points.push({ name, location: 'body', type: 'json' });
+        }
+      } catch {
+        points.push({ name: '$body', location: 'body', type: 'json' });
+      }
+    } else {
+      points.push({ name: '$body', location: 'body', type: contentType || 'opaque' });
+    }
+  }
+  return points;
+}
+
+const createDefaultLauncher = (fixedCookies?: readonly BrowserCookie[], proxyServer?: string): BrowserLauncher => {
   return async () => {
     const playwright = await import('playwright');
-    const browser = await playwright.chromium.launch();
+    const browser = await playwright.chromium.launch(proxyServer === undefined ? {} : { proxy: { server: proxyServer } });
     return {
       newPage: async (perCallCookies?: readonly BrowserCookie[]) => {
         const context = await browser.newContext();
@@ -58,12 +87,52 @@ const createDefaultLauncher = (fixedCookies?: readonly BrowserCookie[]): Browser
           })));
         }
         const page = await context.newPage();
+        const requests: ObservedHttpRequest[] = [];
+        const captureRequest = (request: PlaywrightRequest): void => {
+          const method = request.method().toUpperCase();
+          requests.push({
+            requestId: `browser-${String(requests.length + 1).padStart(6, '0')}`,
+            url: request.url(),
+            method,
+            resourceType: request.resourceType(),
+            ...(request.headers()['content-type'] === undefined ? {} : { contentType: request.headers()['content-type'] }),
+            inputPoints: requestInputPoints(request),
+            sourceUrl: page.url() || request.url(),
+          });
+        };
+        page.on('request', captureRequest);
         return {
-          goto: async (url: string) => await page.goto(url, { waitUntil: 'domcontentloaded' }),
+          goto: async (url: string) => {
+            let navigationResponse: PlaywrightResponse | null = null;
+            const captureNavigationResponse = (response: PlaywrightResponse): void => {
+              if (response.frame() === page.mainFrame() && response.request().isNavigationRequest()) {
+                navigationResponse = response;
+              }
+            };
+            page.on('response', captureNavigationResponse);
+            try {
+              return await page.goto(url, { waitUntil: 'domcontentloaded' });
+            } catch (cause) {
+              // Chromium turns Content-Disposition: attachment into a download and
+              // page.goto rejects even though an HTTP response was received.
+              if (isDownloadNavigationError(cause) && navigationResponse !== null) {
+                const captured = navigationResponse as PlaywrightResponse;
+                return {
+                  status: () => captured.status(),
+                  headers: () => captured.headers(),
+                };
+              }
+              throw cause;
+            } finally {
+              page.off('response', captureNavigationResponse);
+            }
+          },
           title: async () => await page.title(),
           $$eval: async (selector: string, fn: (elements: readonly unknown[]) => readonly unknown[]): Promise<readonly unknown[]> =>
             await page.$$eval(selector, fn as never) as readonly unknown[],
+          observedRequests: () => [...requests],
           close: async () => {
+            page.off('request', captureRequest);
             await context.close();
           },
         } satisfies StubPage;
@@ -80,6 +149,29 @@ export interface PlaywrightExplorerOptions {
   readonly launcher?: BrowserLauncher;
   /** 認証済み session の cookie。既定 launcher でのみ使う (差替え launcher は自前で扱う)。 */
   readonly cookies?: readonly BrowserCookie[];
+  /** Route exploration through ZAP so authenticated browser traffic seeds its site tree. */
+  readonly proxyServer?: string;
+}
+
+function isDownloadNavigationError(cause: unknown): boolean {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return /download is starting/i.test(message);
+}
+
+function downloadObservation(url: string): PageObservation {
+  return {
+    url,
+    // Playwright does not expose a navigation Response when the response is
+    // converted into a download. The server accepted the request, so retain
+    // the URL as a non-HTML observation instead of aborting the entire crawl.
+    status: 0,
+    contentType: 'application/octet-stream',
+    discoveredFrom: null,
+    depth: 0,
+    originType: 'crawl',
+    links: [],
+    forms: [],
+  };
 }
 
 export class PlaywrightExplorerAdapter implements ExplorationPort {
@@ -91,7 +183,7 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
 
   constructor(options: PlaywrightExplorerOptions) {
     this.scope = options.scope;
-    this.launcher = options.launcher ?? createDefaultLauncher(options.cookies);
+    this.launcher = options.launcher ?? createDefaultLauncher(options.cookies, options.proxyServer);
   }
 
   /** 案件の作成・切替時に、送信前強制へ使う scope を更新する。 */
@@ -145,12 +237,13 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
         return null;
       }
       const status = response.status();
-      if (status >= 400) {
-        // 観測としては記録するが page 解析 (link 抽出) は行わない。
+      const contentType = response.headers()['content-type'] ?? 'application/octet-stream';
+      if (status >= 400 || !/^(?:text\/html|application\/xhtml\+xml)(?:;|$)/i.test(contentType)) {
+        // エラー応答と非HTML応答は観測として記録するが、DOM解析は行わない。
         return {
           url,
           status,
-          contentType: response.headers()['content-type'] ?? 'application/octet-stream',
+          contentType,
           discoveredFrom: null,
           depth: 0,
           originType: 'crawl',
@@ -183,18 +276,43 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
               : fields.length > 0 ? 'filter' : 'unknown';
         return { actionUrl: form.action || location.href, method, fields, classification };
       }));
+      const javascriptSignalRows = await page.$$eval('*', (elements) => {
+        let scriptElements = 0;
+        let inlineEventHandlers = 0;
+        let javascriptUrls = 0;
+        for (const candidate of elements) {
+          const element = candidate as Element;
+          if (element.tagName.toLowerCase() === 'script') {
+            const type = element.getAttribute('type')?.trim().toLowerCase() ?? '';
+            if (type === '' || type === 'module' || type.includes('javascript') || type.includes('ecmascript')) scriptElements += 1;
+          }
+          for (const attribute of Array.from(element.attributes)) {
+            if (attribute.name.toLowerCase().startsWith('on') && attribute.value.trim() !== '') inlineEventHandlers += 1;
+            if ((attribute.name.toLowerCase() === 'href' || attribute.name.toLowerCase() === 'src')
+              && attribute.value.trim().toLowerCase().startsWith('javascript:')) javascriptUrls += 1;
+          }
+        }
+        return [{ scriptElements, inlineEventHandlers, javascriptUrls }];
+      });
+      const javascriptSignals = javascriptSignalRows[0] as PageObservation['javascriptSignals'] | undefined;
+      const observedRequests = (page.observedRequests?.() ?? []).filter((request) => ScopePolicy.decide(this.scope, request.url).allowed);
       return {
         url,
         status,
-        contentType: response.headers()['content-type'] ?? 'application/octet-stream',
+        contentType,
         ...(title === '' ? {} : { title }),
         discoveredFrom: null,
         depth: 0,
         originType: 'crawl',
         links: (links as readonly string[]).filter((link) => link.startsWith('http://') || link.startsWith('https://')),
         forms: forms as PageObservation['forms'],
+        requests: observedRequests,
+        ...(javascriptSignals === undefined ? {} : { javascriptSignals }),
       };
     } catch (cause) {
+      if (isDownloadNavigationError(cause)) {
+        return downloadObservation(url);
+      }
       throw new Error(`Playwright exploration failed for ${url}: ${cause instanceof Error ? cause.message : String(cause)}`);
     } finally {
       await page.close();

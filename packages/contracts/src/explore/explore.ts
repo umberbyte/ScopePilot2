@@ -10,6 +10,28 @@ export interface FormFieldDescriptor {
   readonly type: string;
 }
 
+/**
+ * An attackable input observed by the browser. Values are deliberately not
+ * retained: CSRF tokens, passwords and personal data must not cross the
+ * renderer/API boundary just to describe scan coverage.
+ */
+export interface RequestInputPoint {
+  readonly name: string;
+  readonly location: 'query' | 'body' | 'path' | 'header' | 'cookie' | 'file';
+  readonly type: string;
+}
+
+/** Sanitised HTTP request metadata captured while rendering a page. */
+export interface ObservedHttpRequest {
+  readonly requestId: string;
+  readonly url: string;
+  readonly method: string;
+  readonly resourceType: string;
+  readonly contentType?: string;
+  readonly inputPoints: readonly RequestInputPoint[];
+  readonly sourceUrl: string;
+}
+
 export interface FormDescriptor {
   readonly actionUrl: string;
   readonly method: string;
@@ -29,6 +51,14 @@ export interface PageObservation {
   readonly originType: 'crawl' | 'document-hint';
   readonly links: readonly string[];
   readonly forms: readonly FormDescriptor[];
+  /** Same-origin browser requests. No header/body values are retained. */
+  readonly requests?: readonly ObservedHttpRequest[];
+  /** DOMから実測したクライアント側実行要素。値やスクリプト本文は保存しない。 */
+  readonly javascriptSignals?: {
+    readonly scriptElements: number;
+    readonly inlineEventHandlers: number;
+    readonly javascriptUrls: number;
+  };
 }
 
 export const CandidateCategories = ['page', 'form', 'api-endpoint'] as const;
@@ -45,4 +75,29 @@ export interface ScanCandidate {
   readonly confidence: number;
   /** provenance: この候補の根拠となった観測 URL。 */
   readonly observationUrl: string;
+  /** 探索結果からこの候補を作った理由。UI で採否判断の根拠として表示する。 */
+  readonly detectionReason?: string;
+  /** 静的なページ遷移ではなく、入力・状態変化を伴う候補なら true。 */
+  readonly dynamic?: boolean;
+  /** Concrete insertion points which justify active testing. */
+  readonly inputPoints?: readonly RequestInputPoint[];
+  /** Sanitised browser request that produced this candidate. */
+  readonly requestId?: string;
+  /** Observed request media type; parameters such as multipart boundaries may be replaced on replay. */
+  readonly contentType?: string;
+  /** Engine/workflow tracks required for meaningful coverage. */
+  readonly diagnosticTracks?: readonly DiagnosticTrack[];
 }
+
+export const DiagnosticTracks = [
+  'zap-active',
+  'browser-dom',
+  'workflow-state',
+  'session-analysis',
+  'authorization-differential',
+  'upload-workflow',
+  'api-schema',
+  'cryptography-review',
+] as const;
+
+export type DiagnosticTrack = (typeof DiagnosticTracks)[number];

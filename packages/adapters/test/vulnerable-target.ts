@@ -18,6 +18,7 @@ export interface VulnerableTarget {
   readonly indexUrl: string;
   readonly echoUrl: string;
   readonly plainUrl: string;
+  readonly downloadUrl: string;
   readonly loginUrl: string;
   readonly authenticatedUrl: string;
   readonly domUrl: string;
@@ -65,6 +66,14 @@ export function startVulnerableTarget(): Promise<VulnerableTarget> {
     }
     if (url.pathname === '/plain') {
       send('<!doctype html><html><body>plain page</body></html>');
+      return;
+    }
+    if (url.pathname === '/config.inc.php.dist') {
+      response.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="config.inc.php.dist"',
+      });
+      response.end('fixture download');
       return;
     }
     if (url.pathname === '/dom-flow') {
@@ -128,6 +137,7 @@ export function startVulnerableTarget(): Promise<VulnerableTarget> {
         indexUrl: `${base}/`,
         echoUrl: `${base}/echo?x=abc`,
         plainUrl: `${base}/plain`,
+        downloadUrl: `${base}/config.inc.php.dist`,
         loginUrl: `${base}/login`,
         authenticatedUrl: `${base}/authenticated/page`,
         domUrl: `${base}/dom-flow?marker=scopepilot-dom-marker`,

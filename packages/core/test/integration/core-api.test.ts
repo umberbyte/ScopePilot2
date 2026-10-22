@@ -310,11 +310,18 @@ describe('Core API server (node:http)', () => {
     const reportResponse = await fetch(`${baseUrl}/api/report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ guidelines: ['it-guideline'] }),
+      body: JSON.stringify({ guidelines: ['it-guideline'], excludeLowAndInfo: true }),
     });
     assert.equal(reportResponse.status, 200);
     const report = (await reportResponse.json()) as { modelHash: string };
     assert.match(report.modelHash, /^[0-9a-f]{64}$/);
+
+    const invalidReportFilter = await fetch(`${baseUrl}/api/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ guidelines: ['it-guideline'], excludeLowAndInfo: 'yes' }),
+    });
+    assert.equal(invalidReportFilter.status, 400);
 
     // 空の targets・空の candidates は 400 ValidationFailed。
     const emptyTargets = await fetch(`${baseUrl}/api/plan/scan`, {
@@ -939,12 +946,14 @@ describe('Core API server (node:http)', () => {
           { kind: 'navigate', target: 'http://fixture.target.test/login.php' },
           { kind: 'fill', target: '#username', secretReference: 'vault://admin-user' },
           { kind: 'click', target: 'input[type=submit]' },
+          { kind: 'select', target: 'select[name=security]', value: 'low' },
+          { kind: 'assertValue', target: 'select[name=security]', value: 'low' },
         ],
       }),
     });
     assert.equal(registered.status, 201);
     const flow = (await registered.json()) as { flow: { stepCount: number; secretReferences: readonly { secretReference: string }[] } };
-    assert.equal(flow.flow.stepCount, 3);
+    assert.equal(flow.flow.stepCount, 5);
     assert.equal(flow.flow.secretReferences[0]?.secretReference, 'vault://admin-user');
     assert.equal(JSON.stringify(flow).includes('secretValue'), false, '応答に secret 値を含まない');
 

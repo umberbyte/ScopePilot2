@@ -44,7 +44,7 @@ gated('ZAP adapter (実 ZAP 結合)', () => {
           leasedLimits: { maxRequests: 200, maxPages: 10, maxDurationMinutes: 5, maxConcurrency: 1, requestsPerSecond: 2 },
           authorizationRef: 'authz-it-0001',
         });
-        assert.match(scanId, /^\d+$/);
+        assert.match(scanId, /^scopepilot:run-it-zap-0001$/);
 
         // progress の写像。既定 policy は時間がかかるので、完了するか期限まで待つ。
         let lastProgress = await adapter.progress(scanId);

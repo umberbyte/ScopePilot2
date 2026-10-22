@@ -1,5 +1,6 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { createServer, type Server } from 'node:http';
 
 /**
  * Simple wizard (S01〜S07) の実 DOM 検証。`docs/detailed-design/02-ui-information-architecture.md` §2・§7。
@@ -7,6 +8,8 @@ import { _electron as electron } from 'playwright';
  */
 let app: ElectronApplication;
 let page: Page;
+let targetServer: Server;
+let targetOrigin: string;
 
 async function visiblePureBlackText(): Promise<readonly string[]> {
   return page.evaluate(() =>
@@ -24,15 +27,28 @@ async function visiblePureBlackText(): Promise<readonly string[]> {
 }
 
 test.beforeAll(async () => {
-  app = await electron.launch({ args: ['dist/main.cjs'], env: { ...process.env, SCOPEPILOT_DISABLE_AI: '1' } });
+  targetServer = createServer((request, response) => {
+    if (request.url === '/login.php' && request.method === 'GET') {
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      response.end('<!doctype html><form method="post"><input id="username" name="username"><input id="password" name="password" type="password"><input type="submit"></form>');
+      return;
+    }
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': 'TESTSESSION=authenticated; Path=/' });
+    response.end('<!doctype html><title>Fixture Target Home</title><a href="/page">Page</a><a href="/login.php">Login</a>');
+  });
+  await new Promise<void>((resolve) => targetServer.listen(0, '127.0.0.1', resolve));
+  const address = targetServer.address();
+  if (address === null || typeof address === 'string') throw new Error('fixture target did not bind');
+  targetOrigin = `http://127.0.0.1:${address.port}`;
+  app = await electron.launch({ args: ['dist/main.cjs'], env: { ...process.env, SCOPEPILOT_DISABLE_AI: '1', SCOPEPILOT_DISABLE_NUCLEI: '1' } });
   page = await app.firstWindow();
   await expect(page).toHaveTitle(/ScopePilot2/);
   await app.evaluate(({ dialog, app }) => {
+    const caseRoot = `${app.getPath('temp')}\\scopepilot2-desktop-test-${process.pid}-${Date.now()}`;
     Object.defineProperty(dialog, 'showOpenDialog', {
       configurable: true,
       value: async (...args: unknown[]) => {
         const options = args.at(-1) as { properties?: readonly string[] };
-        const caseRoot = `${app.getPath('temp')}\\scopepilot2-desktop-test-${process.pid}`;
         return options.properties?.includes('openDirectory') === true
           ? { canceled: false, filePaths: [caseRoot] }
           : { canceled: false, filePaths: [`${process.cwd()}\\package.json`] };
@@ -49,20 +65,35 @@ test.afterEach(async () => {
 test.afterAll(async () => {
   await page.getByRole('combobox', { name: 'テーマ' }).selectOption('system');
   await app.close();
+  await new Promise<void>((resolve, reject) => targetServer.close((cause) => cause === undefined ? resolve() : reject(cause)));
 });
 
 test('S01: 案件を開くまで次へは無効', async () => {
   const next = page.getByRole('button', { name: /次へ/ });
   await expect(next).toBeDisabled();
   await page.getByRole('button', { name: '新規案件を作成' }).click();
-  await expect(page.getByText(/^scopepilot2-desktop-test-\d+$/, { exact: true })).toBeVisible();
+  await expect(page.getByText(/^scopepilot2-desktop-test-\d+-\d+$/, { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '案件を作成' })).toBeEnabled();
-  await page.getByRole('textbox', { name: '診断を許可されたOrigin' }).fill('http://fixture.target.test/');
+  await page.getByRole('textbox', { name: '開始URL' }).fill(`${targetOrigin}/`);
+  await page.getByRole('textbox', { name: '診断を許可されたOrigin' }).fill(targetOrigin);
   await page.getByRole('button', { name: '資料ファイルを追加' }).click();
   await expect(page.getByText('package.json', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '案件を作成' }).click();
   const openNotice = page.getByRole('status').filter({ hasText: /案件「scopepilot2-desktop-test-/ });
   await expect(openNotice).toBeVisible();
+  await page.getByRole('button', { name: 'URL・Originを保存' }).click();
+  await expect(page.getByText('開始URLとOriginを案件へ保存しました。')).toBeVisible();
+  await page.getByRole('button', { name: '削除' }).click();
+  await expect(page.getByText('package.json', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '資料ファイルを追加' }).click();
+  await expect(page.getByText('package.json', { exact: true })).toHaveCount(1);
+
+  // Rendererを再読込して既存案件を選ぶ。追加操作を行う前からDB登録済み資料が
+  // 1件だけ表示され、案件も開いた状態になることを確認する。
+  await page.reload();
+  await page.getByRole('button', { name: '既存案件を開く' }).click();
+  await expect(page.getByText('package.json', { exact: true })).toHaveCount(1);
+  await expect(page.getByRole('status').filter({ hasText: /案件「scopepilot2-desktop-test-/ })).toBeVisible();
   await expect(next).toBeEnabled();
   await next.click();
 });
@@ -79,6 +110,19 @@ test('S02: ガイドライン選択しないと次へは無効', async () => {
 
 test('S03: 上限は表示専用で探索を実行できる', async () => {
   await expect(page.getByText(/表示専用/)).toBeVisible();
+  await page.getByRole('button', { name: '認証情報を追加' }).click();
+  await page.getByRole('textbox', { name: '認証ロール' }).fill('admin');
+  await page.getByRole('textbox', { name: 'ログインURL' }).fill(`${targetOrigin}/login.php`);
+  await page.getByRole('textbox', { name: 'ユーザー名', exact: true }).fill('fixture-user');
+  await page.locator('input[type="password"]').fill('fixture-pass');
+  await page.getByRole('textbox', { name: 'ユーザー名欄のCSSセレクター' }).fill('#username');
+  await page.getByRole('textbox', { name: 'パスワード欄のCSSセレクター' }).fill('#password');
+  await page.getByRole('textbox', { name: 'ログインボタンのCSSセレクター' }).fill('input[type=submit]');
+  await page.getByRole('textbox', { name: '認証後URLのprefix' }).fill(`${targetOrigin}/`);
+  await page.getByRole('textbox', { name: '認証後ページに含まれる文字列' }).fill('Fixture Target Home');
+  await page.getByRole('button', { name: 'ログインして認証情報を追加' }).click();
+  await expect(page.getByText(/admin のログインに成功しました/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('textbox', { name: 'ログインURL' })).toHaveCount(0);
   await page.getByRole('button', { name: /探索を開始する/ }).click();
   await expect(page.getByText(/探索完了:/)).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: /次へ/ }).click();
@@ -106,7 +150,10 @@ test('S05: 委譲範囲の開示を表示して計画を確認する', async () 
 
 test('S06: 診断を実行し所見に実影響未確認ラベルが出る', async () => {
   await page.getByRole('button', { name: /診断を実行する/ }).click();
-  await expect(page.getByText(/診断完了/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('status').filter({ hasText: /診断完了/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('現在のコマンド')).toBeVisible();
+  await expect(page.getByText(/ZAP API: core\/accessUrl/).first()).toBeVisible();
+  await expect(page.getByText('実行ログ')).toBeVisible();
   await expect(page.getByText(/実影響未確認/).first()).toBeVisible();
   await page.getByRole('button', { name: /次へ/ }).click();
 });

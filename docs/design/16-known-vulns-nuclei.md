@@ -28,6 +28,19 @@ TemplateStore（21と共通）: 審査済みテンプレートID・ファイル�
   補助ファイルを含む集合全体のSHA-256固定（テンプレート単体の署名にだけ依存しない）
 ```
 
+製品実行時はNucleiバイナリだけでは能力を公開しない。設定画面で次の形式の
+`scopepilot2.nuclei-template-bundle.v1`マニフェストも指定し、各相対パス、HTTP-only宣言、SHA-256を
+起動時と実行直前に検証する。検証済みファイルだけを実行用一時ディレクトリへ複製してNucleiへ渡す。
+
+```json
+{
+  "schemaVersion": "scopepilot2.nuclei-template-bundle.v1",
+  "templates": [
+    { "id": "reviewed-template-id", "path": "templates/reviewed.yaml", "sha256": "64桁のSHA-256", "protocol": "http" }
+  ]
+}
+```
+
 ## 4. データモデル
 
 - `EngineRuntime`: 種別（ZAP/Nuclei/…）・版・取得元・SHA-256・互換条件（5.2手順3）。

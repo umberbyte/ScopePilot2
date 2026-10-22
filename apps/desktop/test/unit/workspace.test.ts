@@ -17,7 +17,9 @@ describe('desktop case workspace', () => {
     roots.push(base);
     const caseDirectory = join(base, 'case-a');
     const source = join(base, 'director-notes.txt');
+    const sameContentSource = join(base, 'director-notes-copy.txt');
     await writeFile(source, 'scope and operation notes', 'utf8');
+    await writeFile(sameContentSource, 'scope and operation notes', 'utf8');
     const manager = new DesktopWorkspaceManager();
     const settings = {
       startUrl: 'https://example.test/start',
@@ -28,9 +30,10 @@ describe('desktop case workspace', () => {
       aiModel: '',
     };
 
-    const first = await manager.activate(caseDirectory, [source], settings, 'create');
+    const first = await manager.activate(caseDirectory, [source, sameContentSource], settings, 'create');
     assert.equal(first.existingCase, null);
-    assert.equal(first.inputs.length, 1);
+    assert.equal(first.inputs.length, 2);
+    assert.notEqual(first.inputs[0]?.inputId, first.inputs[1]?.inputId, '同一内容・別名の資料は異なる入力IDを持つ');
     assert.match(first.inputs[0]?.sha256 ?? '', /^[0-9a-f]{64}$/);
     assert.equal(await readFile(join(caseDirectory, first.inputs[0]!.relativePath), 'utf8'), 'scope and operation notes');
     assert.equal(first.settings.startUrl, settings.startUrl);
@@ -52,10 +55,39 @@ describe('desktop case workspace', () => {
     resumed.close();
 
     const reopened = new DesktopWorkspaceManager();
-    const second = await reopened.activate(caseDirectory, [], { ...settings, startUrl: 'https://overwrite.invalid/' }, 'open');
+    const second = await reopened.activate(caseDirectory, [], {
+      ...settings,
+      startUrl: 'https://overwrite.invalid/',
+      aiProvider: 'claude',
+      aiModel: 'sonnet',
+    }, 'open');
     assert.equal(second.settings.startUrl, settings.startUrl, '既存案件の保存済み設定を選択時の既定値で上書きしない');
-    assert.equal(second.inputs.length, 1);
+    assert.equal(second.settings.aiProvider, 'claude', 'AI選択は案件設定ではなくアプリ共通選択を反映する');
+    assert.equal(second.settings.aiModel, 'sonnet');
+    assert.equal(second.inputs.length, 2);
+    const updated = reopened.updateSettings({
+      ...settings,
+      startUrl: 'https://example.test/updated-start',
+      allowedOrigins: ['https://example.test'],
+    });
+    assert.equal(updated.settings.startUrl, 'https://example.test/updated-start');
+    assert.deepEqual(updated.existingCase?.scope.allowedOrigins, ['https://example.test']);
+    const originalInput = second.inputs.find((input) => input.originalName === 'director-notes.txt')!;
+    const importedPath = join(caseDirectory, originalInput.relativePath);
+    const remaining = await reopened.removeInput(originalInput.inputId);
+    assert.equal(remaining.length, 1);
+    await assert.rejects(readFile(importedPath));
+    const reimported = await reopened.importInputs([source]);
+    assert.equal(reimported.length, 2);
+    assert.equal(await readFile(join(caseDirectory, reimported.find((input) => input.originalName === 'director-notes.txt')!.relativePath), 'utf8'), 'scope and operation notes');
     reopened.close();
+
+    const verified = new DesktopWorkspaceManager();
+    const persisted = await verified.activate(caseDirectory, [], settings, 'open');
+    assert.equal(persisted.settings.startUrl, 'https://example.test/updated-start');
+    assert.deepEqual(persisted.existingCase?.scope.allowedOrigins, ['https://example.test']);
+    assert.equal(persisted.inputs.length, 2);
+    verified.close();
   });
 });
 

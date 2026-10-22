@@ -54,6 +54,11 @@ export class SystemClock implements Clock {
 /** 連番 ID。fixture で決定的な ID を作る。 */
 export class SequentialIdGenerator implements IdGenerator {
   private counters = new Map<string, number>();
+  constructor(initialCounters: Readonly<Record<string, number>> = {}) {
+    for (const [prefix, value] of Object.entries(initialCounters)) {
+      if (Number.isSafeInteger(value) && value >= 0) this.counters.set(prefix, value);
+    }
+  }
   next(prefix: string): string {
     const next = (this.counters.get(prefix) ?? 0) + 1;
     this.counters.set(prefix, next);
@@ -87,4 +92,9 @@ export class InMemoryEvidenceStore implements EvidenceStorePort {
 /** run 記録の永続化 port (design/20 §2)。実行開始時 (Running) と終了時の両方を保存する。 */
 export interface RunSinkPort {
   save(record: import('@scopepilot2/contracts').RunRecord): void;
+}
+
+/** Durable finding ledger. Implementations must deduplicate within a case. */
+export interface FindingSinkPort {
+  save(caseId: string, dedupeKey: string, finding: import('@scopepilot2/contracts').Finding): void;
 }

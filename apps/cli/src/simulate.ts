@@ -18,7 +18,7 @@ import type {
   ReportArtifact,
   ScanCandidate,
 } from '@scopepilot2/contracts';
-import { createCoreApiServer } from '@scopepilot2/core';
+import { createCoreApiServer, isSessionControlUrl } from '@scopepilot2/core';
 import {
   createHarness,
   FIXTURE_NUCLEI_JSONL,
@@ -174,7 +174,9 @@ async function runScenarioOverApi(baseUrl: string, options: SimulateOptions): Pr
 
   // 4. 候補の採用 (基準シナリオでは全採用)
   const { adopted } = await callApi<{ adopted: readonly ScanCandidate[] }>(baseUrl, 'POST', '/api/candidates/adopt', {
-    candidates: exploration.candidates,
+    // Product safety policy excludes logout/setup/install endpoints from active
+    // scanning. Keep the CLI simulation on the same adoption path as the UI.
+    candidates: exploration.candidates.filter((candidate) => !isSessionControlUrl(candidate.url)),
   });
 
   // 5. 能動診断計画 → 検証・認可結び付け → 確認 → 実行 → 取込

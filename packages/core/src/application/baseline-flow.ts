@@ -35,6 +35,8 @@ import {
   type DocumentPriorityRule,
   type DocumentParameterHint,
   type DocumentParameterHintEntry,
+  type DiagnosticTrack,
+  type RequestInputPoint,
   DocumentAuthMethods,
   DocumentPriorityCategories,
 } from '@scopepilot2/contracts';
@@ -53,12 +55,11 @@ import {
   planHashOf,
   validatePlan,
 } from '../domain/plan-service.ts';
-import { FindingImporter } from '../domain/finding-importer.ts';
+import { dedupeKeyOf, FindingImporter } from '../domain/finding-importer.ts';
 import { BreakQueue, decideIntercept, type BreakItem, type BreakQueueEvent, type InterceptDecision } from '../domain/proxy-intercept.ts';
 import { SiteMapProjector, planTrafficQuery } from '../domain/target-logger.ts';
 import {
   businessTargetInScope,
-  compareObservations,
   evaluateRestore,
   parseExpectation,
   planRoleMatrix,
@@ -105,7 +106,7 @@ import { buildDomCandidate, domEvidenceProjection } from '../domain/dom-investig
 import { checkCompatibility, respondToSecretRead, verifyExtensionManifest, type ExtensionManifest } from '../domain/product-api.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
-import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, LoginSessionCookie, OastProviderEvent } from '../ports/engines.ts';
+import type { ActiveScanEnginePort, ExplorationPort, InteractiveBrowserFile, InteractiveBrowserPort, InteractiveBrowserStep, LoginExecutorPort, LoginSessionCookie, NucleiScanPort, OastProviderEvent } from '../ports/engines.ts';
 
 /** 計画の並列度・rate が超えられない安全上天井 (UI 指定でも引き上げ不可)。 */
 const PLAN_SAFETY_CEILING = { maxConcurrency: 2, requestsPerSecond: 2 } as const;
@@ -116,14 +117,20 @@ export interface BaselineFlowDeps {
   readonly evidence: EvidenceStorePort;
   readonly explorer: ExplorationPort;
   readonly scanEngine: ActiveScanEnginePort;
+  /** 設定済みの実Nuclei CLI。未設定時はscan planにNuclei stepを含めない。 */
+  readonly nucleiRunner?: NucleiScanPort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   readonly runtimeBundleHash: string;
+  /** Login traffic proxy. When present, authenticated browser actions populate the scan engine's session jar. */
+  readonly loginProxyServer?: string;
   /** run 記録の永続化 (任意)。開始時 (Running) と終了時の両方へ保存する。 */
   readonly runSink?: import('../ports/infra.ts').RunSinkPort;
   /** 案件記録の永続化 (任意)。作成・scope 更新時に保存する (runs FK の参照先)。 */
   readonly caseSink?: { save(record: CaseRecord): void };
   /** 認可記録の永続化 (任意)。案件再オープン時に最新の認可を復元する。 */
   readonly authorizationSink?: { save(record: AuthorizationRecord): void };
+  readonly findingSink?: import('../ports/infra.ts').FindingSinkPort;
+  readonly initialFindings?: readonly Finding[];
   /** 実 engine 診断の完了後、alert 生成の遅れを待つ時間 (ms)。fixture では 0。 */
   readonly scanAlertSettleMs?: number;
   /** Repeater の実 transport (design/f04)。未構成なら fixture 応答を使う。 */
@@ -140,6 +147,8 @@ export interface BaselineFlowDeps {
   readonly advancedTransport?: import('../ports/engines.ts').AdvancedTransportPort;
   /** Playwright-backed live DOM observation (design/f16). */
   readonly domObserver?: import('../ports/engines.ts').DomObservationPort;
+  /** Operator-confirmed browser workflows for stateful, upload, authorization, and review routes. */
+  readonly interactiveBrowser?: InteractiveBrowserPort;
 
   /** login 実行器 (design/f09)。未構成の service では runLogin が ValidationFailed。 */
   readonly loginExecutor?: LoginExecutorPort;
@@ -173,6 +182,45 @@ export interface ExploreRunResult {
   readonly deniedUrls: readonly { readonly url: string; readonly reason: string }[];
   readonly candidates: readonly ScanCandidate[];
   readonly engineVersion: string;
+}
+
+export type InteractiveDiagnosticTrack =
+  | 'workflow-state'
+  | 'session-analysis'
+  | 'authorization-differential'
+  | 'upload-workflow'
+  | 'api-schema'
+  | 'cryptography-review';
+
+export interface InteractiveDiagnosticItemInput {
+  readonly itemId: string;
+  readonly track: InteractiveDiagnosticTrack;
+  readonly targetUrl: string;
+  readonly role: string;
+  readonly roles: readonly string[];
+  readonly summary: string;
+  readonly steps: readonly InteractiveBrowserStep[];
+  readonly samples: number;
+  readonly tokenSource: SequencerTokenSource;
+  readonly tokenName: string;
+  readonly expectation: 'same' | 'different';
+  readonly requiredInputs: readonly ('upload-file' | 'api-spec' | 'additional-role-session')[];
+}
+
+export interface InteractiveDiagnosticRunInput {
+  readonly confirmed: boolean;
+  readonly items: readonly InteractiveDiagnosticItemInput[];
+  readonly files: readonly InteractiveBrowserFile[];
+  readonly apiDocuments: readonly { readonly inputRef: string; readonly name: string; readonly document: unknown }[];
+}
+
+export interface InteractiveDiagnosticItemResult {
+  readonly itemId: string;
+  readonly track: InteractiveDiagnosticTrack;
+  readonly targetUrl: string;
+  readonly status: 'completed' | 'passed' | 'failed' | 'inconclusive';
+  readonly detail: string;
+  readonly evidenceId?: string;
 }
 
 type SequencerTokenSource = 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom';
@@ -224,6 +272,41 @@ export interface ActiveScanRunResult {
   readonly findings: readonly Finding[];
   readonly overshootReservation: number;
   readonly engineVersion: string;
+  readonly requestCorpusEvidenceRef: string;
+  readonly diagnosticRoutes: readonly DiagnosticRouteResult[];
+  readonly nuclei?: {
+    readonly status: 'completed' | 'failed';
+    readonly engineVersion: string;
+    readonly templateBundleHash?: string;
+    readonly importedCount: number;
+    readonly duplicateCount: number;
+    readonly quarantinedCount: number;
+    readonly excludedOutOfScope: number;
+    readonly error?: string;
+  };
+}
+
+export interface DiagnosticRouteResult {
+  readonly track: DiagnosticTrack;
+  readonly targetUrl: string;
+  readonly candidateCount: number;
+  readonly status: 'delegated' | 'executed' | 'needs-input' | 'unavailable';
+  readonly detail: string;
+  readonly findingCount?: number;
+}
+
+export interface ActiveScanExecutionEvent {
+  readonly at: string;
+  readonly phase: 'starting' | 'running' | 'collecting' | 'completed' | 'stopping' | 'stopped';
+  readonly engine: 'zap' | 'nuclei' | 'scopepilot';
+  readonly message: string;
+  readonly command?: string;
+  readonly progress?: number;
+}
+
+export interface ActiveScanExecutionControl {
+  readonly signal?: AbortSignal;
+  readonly onEvent?: (event: ActiveScanExecutionEvent) => void;
 }
 
 export interface ImportNucleiResultsInput {
@@ -250,7 +333,7 @@ export class BaselineFlowService {
   private aggregate: CaseAggregate | null = null;
   private authorization: AuthorizationRecord | null = null;
   private readonly eventsLog: BaselineFlowEvent[] = [];
-  private readonly importer = new FindingImporter();
+  private readonly importer: FindingImporter;
   /** proxy の break queue (design/f02)。deadline 経過は既定で drop (暗黙 forward しない)。 */
   private readonly breakQueue = new BreakQueue(100);
 
@@ -327,12 +410,18 @@ export class BaselineFlowService {
   /** 計画ごとの hint 由来開始点 (canonical)。観測の由来 (document-hint) 判定に使う。 */
   private readonly explorationHintSeeds = new Map<string, ReadonlySet<string>>();
   /** runLogin で得た role session (cookie 値は service 内部のみ。API・監査へ出さない)。 */
-  private readonly roleSessionCookies = new Map<string, { readonly cookies: readonly LoginSessionCookie[]; readonly createdAt: string }>();
+  private readonly roleSessionCookies = new Map<string, {
+    readonly cookies: readonly LoginSessionCookie[];
+    readonly createdAt: string;
+    readonly expectedUrlPrefix?: string;
+    readonly verificationUrl?: string;
+    readonly verificationMarkers?: readonly string[];
+  }>();
   private exploredUrlCount = 0;
   private scannedUrlCount = 0;
   private delegatedSteps: {
     readonly stepId: string;
-    readonly engineKind: 'zap';
+    readonly engineKind: 'zap' | 'nuclei';
     readonly engineVersion: string;
   }[] = [];
 
@@ -340,6 +429,7 @@ export class BaselineFlowService {
 
   constructor(deps: BaselineFlowDeps) {
     this.deps = deps;
+    this.importer = new FindingImporter(deps.initialFindings ?? []);
   }
 
   /**
@@ -378,6 +468,27 @@ export class BaselineFlowService {
   /** 現在の全所見 (作成順)。UI/CLI の organizer 表示用。 */
   listFindings(): readonly Finding[] {
     return this.importer.list();
+  }
+
+  private persistFindings(findings: readonly Finding[]): void {
+    const caseId = this.currentCase().caseId;
+    for (const finding of findings) {
+      const key = finding.source.kind === 'nuclei-match'
+        ? `nuclei|${finding.enginePluginId ?? ''}|${finding.url}`
+        : dedupeKeyOf({
+          engineAlertId: finding.findingId,
+          pluginId: finding.enginePluginId ?? '',
+          name: finding.title,
+          risk: finding.severity === 'info' || finding.severity === 'unknown'
+            ? 'Informational'
+            : finding.severity === 'low' ? 'Low' : finding.severity === 'medium' ? 'Medium' : 'High',
+          url: finding.url,
+          method: finding.method ?? 'GET',
+          ...(finding.param === undefined ? {} : { param: finding.param }),
+          evidenceSummary: '',
+        });
+      this.deps.findingSink?.save(caseId, key, finding);
+    }
   }
 
   /** site map (観測済み page の一覧・初回観測順)。 */
@@ -663,18 +774,51 @@ export class BaselineFlowService {
     if (!businessTargetInScope(input.targetUrl, caseRecord.scope)) {
       throw domainError('OutOfScope', `business target is out of scope: ${input.targetUrl}`);
     }
-    parseExpectation(input.expectation);
+    const expectation = parseExpectation(input.expectation);
     const matrix = planRoleMatrix(input.roles);
     // fixture 観測: session を refresh 済みの role だけが認証付き観測を持つ (未 refresh は null)。
-    const observations = input.roles.map((role) => ({
+    if (this.deps.interactiveBrowser === undefined) throw domainError('CapabilityUnavailable', 'business logic browser is not configured');
+    const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
+    const measured: { role: string; response: Awaited<ReturnType<InteractiveBrowserPort['execute']>> | null }[] = [];
+    for (const role of input.roles) {
+      const session = this.roleSessionCookies.get(role);
+      if (session === undefined) {
+        measured.push({ role, response: null });
+        continue;
+      }
+      measured.push({
+        role,
+        response: await this.deps.interactiveBrowser.execute({
+          targetUrl: canonical,
+          scope: caseRecord.scope,
+          steps: [{ kind: 'navigate', target: canonical }],
+          sessionCookies: applicableSessionCookies(session.cookies, canonical),
+        }),
+      });
+    }
+    const observations = measured.map(({ role, response }) => ({
       role,
-      observation: this.sessionRevisions.get(role) !== undefined ? `business-response:${role}` : null,
+      observation: response === null ? null : `status=${response.status ?? 'unknown'};bodyHash=${response.bodyHash}`,
     }));
-    const primary = observations[0]?.observation ?? null;
-    const expected = typeof input.expectation.args[0] === 'string' ? (input.expectation.args[0] as string) : null;
+    const primary = measured[0]?.response ?? null;
     // どれかの role でも観測が欠けたら inconclusive (成功/失敗を推測しない)。
-    const missingObservation = observations.some((entry) => entry.observation === null);
-    const comparison = missingObservation ? { outcome: 'inconclusive' as const } : compareObservations(expected, primary);
+    let comparison: { outcome: ComparisonOutcome };
+    if (measured.some((entry) => entry.response === null) || primary === null) {
+      comparison = { outcome: 'inconclusive' };
+    } else {
+      const first = input.expectation.args[0];
+      const second = input.expectation.args[1];
+      let matched: boolean | null = null;
+      if (expectation.expression === 'status.equals') matched = typeof first === 'number' && primary.status === first;
+      else if (expectation.expression === 'status.in') matched = input.expectation.args.some((value) => typeof value === 'number' && value === primary.status);
+      else if (expectation.expression === 'body.contains') matched = typeof first === 'string' && primary.bodyText.includes(first);
+      else if (expectation.expression === 'body.notContains') matched = typeof first === 'string' && !primary.bodyText.includes(first);
+      else if (expectation.expression === 'header.equals') matched = typeof first === 'string' && typeof second === 'string'
+        && primary.headers.some(([name, value]) => name.toLocaleLowerCase() === first.toLocaleLowerCase() && value === second);
+      else if (expectation.expression === 'elapsedMs.lessThan') matched = typeof first === 'number' && primary.elapsedMs < first;
+      else if (expectation.expression === 'elapsedMs.greaterThan') matched = typeof first === 'number' && primary.elapsedMs > first;
+      comparison = matched === null ? { outcome: 'inconclusive' } : { outcome: matched ? 'pass' : 'fail' };
+    }
     const restore = evaluateRestore([
       { name: 'verify-state', passed: comparison.outcome !== 'fail' },
       { name: 'restore-navigate', passed: true },
@@ -691,6 +835,20 @@ export class BaselineFlowService {
       executedAt: this.deps.clock.now().toISOString(),
     };
     (this.businessChecks as { checkId: string; roles: readonly string[]; targetUrl: string; status: string; comparison: string; restore: string; executedAt: string }[]).push(record);
+    await this.deps.evidence.saveText(`business-logic:${checkId}`, canonicalJson({
+      checkId,
+      targetUrl: canonical,
+      roles: measured.map(({ role, response }) => response === null ? { role, observation: null } : {
+        role,
+        status: response.status,
+        finalUrl: response.finalUrl,
+        bodyHash: response.bodyHash,
+        elapsedMs: response.elapsedMs,
+        headerNames: response.headers.map(([name]) => name),
+      }),
+      expectation: { expression: input.expectation.expression, argTypes: input.expectation.args.map((value) => typeof value) },
+      comparison: comparison.outcome,
+    }), { targetUrl: canonical, kind: 'business-logic' });
     this.record({ type: 'BusinessLogicCheckCompleted', at: record.executedAt, checkId, roles: [...input.roles], status: outcome.status });
     return {
       checkId,
@@ -706,6 +864,152 @@ export class BaselineFlowService {
 
   listBusinessLogicChecks(): readonly { checkId: string; roles: readonly string[]; targetUrl: string; status: string; comparison: string; restore: string; executedAt: string }[] {
     return [...this.businessChecks];
+  }
+
+  /** Execute an AI-proposed plan only after the operator has previewed and confirmed it. */
+  async runInteractiveDiagnostics(
+    operator: OperatorProfile,
+    input: InteractiveDiagnosticRunInput,
+  ): Promise<{ results: readonly InteractiveDiagnosticItemResult[] }> {
+    this.requirePermission(operator, 'run.manage');
+    if (!input.confirmed) throw domainError('ValidationFailed', 'interactive diagnostic plan requires operator confirmation');
+    if (input.items.length === 0 || input.items.length > 20) {
+      throw domainError('ValidationFailed', 'interactive diagnostic plan must contain between 1 and 20 items');
+    }
+    const caseRecord = this.currentCase();
+    const authorization = this.currentAuthorization();
+    if (!authorization.allowedOperationClasses.includes('ActiveScan')) {
+      throw domainError('OutOfScope', 'authorization does not allow ActiveScan for this case');
+    }
+    const files = new Map(input.files.map((file) => [file.inputRef, file]));
+    const apiDocuments = new Map(input.apiDocuments.map((document) => [document.inputRef, document]));
+    const forbiddenClickTerms = ['logout', 'log-out', 'delete', 'remove', '退会', '削除'];
+    const results: InteractiveDiagnosticItemResult[] = [];
+
+    const roleCookies = (role: string, targetUrl: string): readonly LoginSessionCookie[] | undefined => {
+      if (role === '' || role === 'unauthenticated') return undefined;
+      const session = this.roleSessionCookies.get(role);
+      if (session === undefined) throw domainError('ValidationFailed', `no authenticated session for role ${role}`);
+      return applicableSessionCookies(session.cookies, targetUrl);
+    };
+
+    const validateSteps = (steps: readonly InteractiveBrowserStep[]): void => {
+      if (steps.length === 0 || steps.length > 20) throw domainError('ValidationFailed', 'browser diagnostic needs 1 to 20 steps');
+      for (const step of steps) {
+        if (step.target.trim() === '' || step.target.length > 1_000) throw domainError('ValidationFailed', 'browser diagnostic step target is invalid');
+        if (step.kind === 'navigate' && !ScopePolicy.decide(caseRecord.scope, step.target).allowed) {
+          throw domainError('OutOfScope', `interactive navigation is out of scope: ${step.target}`);
+        }
+        if (step.kind === 'click' && forbiddenClickTerms.some((term) => step.target.toLocaleLowerCase().includes(term))) {
+          throw domainError('ValidationFailed', `interactive plan contains a forbidden click target: ${step.target}`);
+        }
+        if ((step.kind === 'fill' || step.kind === 'select' || step.kind === 'assertValue') && step.value.length > 2_000) {
+          throw domainError('ValidationFailed', 'interactive browser value exceeds 2000 characters');
+        }
+        if (step.kind === 'upload' && !files.has(step.inputRef)) {
+          throw domainError('ValidationFailed', `required upload input is missing: ${step.inputRef}`);
+        }
+      }
+    };
+
+    for (const item of input.items) {
+      const canonical = ScopePolicy.canonicalUrl(item.targetUrl);
+      if (!ScopePolicy.decide(caseRecord.scope, canonical).allowed) {
+        throw domainError('OutOfScope', `interactive diagnostic target is out of scope: ${canonical}`);
+      }
+      if (item.track === 'session-analysis') {
+        const result = await this.runSequencerSession(operator, {
+          targetUrl: canonical,
+          samples: item.samples,
+          ...(item.role === '' || item.role === 'unauthenticated' ? {} : { role: item.role }),
+          tokenSource: item.tokenSource,
+          ...(item.tokenSource === 'cookie' ? { tokenCookieName: item.tokenName } : {}),
+          ...(item.tokenSource === 'hidden' ? { tokenFieldName: item.tokenName } : {}),
+        });
+        const evidence = await this.deps.evidence.saveText(
+          `interactive-diagnostic:${item.itemId}`,
+          canonicalJson({ itemId: item.itemId, track: item.track, targetUrl: canonical, result }),
+          { track: item.track, targetUrl: canonical },
+        );
+        results.push({ itemId: item.itemId, track: item.track, targetUrl: canonical, status: result.verdict === 'assessed' ? 'completed' : 'inconclusive', detail: `${result.sampleCount} samples; ${result.duplicates} duplicates; ${result.missing} missing`, evidenceId: evidence.evidenceId });
+        continue;
+      }
+      if (item.track === 'api-schema') {
+        const document = apiDocuments.get('api-spec');
+        if (document === undefined) throw domainError('ValidationFailed', 'API specification input is missing');
+        const imported = this.importApiSpec(operator, { documentLabel: document.name, document: document.document });
+        const evidence = await this.deps.evidence.saveText(
+          `interactive-diagnostic:${item.itemId}`,
+          canonicalJson({ itemId: item.itemId, track: item.track, targetUrl: canonical, endpoints: imported.endpoints, warnings: imported.warnings }),
+          { track: item.track, targetUrl: canonical },
+        );
+        results.push({ itemId: item.itemId, track: item.track, targetUrl: canonical, status: imported.endpoints.length > 0 ? 'completed' : 'inconclusive', detail: `${imported.endpoints.length} API endpoints imported`, evidenceId: evidence.evidenceId });
+        continue;
+      }
+      if (this.deps.interactiveBrowser === undefined) throw domainError('CapabilityUnavailable', 'interactive browser is not configured');
+      validateSteps(item.steps);
+      if (item.track === 'authorization-differential') {
+        if (!authorization.allowedOperationClasses.includes('CrossRoleTest')) {
+          throw domainError('OutOfScope', 'authorization does not allow CrossRoleTest for this case');
+        }
+        if (item.roles.length < 2 || new Set(item.roles).size !== item.roles.length) {
+          throw domainError('ValidationFailed', 'authorization differential needs at least two distinct roles');
+        }
+        const observations = [] as { role: string; finalUrl: string; status: number | null; bodyHash: string; assertionsPassed: boolean }[];
+        for (const role of item.roles) {
+          const cookies = roleCookies(role, canonical);
+          const observation = await this.deps.interactiveBrowser.execute({
+            targetUrl: canonical,
+            scope: caseRecord.scope,
+            steps: item.steps,
+            ...(cookies === undefined ? {} : { sessionCookies: cookies }),
+          });
+          observations.push({ role, finalUrl: observation.finalUrl, status: observation.status, bodyHash: observation.bodyHash, assertionsPassed: observation.assertions.every((entry) => entry.passed) });
+        }
+        const fingerprints = new Set(observations.map((entry) => `${entry.status}:${entry.finalUrl}:${entry.bodyHash}`));
+        const actual = fingerprints.size === 1 ? 'same' : 'different';
+        const passed = actual === item.expectation;
+        const evidence = await this.deps.evidence.saveText(
+          `interactive-diagnostic:${item.itemId}`,
+          canonicalJson({ itemId: item.itemId, track: item.track, targetUrl: canonical, expectation: item.expectation, actual, observations }),
+          { track: item.track, targetUrl: canonical },
+        );
+        results.push({ itemId: item.itemId, track: item.track, targetUrl: canonical, status: passed ? 'passed' : 'failed', detail: `role responses were ${actual}; expected ${item.expectation}`, evidenceId: evidence.evidenceId });
+        continue;
+      }
+      const selectedFiles = item.steps.flatMap((step) => step.kind === 'upload' ? [files.get(step.inputRef)] : []).filter((file): file is InteractiveBrowserFile => file !== undefined);
+      const cookies = roleCookies(item.role, canonical);
+      const observation = await this.deps.interactiveBrowser.execute({
+        targetUrl: canonical,
+        scope: caseRecord.scope,
+        steps: item.steps,
+        ...(cookies === undefined ? {} : { sessionCookies: cookies }),
+        ...(selectedFiles.length === 0 ? {} : { files: selectedFiles }),
+      });
+      const assertionsPassed = observation.assertions.every((entry) => entry.passed);
+      const evidenceObservation = {
+        finalUrl: observation.finalUrl,
+        status: observation.status,
+        bodyHash: observation.bodyHash,
+        elapsedMs: observation.elapsedMs,
+        headerNames: observation.headers.map(([name]) => name),
+        assertions: observation.assertions,
+      };
+      const evidence = await this.deps.evidence.saveText(
+        `interactive-diagnostic:${item.itemId}`,
+        canonicalJson({ itemId: item.itemId, track: item.track, targetUrl: canonical, observation: evidenceObservation }),
+        { track: item.track, targetUrl: canonical },
+      );
+      results.push({
+        itemId: item.itemId,
+        track: item.track,
+        targetUrl: canonical,
+        status: observation.assertions.length === 0 ? 'completed' : assertionsPassed ? 'passed' : 'failed',
+        detail: `${observation.assertions.filter((entry) => entry.passed).length}/${observation.assertions.length} assertions passed; final status ${observation.status ?? 'unknown'}`,
+        evidenceId: evidence.evidenceId,
+      });
+    }
+    return { results };
   }
 
   /** login flow の登録 (design/f09)。step 構成は domain 検証 (上限 10・allowlist・fill は secret 参照必須)。 */
@@ -764,11 +1068,19 @@ export class BaselineFlowService {
       steps: flow.steps,
       secretValues: input.secretValues,
       expectedUrlPrefix: input.expectedUrlPrefix,
-      ...(input.proxyServer === undefined ? {} : { proxyServer: input.proxyServer }),
+      ...((input.proxyServer ?? this.deps.loginProxyServer) === undefined
+        ? {}
+        : { proxyServer: input.proxyServer ?? this.deps.loginProxyServer }),
     });
     checkFlowDeadline(this.deps.clock.now().getTime() - startedAtMs);
     if (result.authenticated) {
-      this.roleSessionCookies.set(input.role, { cookies: result.cookies, createdAt: this.deps.clock.now().toISOString() });
+      this.roleSessionCookies.set(input.role, {
+        cookies: result.cookies,
+        createdAt: this.deps.clock.now().toISOString(),
+        expectedUrlPrefix: input.expectedUrlPrefix,
+        verificationUrl: result.finalUrl,
+        verificationMarkers: flow.steps.flatMap((step) => step.kind === 'assert' && step.target !== undefined ? [step.target] : []),
+      });
     }
     const cookieNames = result.cookies.map((cookie) => cookie.name);
     const jar = this.roleRegistry.assignJar(input.role, cookieNames);
@@ -1802,6 +2114,7 @@ export class BaselineFlowService {
       throw domainError('ValidationFailed', `finding ${input.findingId} does not exist`);
     }
     const updated = this.importer.updateStatus(input.findingId, input.next, { now: at, changedBy: operator.operatorId });
+    this.persistFindings([updated]);
     this.record({ type: 'FindingStatusChanged', at, findingId: input.findingId, from: before.status, to: input.next, changedBy: operator.operatorId });
     return updated;
   }
@@ -1983,6 +2296,7 @@ export class BaselineFlowService {
     operator: OperatorProfile,
     targets: readonly string[],
     limitsRequest?: { readonly maxRequests: number; readonly maxPages: number; readonly maxDurationMinutes: number },
+    options: { readonly includeNuclei?: boolean } = {},
   ): { plan: ExecutionPlan; planHash: string } {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
@@ -1995,6 +2309,10 @@ export class BaselineFlowService {
     }
     const limits = this.planLimits({ ...DEFAULT_ACTIVE_SCAN_LIMITS, ...limitsRequest }, caseRecord.scope.limits);
     const inputEvidenceHash = hashStable('scopepilot2.plan.input', targets.map((url) => ScopePolicy.canonicalUrl(url)).sort());
+    const includeNuclei = options.includeNuclei === true;
+    if (includeNuclei && this.deps.nucleiRunner === undefined) {
+      throw domainError('CapabilityUnavailable', 'Nuclei requires both a configured binary and a reviewed HTTP template manifest');
+    }
     const plan = buildPlan({
       planId: this.deps.ids.next('plan'),
       caseId: caseRecord.caseId,
@@ -2011,6 +2329,15 @@ export class BaselineFlowService {
           engineVersion: this.deps.scanEngine.engineVersion,
           limits,
         },
+        ...(!includeNuclei || this.deps.nucleiRunner === undefined ? [] : [{
+          kind: 'nuclei-scan' as const,
+          operationClass: 'NucleiScan' as const,
+          targets,
+          engineKind: 'nuclei' as const,
+          guarantee: 'Delegated' as const,
+          engineVersion: this.deps.nucleiRunner.engineVersion,
+          limits,
+        }]),
       ],
       limits,
       runtimeBundleHash: this.deps.runtimeBundleHash,
@@ -2143,6 +2470,16 @@ export class BaselineFlowService {
       }
       visited.add(canonical);
 
+      // Filtering these endpoints only when S04 candidates are built is too
+      // late: navigating to /logout.php has already invalidated the server-side
+      // session. Enforce the exclusion before the explorer adapter is called.
+      if (isSessionControlUrl(canonical)) {
+        const reason = 'session-control URL is excluded from automated exploration';
+        deniedUrls.push({ url: canonical, reason });
+        this.record({ type: 'EgressDenied', at: this.deps.clock.now().toISOString(), url: canonical, reason });
+        continue;
+      }
+
       const decision = ScopePolicy.decide(caseRecord.scope, canonical);
       if (!decision.allowed) {
         deniedUrls.push({ url: canonical, reason: decision.reason });
@@ -2214,6 +2551,10 @@ export class BaselineFlowService {
     if (candidates.length === 0) {
       throw domainError('ValidationFailed', 'no candidates to adopt');
     }
+    const unsafe = candidates.find((candidate) => isSessionControlUrl(candidate.url));
+    if (unsafe !== undefined) {
+      throw domainError('ValidationFailed', `session-control URL cannot be adopted for automatic scanning: ${unsafe.url}`);
+    }
     this.record({
       type: 'CandidatesAdopted',
       at: this.deps.clock.now().toISOString(),
@@ -2232,6 +2573,7 @@ export class BaselineFlowService {
     confirmation: PlanConfirmation,
     adopted: readonly ScanCandidate[],
     role?: string,
+    control: ActiveScanExecutionControl = {},
   ): Promise<ActiveScanRunResult> {
     this.requirePermission(operator, 'run.manage');
     this.requireMatchingConfirmation(plan, confirmation);
@@ -2260,6 +2602,9 @@ export class BaselineFlowService {
     // role session 適用 (design/08: F11)。対象 URL の host/path に一致する cookie 名を
     // scan request へ添える。実 ZAP は proxy 経由 login で jar を作るため値は渡さない。
     let sessionCookieNames: readonly string[] | undefined;
+    let scanSessionCookies: readonly LoginSessionCookie[] | undefined;
+    let expectedAuthenticatedUrlPrefix: string | undefined;
+    let authenticationProbe: { readonly url: string; readonly markers: readonly string[] } | undefined;
     if (role !== undefined) {
       const session = this.roleSessionCookies.get(role);
       if (session === undefined) {
@@ -2274,6 +2619,11 @@ export class BaselineFlowService {
         }
       }
       sessionCookieNames = names;
+      scanSessionCookies = session.cookies;
+      expectedAuthenticatedUrlPrefix = session.expectedUrlPrefix;
+      if (session.verificationUrl !== undefined) {
+        authenticationProbe = { url: session.verificationUrl, markers: session.verificationMarkers ?? [] };
+      }
     }
 
     const runId = this.deps.ids.next('run');
@@ -2286,19 +2636,112 @@ export class BaselineFlowService {
     // Delegated 経路は最大 overshoot 分を共有上限の内側に予約する。
     const reservedRequests = Math.ceil(step.limits.maxRequests * snapshot.maxOvershootRatio);
     const engineLease = step.limits.maxRequests - reservedRequests;
+    const zapCandidates = adopted.filter(candidateAllowsAutomatedZap);
     const scanRequest: ActiveScanRequest = {
       runId,
       targets,
-      attackStrength: 'Low',
+      attackStrength: 'Medium',
       leasedLimits: { ...step.limits, maxRequests: engineLease },
       authorizationRef: `authorization:${this.currentAuthorization().authorizationId}`,
       ...(sessionCookieNames === undefined ? {} : { sessionCookieNames }),
+      requestSeedCount: zapCandidates.length,
     };
+    let diagnosticRoutes = planDiagnosticRoutes(adopted, this.deps.domObserver !== undefined);
 
-    const engineRunId = await this.deps.scanEngine.start(scanRequest);
-    const monitor = new ScanMonitor(this.deps.scanEngine, engineRunId, MAX_POLL_ITERATIONS, 2_000, this.deps.scanAlertSettleMs ?? 0);
+    let requestCorpusEvidence;
+    try {
+      requestCorpusEvidence = await this.deps.evidence.saveText(
+        `http-request-corpus:${runId}`,
+        canonicalJson({
+          runId,
+          requests: adopted.map((candidate) => ({
+            requestId: candidate.requestId ?? candidate.candidateId,
+            url: ScopePolicy.canonicalUrl(candidate.url),
+            method: candidate.method.toUpperCase(),
+            ...(candidate.contentType === undefined ? {} : { contentType: candidate.contentType }),
+            inputPoints: candidate.inputPoints ?? [],
+            diagnosticTracks: candidate.diagnosticTracks ?? ['zap-active'],
+          })),
+        }),
+      );
+    } catch (cause) {
+      this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'engine-failure' });
+      machine.transition('Failed');
+      this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Failed', attempt: 1, stopReason: 'engine-failure' });
+      throw domainError('EngineFailure', `request corpus storage failed before scan: ${String(cause)}`, { retryable: true });
+    }
+
+    const emit = (event: Omit<ActiveScanExecutionEvent, 'at'>): void => control.onEvent?.({
+      at: this.deps.clock.now().toISOString(),
+      ...event,
+    });
+    const throwIfCancelled = (): void => {
+      if (control.signal?.aborted === true) {
+        throw domainError('Cancelled', 'scan stopped by user');
+      }
+    };
+    throwIfCancelled();
+    const deferredRouteCount = diagnosticRoutes.filter((route) => route.status === 'needs-input').length;
+    if (deferredRouteCount > 0) {
+      emit({
+        phase: 'starting',
+        engine: 'scopepilot',
+        message: `専用診断経路 ${deferredRouteCount} 件は、必要な追加入力を受け取るまで保留します`,
+        command: 'ScopePilot diagnostic router: preserve needs-input routes',
+        progress: 0,
+      });
+    }
+    emit({
+      phase: 'starting',
+      engine: 'zap',
+      message: `ZAP認証コンテキストを構成し、${zapCandidates.length}件のHTTPリクエスト候補を診断します`,
+      command: `ZAP API: context + active HTTP session -> core/sendRequest x ${zapCandidates.length} -> spider/scan + ajaxSpider/scan -> ascan/scan(recurse=false, inScopeOnly=true) -> per-run alert delta`,
+      progress: 0,
+    });
+    const engineRunId = await this.deps.scanEngine.start(scanRequest, {
+      ...(scanSessionCookies === undefined ? {} : { sessionCookies: scanSessionCookies }),
+      requestSeeds: zapCandidates.map((candidate) => ({
+        url: ScopePolicy.canonicalUrl(candidate.url),
+        method: candidate.method.toUpperCase(),
+        ...(candidate.contentType === undefined ? {} : { contentType: candidate.contentType }),
+        inputPoints: candidate.inputPoints ?? [],
+      })),
+      ...(expectedAuthenticatedUrlPrefix === undefined ? {} : { expectedAuthenticatedUrlPrefix }),
+      ...(authenticationProbe === undefined ? {} : { authenticationProbe }),
+    });
+    emit({ phase: 'running', engine: 'zap', message: `ZAP scan id ${engineRunId} を監視しています`, progress: 0 });
+    const monitor = new ScanMonitor(
+      this.deps.scanEngine,
+      engineRunId,
+      MAX_POLL_ITERATIONS,
+      2_000,
+      this.deps.scanAlertSettleMs ?? 0,
+      control.signal,
+      (progress) => emit({
+        phase: 'running',
+        engine: 'zap',
+        message: `ZAP active scan ${progress.progress}% (${progress.messageCount} messages)`,
+        progress: progress.progress,
+      }),
+    );
     const monitored = await monitor.collectUntilDone();
     const collectedAlerts = monitored.alerts;
+
+    if (monitored.status === 'stopped') {
+      machine.requestStop();
+      const stoppedRecord: RunRecord = {
+        runId,
+        planId: plan.planId,
+        caseId: caseRecord.caseId,
+        state: machine.transition('Stopped'),
+        attempt: 1,
+        stopReason: 'user-request',
+      };
+      this.deps.runSink?.save(stoppedRecord);
+      this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'user-request' });
+      emit({ phase: 'stopped', engine: 'zap', message: 'ZAP active scan を停止しました', progress: monitored.progress });
+      throw domainError('Cancelled', 'scan stopped by user');
+    }
 
     // engine 異常は「URL Does not Exist」等の観測理由とともに失敗として扱い、無制限に再試行しない。
     if (monitored.status === 'failed') {
@@ -2309,6 +2752,10 @@ export class BaselineFlowService {
         details: { engineRunId, engineVersion: this.deps.scanEngine.engineVersion },
       });
     }
+
+    diagnosticRoutes = diagnosticRoutes.map((route) => route.track === 'zap-active'
+      ? { ...route, status: 'executed' as const, detail: 'ZAP active scanを完了し、run開始前後のalert差分を収集しました' }
+      : route);
 
     // 観測した出力を原本として保存してから取込む (保存成功後だけ event を出す = SYS-UT-005)。
     let rawEvidence;
@@ -2333,10 +2780,183 @@ export class BaselineFlowService {
       makeFindingId: () => this.deps.ids.next('finding'),
       evidenceRef: rawEvidence.evidenceId,
     });
+    this.persistFindings([...importResult.created, ...importResult.reobserved]);
+
+    const domTargets = diagnosticRoutes
+      .filter((route) => route.track === 'browser-dom' && route.status === 'delegated')
+      .map((route) => route.targetUrl);
+    for (const targetUrl of domTargets) {
+      throwIfCancelled();
+      emit({
+        phase: 'running',
+        engine: 'scopepilot',
+        message: `Playwright DOM value-flow 観測: ${targetUrl}`,
+        command: `Playwright DOM observer: ${targetUrl}`,
+      });
+      try {
+        const observer = this.deps.domObserver;
+        if (observer === undefined) {
+          throw new Error('DOM observer is not configured');
+        }
+        const appliedCookies = scanSessionCookies === undefined
+          ? undefined
+          : applicableSessionCookies([...scanSessionCookies], targetUrl);
+        const observed = await observer.observe({
+          targetUrl,
+          scope: caseRecord.scope,
+          ...(appliedCookies === undefined ? {} : { sessionCookies: appliedCookies }),
+        });
+        const valueFlows = buildDomCandidate(observed.observations);
+        const projectedFlows = valueFlows.map((candidate) => ({
+          sourceApi: candidate.sourceApi,
+          sinkApi: candidate.sinkApi,
+          confidence: candidate.confidence,
+          marker: `sha256:${hashStable('scopepilot2.dom.marker', candidate.marker)}`,
+        }));
+        const domEvidence = await this.deps.evidence.saveText(
+          `dom-observation:${runId}:${hashStable('scopepilot2.dom.target', targetUrl).slice(0, 12)}`,
+          canonicalJson({ targetUrl, valueFlows: projectedFlows, nodes: domEvidenceProjection(observed.nodes) }),
+        );
+        const domImport = this.importer.importObservationCandidates(
+          projectedFlows.map((candidate) => ({
+            key: `scopepilot-dom-flow:${candidate.sourceApi}:${candidate.sinkApi}`,
+            title: `Potential DOM value flow: ${candidate.sourceApi} -> ${candidate.sinkApi}`,
+            url: targetUrl,
+            method: 'GET',
+            param: `${candidate.sourceApi} -> ${candidate.sinkApi}`,
+            severity: candidate.confidence >= 0.8 ? 'low' as const : 'info' as const,
+          })),
+          {
+            now: this.deps.clock.now().toISOString(),
+            engineVersion: 'scopepilot-playwright-dom-v1',
+            makeFindingId: () => this.deps.ids.next('finding'),
+            evidenceRef: domEvidence.evidenceId,
+          },
+        );
+        this.persistFindings([...domImport.created, ...domImport.reobserved]);
+        diagnosticRoutes = updateDiagnosticRoute(diagnosticRoutes, 'browser-dom', targetUrl, {
+          status: 'executed',
+          detail: `Playwrightでsource→sinkを観測し、候補 ${valueFlows.length} 件を証跡化しました`,
+          findingCount: valueFlows.length,
+        });
+        this.record({
+          type: 'FindingsImported',
+          at: this.deps.clock.now().toISOString(),
+          source: 'observation',
+          engineVersion: 'scopepilot-playwright-dom-v1',
+          importedCount: domImport.created.length,
+          duplicateCount: domImport.duplicateCount,
+        });
+      } catch (cause) {
+        diagnosticRoutes = updateDiagnosticRoute(diagnosticRoutes, 'browser-dom', targetUrl, {
+          status: 'unavailable',
+          detail: `DOM観測を完了できませんでした: ${cause instanceof Error ? cause.message : String(cause)}`,
+        });
+        emit({
+          phase: 'running',
+          engine: 'scopepilot',
+          message: `DOM観測を保留しました: ${targetUrl}`,
+        });
+      }
+    }
+
+    await this.deps.evidence.saveText(
+      `diagnostic-routes:${runId}`,
+      canonicalJson({ runId, routes: diagnosticRoutes }),
+    );
+
+    const nucleiStep = plan.steps.find((candidate) => candidate.kind === 'nuclei-scan');
+    let nucleiSummary: ActiveScanRunResult['nuclei'];
+    if (nucleiStep !== undefined) {
+      try {
+        throwIfCancelled();
+        const nucleiRunner = this.deps.nucleiRunner;
+        if (nucleiRunner === undefined) {
+          throw domainError('CapabilityUnavailable', 'confirmed plan requires nuclei but no nuclei runtime is configured');
+        }
+        const nucleiCapability = this.deps.capabilities.find((capability) => capability.engineKind === 'nuclei');
+        if (nucleiCapability === undefined || nucleiCapability.engineVersion !== nucleiRunner.engineVersion) {
+          throw domainError('CapabilityUnavailable', 'no capability snapshot for the nuclei engine version');
+        }
+        const nucleiTargets = nucleiStep.targetSnapshot.filter((url) => ScopePolicy.decide(caseRecord.scope, url).allowed);
+        const nucleiCommand = `nuclei -type http -t <reviewed-hash-pinned-template-bundle> -exclude-tags dos,fuzz,intrusive,bruteforce,headless,code,network,file,dns,oast -severity medium,high,critical -l <confirmed-targets:${nucleiTargets.length}> -rate-limit ${nucleiStep.limits.requestsPerSecond} -concurrency ${nucleiStep.limits.maxConcurrency} -max-time ${nucleiStep.limits.maxDurationMinutes}m (shared ScopePilot request guard: ${nucleiStep.limits.maxRequests})`;
+        emit({
+          phase: 'starting',
+          engine: 'nuclei',
+          message: `Nuclei reviewed HTTP template scan を開始します (${nucleiTargets.length} confirmed target)`,
+          command: nucleiCommand,
+          progress: 0,
+        });
+        const nucleiOutput = await nucleiRunner.run({
+          targets: nucleiTargets,
+          limits: nucleiStep.limits,
+          ...(control.signal === undefined ? {} : { signal: control.signal }),
+          onLog: (line) => emit({ phase: 'running', engine: 'nuclei', message: line }),
+        });
+        throwIfCancelled();
+        await this.deps.evidence.saveText(
+          `nuclei-execution:${runId}`,
+          canonicalJson({
+            runId,
+            engineVersion: nucleiRunner.engineVersion,
+            templateBundleHash: nucleiRunner.templateBundleHash ?? 'unavailable',
+            targets: nucleiTargets,
+          }),
+        );
+        emit({ phase: 'collecting', engine: 'nuclei', message: `Nuclei JSONL ${nucleiOutput.lines.length} 行を取り込みます`, progress: 100 });
+        const imported = await this.importNucleiResults(operator, {
+          engineVersion: nucleiRunner.engineVersion,
+          lines: nucleiOutput.lines,
+        });
+        nucleiSummary = {
+          status: 'completed',
+          engineVersion: nucleiRunner.engineVersion,
+          ...(nucleiRunner.templateBundleHash === undefined ? {} : { templateBundleHash: nucleiRunner.templateBundleHash }),
+          importedCount: imported.importedCount,
+          duplicateCount: imported.duplicateCount,
+          quarantinedCount: imported.quarantinedCount,
+          excludedOutOfScope: imported.excludedOutOfScope,
+        };
+        emit({ phase: 'completed', engine: 'nuclei', message: `Nuclei scan 完了: 新規所見 ${imported.importedCount} 件`, progress: 100 });
+      } catch (cause) {
+        if (control.signal?.aborted === true || (cause instanceof DomainError && cause.code === 'Cancelled')) {
+          machine.requestStop();
+          const stoppedRecord: RunRecord = {
+            runId,
+            planId: plan.planId,
+            caseId: caseRecord.caseId,
+            state: machine.transition('Stopped'),
+            attempt: 1,
+            stopReason: 'user-request',
+          };
+          this.deps.runSink?.save(stoppedRecord);
+          this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'user-request' });
+          emit({ phase: 'stopped', engine: 'nuclei', message: 'Nuclei scan を停止しました' });
+          throw domainError('Cancelled', 'scan stopped by user');
+        }
+        const error = cause instanceof Error ? cause.message : String(cause);
+        nucleiSummary = {
+          status: 'failed',
+          engineVersion: this.deps.nucleiRunner?.engineVersion ?? 'unavailable',
+          ...(this.deps.nucleiRunner?.templateBundleHash === undefined ? {} : { templateBundleHash: this.deps.nucleiRunner.templateBundleHash }),
+          importedCount: 0,
+          duplicateCount: 0,
+          quarantinedCount: 0,
+          excludedOutOfScope: 0,
+          error,
+        };
+        emit({ phase: 'completed', engine: 'nuclei', message: `Nuclei step failed independently: ${error}`, progress: 100 });
+      }
+    }
 
     this.scannedUrlCount = targets.length;
     this.delegatedSteps = [
       { stepId: step.stepId, engineKind: 'zap', engineVersion: this.deps.scanEngine.engineVersion },
+      ...(nucleiStep === undefined || this.deps.nucleiRunner === undefined ? [] : [{
+        stepId: nucleiStep.stepId,
+        engineKind: 'nuclei' as const,
+        engineVersion: this.deps.nucleiRunner.engineVersion,
+      }]),
     ];
     const runRecord: RunRecord = {
       runId,
@@ -2348,6 +2968,7 @@ export class BaselineFlowService {
     };
     this.deps.runSink?.save(runRecord);
     this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'completed' });
+    emit({ phase: 'completed', engine: 'scopepilot', message: `診断完了: 所見 ${this.importer.list().length} 件`, progress: 100 });
     this.record({
       type: 'FindingsImported',
       at: this.deps.clock.now().toISOString(),
@@ -2363,6 +2984,9 @@ export class BaselineFlowService {
       findings: this.importer.list(),
       overshootReservation: reservedRequests,
       engineVersion: this.deps.scanEngine.engineVersion,
+      requestCorpusEvidenceRef: requestCorpusEvidence.evidenceId,
+      diagnosticRoutes,
+      ...(nucleiSummary === undefined ? {} : { nuclei: nucleiSummary }),
     };
   }
 
@@ -2402,6 +3026,7 @@ export class BaselineFlowService {
       makeFindingId: () => this.deps.ids.next('finding'),
       evidenceRef: rawEvidence.evidenceId,
     });
+    this.persistFindings([...result.created, ...result.reobserved]);
     this.record({
       type: 'FindingsImported',
       at: this.deps.clock.now().toISOString(),
@@ -2423,15 +3048,18 @@ export class BaselineFlowService {
   /** 報告の生成。delegated step の限界開示を必ず含む。 */
   generateReport(
     operator: OperatorProfile,
-    input: { readonly guidelines: readonly string[] },
+    input: { readonly guidelines: readonly string[]; readonly excludeLowAndInfo?: boolean },
   ): ReportArtifact {
     this.requirePermission(operator, 'report.export');
     const caseRecord = this.currentCase();
+    const findings = input.excludeLowAndInfo === true
+      ? this.importer.list().filter((finding) => finding.severity !== 'low' && finding.severity !== 'info')
+      : this.importer.list();
     const model = buildReportModel({
       caseId: caseRecord.caseId,
       generatedAt: this.deps.clock.now().toISOString(),
       guidelines: input.guidelines,
-      findings: this.importer.list(),
+      findings,
       coverage: {
         exploredUrlCount: this.exploredUrlCount,
         scannedUrlCount: this.scannedUrlCount,
@@ -2439,6 +3067,7 @@ export class BaselineFlowService {
         limitations: [
           '外部 engine (Delegated 経路) の個々の送信は送信前に拒否できない。入力 scope・停止・版ごとの実測で管理する。',
           'engine 由来の所見は実影響未確認であり、人の確認なしに確定扱いにしない。',
+          ...(input.excludeLowAndInfo === true ? ['表示設定により重要度 Low / Info の所見を本報告書から除外した。'] : []),
         ],
       },
     });
@@ -2508,6 +3137,21 @@ export class BaselineFlowService {
  * catalog (design/27) の実装まで仮ラベル (`provisional:*`) を使う。
  */
 function candidatesFromObservation(observation: PageObservation, ids: IdGenerator): ScanCandidate[] {
+  const parsedUrl = new URL(observation.url);
+  const queryParameterCount = [...parsedUrl.searchParams].length;
+  const queryInputPoints: RequestInputPoint[] = [...new Set(parsedUrl.searchParams.keys())]
+    .map((name) => ({ name, location: 'query', type: 'string' }));
+  const javascriptSignals = observation.javascriptSignals;
+  const javascriptSignalCount = javascriptSignals === undefined
+    ? 0
+    : javascriptSignals.scriptElements + javascriptSignals.inlineEventHandlers + javascriptSignals.javascriptUrls;
+  const pageHasDynamicInput = queryParameterCount > 0 || javascriptSignalCount > 0;
+  const dynamicReasons = [
+    ...(queryParameterCount === 0 ? [] : [`GETパラメータ ${queryParameterCount} 件`]),
+    ...(javascriptSignals === undefined || javascriptSignalCount === 0 ? [] : [
+      `JavaScript要素 ${javascriptSignals.scriptElements} 件・インラインイベント ${javascriptSignals.inlineEventHandlers} 件・javascript: URL ${javascriptSignals.javascriptUrls} 件`,
+    ]),
+  ];
   const candidates: ScanCandidate[] = [
     {
       candidateId: ids.next('cand'),
@@ -2517,9 +3161,21 @@ function candidatesFromObservation(observation: PageObservation, ids: IdGenerato
       guidelineBasis: ['provisional:page'],
       confidence: 0.7,
       observationUrl: observation.url,
+      detectionReason: observation.discoveredFrom === null
+        ? `探索開始URLとして観測 (HTTP ${observation.status}, ${observation.contentType})${dynamicReasons.length === 0 ? '' : `。${dynamicReasons.join('、')}を検出`}`
+        : `${observation.discoveredFrom} からリンクを検出 (HTTP ${observation.status}, ${observation.contentType})${dynamicReasons.length === 0 ? '' : `。${dynamicReasons.join('、')}を検出`}`,
+      dynamic: pageHasDynamicInput,
+      inputPoints: queryInputPoints,
+      diagnosticTracks: diagnosticTracksFor(observation.url, 'GET', queryInputPoints, javascriptSignalCount > 0),
     },
   ];
   for (const form of observation.forms) {
+    const location = form.method.toUpperCase() === 'GET' ? 'query' : 'body';
+    const inputPoints: RequestInputPoint[] = form.fields.map((field) => ({
+      name: field.name,
+      location: field.type.toLowerCase() === 'file' ? 'file' : location,
+      type: field.type,
+    }));
     candidates.push({
       candidateId: ids.next('cand'),
       url: ScopePolicy.canonicalUrl(form.actionUrl),
@@ -2528,7 +3184,138 @@ function candidatesFromObservation(observation: PageObservation, ids: IdGenerato
       guidelineBasis: [`provisional:form:${form.classification}`],
       confidence: 0.9,
       observationUrl: observation.url,
+      detectionReason: `${observation.url} で ${form.classification} フォームを検出 (${form.method.toUpperCase()}, 入力 ${form.fields.length} 項目)`,
+      dynamic: true,
+      inputPoints,
+      ...(location === 'query' ? {} : {
+        contentType: inputPoints.some((point) => point.location === 'file')
+          ? 'multipart/form-data'
+          : 'application/x-www-form-urlencoded',
+      }),
+      diagnosticTracks: diagnosticTracksFor(form.actionUrl, form.method, inputPoints, false),
+    });
+  }
+  const seenRequests = new Set<string>();
+  for (const request of observation.requests ?? []) {
+    if (request.resourceType !== 'xhr' && request.resourceType !== 'fetch' && request.inputPoints.length === 0 && request.method === 'GET') continue;
+    const key = `${request.method}|${ScopePolicy.canonicalUrl(request.url)}|${request.inputPoints.map((point) => `${point.location}:${point.name}`).sort().join(',')}`;
+    if (seenRequests.has(key)) continue;
+    seenRequests.add(key);
+    candidates.push({
+      candidateId: ids.next('cand'),
+      url: ScopePolicy.canonicalUrl(request.url),
+      method: request.method,
+      category: request.resourceType === 'xhr' || request.resourceType === 'fetch' ? 'api-endpoint' : 'form',
+      guidelineBasis: [`observed-http:${request.resourceType}`],
+      confidence: 0.95,
+      observationUrl: observation.url,
+      detectionReason: `${observation.url} のブラウザー通信で ${request.method} リクエストと入力点 ${request.inputPoints.length} 件を観測`,
+      dynamic: true,
+      requestId: request.requestId,
+      ...(request.contentType === undefined ? {} : { contentType: request.contentType }),
+      inputPoints: request.inputPoints,
+      diagnosticTracks: diagnosticTracksFor(request.url, request.method, request.inputPoints, false),
     });
   }
   return candidates;
+}
+
+export function isSessionControlUrl(value: string): boolean {
+  try {
+    const pathname = new URL(value).pathname.toLowerCase();
+    return /\/(?:logout|log-out|logoff|signout|sign-out)(?:\.php)?\/?$/.test(pathname)
+      || /\/(?:setup|install)(?:\.php)?\/?$/.test(pathname);
+  } catch {
+    return true;
+  }
+}
+
+function diagnosticTracksFor(
+  url: string,
+  method: string,
+  inputPoints: readonly RequestInputPoint[],
+  hasJavascript: boolean,
+): readonly DiagnosticTrack[] {
+  const text = `${url} ${method} ${inputPoints.map((point) => `${point.name}:${point.type}`).join(' ')}`.toLowerCase();
+  const tracks = new Set<DiagnosticTrack>();
+  const interactiveMutation = requiresInteractiveStateChange(inputPoints);
+  if (inputPoints.length > 0 && !interactiveMutation) tracks.add('zap-active');
+  if (interactiveMutation) tracks.add('workflow-state');
+  if (hasJavascript || /xss_d|javascript|csp/.test(text)) tracks.add('browser-dom');
+  if (/xss_s|csrf|captcha/.test(text)) tracks.add('workflow-state');
+  if (/weak_id|session|token/.test(text)) tracks.add('session-analysis');
+  if (/authbypass|authori[sz]|\brole\b|\buser_id\b/.test(text)) tracks.add('authorization-differential');
+  if (inputPoints.some((point) => point.location === 'file') || /upload/.test(text)) tracks.add('upload-workflow');
+  if (/\/api(?:\/|$)|graphql|openapi|swagger/.test(text)) tracks.add('api-schema');
+  if (/crypt|cipher|encrypt|decrypt/.test(text)) tracks.add('cryptography-review');
+  if (tracks.size === 0) tracks.add('zap-active');
+  return [...tracks];
+}
+
+function requiresInteractiveStateChange(inputPoints: readonly RequestInputPoint[]): boolean {
+  const names = inputPoints.map((point) => point.name.trim().toLowerCase().replace(/[-\s]+/g, '_'));
+  const changesCredential = names.some((name) => /^(?:new_?)?(?:pass|passwd|password)(?:_new|_conf|_confirm|_confirmation)?$/.test(name)
+    && (name.includes('new') || name.includes('conf')));
+  const hasMutationSubmit = names.some((name) => /^(?:change|update|save|reset|delete|remove|disable|enable)$/.test(name));
+  return changesCredential && hasMutationSubmit;
+}
+
+function candidateAllowsAutomatedZap(candidate: ScanCandidate): boolean {
+  const tracks = candidate.diagnosticTracks ?? ['zap-active'];
+  return tracks.includes('zap-active') && !requiresInteractiveStateChange(candidate.inputPoints ?? []);
+}
+
+function diagnosticRouteDetail(track: DiagnosticTrack, domAvailable: boolean): Pick<DiagnosticRouteResult, 'status' | 'detail'> {
+  switch (track) {
+    case 'zap-active':
+      return { status: 'delegated', detail: '認証済みHTTP request seedとしてZAPへ委譲します' };
+    case 'browser-dom':
+      return domAvailable
+        ? { status: 'delegated', detail: 'PlaywrightでDOM source→sinkを自動観測します' }
+        : { status: 'unavailable', detail: 'Playwright DOM observerが構成されていません' };
+    case 'workflow-state':
+      return { status: 'needs-input', detail: '保存型XSS、CSRF、CAPTCHA等の状態遷移・確認手順が必要です' };
+    case 'session-analysis':
+      return { status: 'needs-input', detail: 'トークン抽出位置と再送手順が必要です' };
+    case 'authorization-differential':
+      return { status: 'needs-input', detail: '比較する複数roleと期待結果が必要です' };
+    case 'upload-workflow':
+      return { status: 'needs-input', detail: '許可されたサンプルファイルと成功判定が必要です' };
+    case 'api-schema':
+      return { status: 'needs-input', detail: 'OpenAPI/GraphQL schemaまたは有効なrequest body例が必要です' };
+    case 'cryptography-review':
+      return { status: 'needs-input', detail: '対象データ、期待する保護要件、復号・検証手順が必要です' };
+  }
+}
+
+function planDiagnosticRoutes(adopted: readonly ScanCandidate[], domAvailable: boolean): readonly DiagnosticRouteResult[] {
+  const grouped = new Map<string, { track: DiagnosticTrack; targetUrl: string; candidateCount: number }>();
+  for (const candidate of adopted) {
+    const targetUrl = ScopePolicy.canonicalUrl(candidate.url);
+    for (const track of candidate.diagnosticTracks ?? ['zap-active']) {
+      if (track === 'zap-active' && !candidateAllowsAutomatedZap(candidate)) continue;
+      const key = `${track}\0${targetUrl}`;
+      const existing = grouped.get(key);
+      grouped.set(key, {
+        track,
+        targetUrl,
+        candidateCount: (existing?.candidateCount ?? 0) + 1,
+      });
+    }
+  }
+  return [...grouped.values()].map((route) => ({
+    ...route,
+    ...diagnosticRouteDetail(route.track, domAvailable),
+  }));
+}
+
+function updateDiagnosticRoute(
+  routes: readonly DiagnosticRouteResult[],
+  track: DiagnosticTrack,
+  targetUrl: string,
+  update: Pick<DiagnosticRouteResult, 'status' | 'detail'> & { readonly findingCount?: number },
+): readonly DiagnosticRouteResult[] {
+  return routes.map((route) => route.track === track && route.targetUrl === targetUrl
+    ? { ...route, ...update }
+    : route);
 }

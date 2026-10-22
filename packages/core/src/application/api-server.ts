@@ -9,12 +9,15 @@
  */
 import type { Server } from 'node:http';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { DomainError, DocumentAuthMethods, hashStable, type DocumentAuthMethod, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
 import type { BaselineFlowService } from './baseline-flow.ts';
 import { CodecRegistry, compareText, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
+import type { LoginFlowStep } from '../domain/authentication-session.ts';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_SEQUENCER_ENVELOPE_BYTES = 8 * 1024 * 1024;
+const MAX_INTERACTIVE_ENVELOPE_BYTES = 16 * 1024 * 1024;
 const HTTP_STATUS_BY_CODE: Record<DomainErrorCode, number> = {
   ValidationFailed: 400,
   PermissionDenied: 403,
@@ -40,6 +43,19 @@ export interface CoreApiServerOptions {
 
 export function createCoreApiServer(options: CoreApiServerOptions): Server {
   const { service, operator, runRepository } = options;
+  type ScanResult = Awaited<ReturnType<BaselineFlowService['runActiveScan']>>;
+  interface ScanExecution {
+    readonly executionId: string;
+    readonly controller: AbortController;
+    state: 'queued' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed';
+    currentEngine: 'zap' | 'nuclei' | 'scopepilot';
+    currentCommand: string;
+    progress: number;
+    logs: string[];
+    result?: ScanResult;
+    error?: string;
+  }
+  const scanExecutions = new Map<string, ScanExecution>();
 
   const server = createServer((request, response) => {
     void handle(request, response).catch((cause: unknown) => {
@@ -147,7 +163,15 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return;
       }
       try {
-        const result = service.buildActiveScanPlan(operator, stringArrayField(body, 'targets'), optionalLimitsField(body));
+        if (body.enableNuclei !== undefined && typeof body.enableNuclei !== 'boolean') {
+          throw new DomainError('ValidationFailed', 'enableNuclei must be boolean');
+        }
+        const result = service.buildActiveScanPlan(
+          operator,
+          stringArrayField(body, 'targets'),
+          optionalLimitsField(body),
+          { includeNuclei: body.enableNuclei === true },
+        );
         service.authorizePlan(result.plan);
         return respondJson(response, 200, { plan: result.plan, planHash: result.planHash });
       } catch (cause) {
@@ -172,7 +196,13 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return;
       }
       try {
-        const artifact = service.generateReport(operator, { guidelines: stringArrayField(body, 'guidelines') });
+        if (body.excludeLowAndInfo !== undefined && typeof body.excludeLowAndInfo !== 'boolean') {
+          throw new DomainError('ValidationFailed', 'field excludeLowAndInfo must be a boolean');
+        }
+        const artifact = service.generateReport(operator, {
+          guidelines: stringArrayField(body, 'guidelines'),
+          ...(body.excludeLowAndInfo === undefined ? {} : { excludeLowAndInfo: body.excludeLowAndInfo }),
+        });
         return respondJson(response, 200, artifact);
       } catch (cause) {
         return respondDomainError(response, cause);
@@ -210,6 +240,103 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'POST /api/run/scan/start') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const plan = planField(body);
+        const confirmation = confirmationField(body);
+        const adopted = adoptedField(body);
+        const role = typeof body.role === 'string' ? stringField(body, 'role') : undefined;
+        const executionId = randomUUID();
+        const controller = new AbortController();
+        const execution: ScanExecution = {
+          executionId,
+          controller,
+          state: 'queued',
+          currentEngine: 'scopepilot',
+          currentCommand: '',
+          progress: 0,
+          logs: [`${new Date().toISOString()} [ScopePilot] 診断実行を受け付けました`],
+        };
+        scanExecutions.set(executionId, execution);
+        void (async () => {
+          execution.state = 'running';
+          try {
+            const result = await service.runActiveScan(operator, plan, confirmation, adopted, role, {
+              signal: controller.signal,
+              onEvent: (event) => {
+                execution.currentEngine = event.engine;
+                execution.progress = event.progress ?? execution.progress;
+                if (event.command !== undefined) execution.currentCommand = event.command;
+                execution.logs.push(`${event.at} [${event.engine.toUpperCase()}] ${event.message}${event.command === undefined ? '' : `\n  $ ${event.command}`}`);
+                if (execution.logs.length > 500) execution.logs.splice(0, execution.logs.length - 500);
+                if (event.phase === 'stopped') execution.state = 'stopped';
+              },
+            });
+            execution.result = result;
+            execution.state = 'completed';
+            execution.progress = 100;
+          } catch (cause) {
+            const cancelled = controller.signal.aborted || (cause instanceof DomainError && cause.code === 'Cancelled');
+            execution.state = cancelled ? 'stopped' : 'failed';
+            execution.error = cause instanceof Error ? cause.message : String(cause);
+            execution.logs.push(`${new Date().toISOString()} [ScopePilot] ${cancelled ? '停止しました' : `エラー: ${execution.error}`}`);
+          }
+        })();
+        return respondJson(response, 202, { executionId });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/run/scan/status') {
+      const executionId = url.searchParams.get('executionId') ?? '';
+      const execution = scanExecutions.get(executionId);
+      if (execution === undefined) {
+        return respondError(response, 404, 'ValidationFailed', 'scan execution was not found', false);
+      }
+      return respondJson(response, 200, {
+        executionId: execution.executionId,
+        state: execution.state,
+        currentEngine: execution.currentEngine,
+        currentCommand: execution.currentCommand,
+        progress: execution.progress,
+        logs: execution.logs,
+        ...(execution.result === undefined ? {} : {
+          result: {
+            runRecord: execution.result.runRecord,
+            planHash: execution.result.planHash,
+            scanRequest: execution.result.scanRequest,
+            overshootReservation: execution.result.overshootReservation,
+            engineVersion: execution.result.engineVersion,
+            requestCorpusEvidenceRef: execution.result.requestCorpusEvidenceRef,
+            findings: execution.result.findings,
+            diagnosticRoutes: execution.result.diagnosticRoutes,
+            ...(execution.result.nuclei === undefined ? {} : { nuclei: execution.result.nuclei }),
+          },
+        }),
+        ...(execution.error === undefined ? {} : { error: execution.error }),
+      });
+    }
+    if (route === 'POST /api/run/scan/stop') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      const executionId = stringField(body, 'executionId');
+      const execution = scanExecutions.get(executionId);
+      if (execution === undefined) {
+        return respondError(response, 404, 'ValidationFailed', 'scan execution was not found', false);
+      }
+      if (execution.state === 'queued' || execution.state === 'running') {
+        execution.state = 'stopping';
+        execution.logs.push(`${new Date().toISOString()} [ScopePilot] 停止要求を送信しました`);
+        execution.controller.abort();
+      }
+      return respondJson(response, 202, { executionId, state: execution.state });
+    }
     if (route === 'POST /api/run/scan') {
       const body = await readJsonBody(request, response);
       if (body === undefined) {
@@ -225,7 +352,10 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           scanRequest: result.scanRequest,
           overshootReservation: result.overshootReservation,
           engineVersion: result.engineVersion,
+          requestCorpusEvidenceRef: result.requestCorpusEvidenceRef,
           findings: result.findings,
+          diagnosticRoutes: result.diagnosticRoutes,
+          ...(result.nuclei === undefined ? {} : { nuclei: result.nuclei }),
         });
       } catch (cause) {
         return respondDomainError(response, cause);
@@ -310,6 +440,16 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           documentLabel: stringField(body, 'documentLabel'),
           document: body.document,
         });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/diagnostics/interactive') {
+      const body = await readJsonBody(request, response, MAX_INTERACTIVE_ENVELOPE_BYTES);
+      if (body === undefined) return;
+      try {
+        const result = await service.runInteractiveDiagnostics(operator, interactiveDiagnosticInputField(body));
         return respondJson(response, 200, result);
       } catch (cause) {
         return respondDomainError(response, cause);
@@ -885,13 +1025,16 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           if (record.secretValue !== undefined) {
             throw new DomainError('ValidationFailed', `steps[${index}]: inline secret values are not accepted; use secretReference`);
           }
-          const kind = stringField(record, 'kind');
-          const built: { kind: string; target?: string; secretReference?: string } = { kind };
+          const kind = stringField(record, 'kind') as LoginFlowStep['kind'];
+          const built: { kind: LoginFlowStep['kind']; target?: string; secretReference?: string; value?: string } = { kind };
           if (record.target !== undefined) {
             built.target = stringField(record, 'target');
           }
           if (record.secretReference !== undefined) {
             built.secretReference = stringField(record, 'secretReference');
+          }
+          if (record.value !== undefined) {
+            built.value = stringField(record, 'value');
           }
           return built;
         });
@@ -1194,6 +1337,65 @@ function candidateArrayField(body: Record<string, unknown>, field: string): read
     throw new DomainError('ValidationFailed', `field ${field} must be an array of candidates`);
   }
   return value as readonly import('@scopepilot2/contracts').ScanCandidate[];
+}
+
+function interactiveDiagnosticInputField(body: Record<string, unknown>): import('./baseline-flow.ts').InteractiveDiagnosticRunInput {
+  if (body.confirmed !== true) throw new DomainError('ValidationFailed', 'field confirmed must be true');
+  if (!Array.isArray(body.items) || !Array.isArray(body.files) || !Array.isArray(body.apiDocuments)) {
+    throw new DomainError('ValidationFailed', 'interactive diagnostic items, files, and apiDocuments must be arrays');
+  }
+  const tracks = new Set(['workflow-state', 'session-analysis', 'authorization-differential', 'upload-workflow', 'api-schema', 'cryptography-review']);
+  const tokenSources = new Set(['body', 'cookie', 'hidden', 'bearer', 'custom']);
+  const requiredInputs = new Set(['upload-file', 'api-spec', 'additional-role-session']);
+  const stepKinds = new Set(['navigate', 'fill', 'select', 'click', 'wait', 'assert', 'assertValue', 'upload']);
+  const items = body.items.map((entry, itemIndex) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new DomainError('ValidationFailed', `items[${itemIndex}] must be an object`);
+    const item = entry as Record<string, unknown>;
+    const track = stringField(item, 'track');
+    const tokenSource = stringField(item, 'tokenSource');
+    const expectation = stringField(item, 'expectation');
+    if (!tracks.has(track) || !tokenSources.has(tokenSource) || !['same', 'different'].includes(expectation)) {
+      throw new DomainError('ValidationFailed', `items[${itemIndex}] contains an unsupported enum value`);
+    }
+    if (!Array.isArray(item.steps)) throw new DomainError('ValidationFailed', `items[${itemIndex}].steps must be an array`);
+    const steps = item.steps.map((entryStep, stepIndex) => {
+      if (typeof entryStep !== 'object' || entryStep === null || Array.isArray(entryStep)) throw new DomainError('ValidationFailed', `items[${itemIndex}].steps[${stepIndex}] must be an object`);
+      const step = entryStep as Record<string, unknown>;
+      const kind = stringField(step, 'kind');
+      const target = stringField(step, 'target');
+      if (!stepKinds.has(kind)) throw new DomainError('ValidationFailed', `unsupported browser step kind: ${kind}`);
+      if (kind === 'fill' || kind === 'select' || kind === 'assertValue') return { kind, target, value: stringField(step, 'value') };
+      if (kind === 'upload') return { kind, target, inputRef: stringField(step, 'inputRef') };
+      return { kind, target };
+    });
+    const required = stringArrayField(item, 'requiredInputs');
+    if (required.some((value) => !requiredInputs.has(value))) throw new DomainError('ValidationFailed', `items[${itemIndex}].requiredInputs contains an unsupported value`);
+    return {
+      itemId: stringField(item, 'itemId'),
+      track: track as import('./baseline-flow.ts').InteractiveDiagnosticTrack,
+      targetUrl: stringField(item, 'targetUrl'),
+      role: stringField(item, 'role'),
+      roles: stringArrayField(item, 'roles'),
+      summary: stringField(item, 'summary'),
+      steps: steps as import('../ports/engines.ts').InteractiveBrowserStep[],
+      samples: numberField(item, 'samples'),
+      tokenSource: tokenSource as 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom',
+      tokenName: stringField(item, 'tokenName'),
+      expectation: expectation as 'same' | 'different',
+      requiredInputs: required as ('upload-file' | 'api-spec' | 'additional-role-session')[],
+    };
+  });
+  const files = body.files.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new DomainError('ValidationFailed', `files[${index}] must be an object`);
+    const file = entry as Record<string, unknown>;
+    return { inputRef: stringField(file, 'inputRef'), name: stringField(file, 'name'), mimeType: stringField(file, 'mimeType'), dataBase64: stringField(file, 'dataBase64') };
+  });
+  const apiDocuments = body.apiDocuments.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new DomainError('ValidationFailed', `apiDocuments[${index}] must be an object`);
+    const document = entry as Record<string, unknown>;
+    return { inputRef: stringField(document, 'inputRef'), name: stringField(document, 'name'), document: document.document };
+  });
+  return { confirmed: true, items, files, apiDocuments };
 }
 
 function structField(body: Record<string, unknown>, field: string): Record<string, unknown> {

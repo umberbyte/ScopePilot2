@@ -7,6 +7,16 @@ import { createRoot } from 'react-dom/client';
 import { AdvancedApp } from './advanced.tsx';
 import { setLocale, t, type Locale } from './resources.ts';
 import { WizardApp } from './wizard.tsx';
+import { RuntimeSettingsWindow } from './runtime-settings-window.tsx';
+import type {
+  AiCliAuthStatus,
+  AiCatalogSnapshot,
+  AiCliProvider,
+  RuntimeSettingsInput,
+  AppAiSelection,
+  RuntimeSettingsSnapshot,
+  RuntimeToolId,
+} from '../shared/runtime-settings.ts';
 import {
   Badge,
   Button,
@@ -39,7 +49,7 @@ interface DesktopBridge {
   }): Promise<{
     readonly directory: string;
     readonly dbPath: string;
-    readonly existingCase: { readonly name: string; readonly scope: { readonly allowedOrigins: readonly string[] } } | null;
+    readonly existingCase: { readonly name: string; readonly revision: number; readonly scope: { readonly allowedOrigins: readonly string[] } } | null;
     readonly settings: {
       readonly startUrl: string;
       readonly supportingOrigins: readonly string[];
@@ -50,6 +60,27 @@ interface DesktopBridge {
     };
     readonly inputs: readonly (DesktopPath & { readonly sha256: string; readonly relativePath: string })[];
   }>;
+  saveCaseWorkspaceSettings(request: {
+    readonly startUrl: string;
+    readonly allowedOrigins: readonly string[];
+    readonly supportingOrigins: readonly string[];
+    readonly targetRoles: readonly string[];
+    readonly forbiddenActions: readonly string[];
+    readonly aiProvider: 'zcode' | 'codex' | 'claude';
+    readonly aiModel: string;
+  }): Promise<{
+    readonly settings: {
+      readonly startUrl: string;
+      readonly supportingOrigins: readonly string[];
+      readonly targetRoles: readonly string[];
+      readonly forbiddenActions: readonly string[];
+      readonly aiProvider: 'zcode' | 'codex' | 'claude';
+      readonly aiModel: string;
+    };
+    readonly allowedOrigins: readonly string[];
+  }>;
+  removeCaseInput(inputId: string): Promise<readonly (DesktopPath & { readonly inputId: string; readonly sha256: string; readonly relativePath: string })[]>;
+  importCaseInputs(materialPaths: readonly string[]): Promise<readonly (DesktopPath & { readonly inputId: string; readonly sha256: string; readonly relativePath: string })[]>;
   saveReport(request: { readonly content: string; readonly modelHash: string }): Promise<{
     readonly markdownPath: string;
     readonly wordPath: string;
@@ -69,6 +100,54 @@ interface DesktopBridge {
       readonly warnings: readonly string[];
     }[];
   }>;
+  planPostLoginActions(request: { readonly instruction: string }): Promise<{
+    readonly provider: 'zcode' | 'codex' | 'claude';
+    readonly model: string;
+    readonly summary: string;
+    readonly steps: readonly (
+      | { readonly kind: 'navigate' | 'click' | 'wait' | 'assert'; readonly target: string }
+      | { readonly kind: 'select' | 'assertValue'; readonly target: string; readonly value: string }
+    )[];
+    readonly warnings: readonly string[];
+    readonly expectedUrlPrefix?: string;
+    readonly invocationId: string;
+  }>;
+  planInteractiveDiagnostics(request: {
+    readonly instruction: string;
+    readonly roles: readonly string[];
+    readonly candidates: readonly {
+      readonly url: string;
+      readonly method: string;
+      readonly diagnosticTracks: readonly string[];
+      readonly inputPoints: readonly { readonly location: string; readonly name: string }[];
+    }[];
+  }): Promise<{
+    readonly provider: 'zcode' | 'codex' | 'claude';
+    readonly model: string;
+    readonly summary: string;
+    readonly items: readonly {
+      readonly itemId: string;
+      readonly track: 'workflow-state' | 'session-analysis' | 'authorization-differential' | 'upload-workflow' | 'api-schema' | 'cryptography-review';
+      readonly targetUrl: string;
+      readonly role: string;
+      readonly roles: readonly string[];
+      readonly summary: string;
+      readonly steps: readonly (
+        | { readonly kind: 'navigate' | 'click' | 'wait' | 'assert'; readonly target: string }
+        | { readonly kind: 'fill' | 'select' | 'assertValue'; readonly target: string; readonly value: string }
+        | { readonly kind: 'upload'; readonly target: string; readonly inputRef: 'upload-file' }
+      )[];
+      readonly samples: number;
+      readonly tokenSource: 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom';
+      readonly tokenName: string;
+      readonly expectation: 'same' | 'different';
+      readonly requiredInputs: readonly ('upload-file' | 'api-spec' | 'additional-role-session')[];
+    }[];
+    readonly warnings: readonly string[];
+    readonly invocationId: string;
+  }>;
+  selectInteractiveInput(kind: 'upload-file'): Promise<{ readonly kind: 'upload-file'; readonly inputRef: 'upload-file'; readonly name: string; readonly mimeType: string; readonly dataBase64: string } | null>;
+  selectInteractiveInput(kind: 'api-spec'): Promise<{ readonly kind: 'api-spec'; readonly inputRef: 'api-spec'; readonly name: string; readonly document: unknown } | null>;
   generateAiReport(request: { readonly baseContent: string; readonly baseModelHash: string; readonly guidelines: readonly string[] }): Promise<{
     readonly provider: 'zcode' | 'codex' | 'claude';
     readonly model: string;
@@ -77,6 +156,15 @@ interface DesktopBridge {
     readonly invocationId: string;
   }>;
   openSelectedPath(path: string): Promise<void>;
+  openSettings(): Promise<void>;
+  getRuntimeSettings(): Promise<RuntimeSettingsSnapshot>;
+  saveRuntimeSettings(settings: RuntimeSettingsInput): Promise<RuntimeSettingsSnapshot>;
+  selectRuntimeToolFile(toolId: RuntimeToolId, currentPath: string): Promise<string | null>;
+  getAiAuthStatuses(): Promise<readonly AiCliAuthStatus[]>;
+  launchAiLogin(provider: AiCliProvider): Promise<void>;
+  getAiCatalog(): Promise<AiCatalogSnapshot>;
+  saveAiSelection(selection: AppAiSelection): Promise<AppAiSelection>;
+  closeSettings(): Promise<void>;
 }
 
 interface DesktopPath {
@@ -250,6 +338,13 @@ function App({ themePreference, onThemePreferenceChange }: {
           </div>
 
           <div className={styles.controls}>
+            <Button
+              appearance="subtle"
+              size="small"
+              onClick={() => void window.scopepilotDesktop?.openSettings()}
+            >
+              {t('app.settings')}
+            </Button>
             <Select
               className={styles.themeSelect}
               aria-label={t('app.theme.label')}
@@ -318,7 +413,9 @@ function ThemedApp(): React.ReactElement {
         backgroundColor: theme.colorNeutralBackground2,
       }}
     >
-      <App themePreference={themePreference} onThemePreferenceChange={setThemePreference} />
+      {new URLSearchParams(window.location.search).get('window') === 'settings'
+        ? <RuntimeSettingsWindow />
+        : <App themePreference={themePreference} onThemePreferenceChange={setThemePreference} />}
     </FluentProvider>
   );
 }

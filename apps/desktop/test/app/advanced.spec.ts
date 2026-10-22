@@ -10,7 +10,7 @@ let app: ElectronApplication;
 let page: Page;
 
 test.beforeAll(async () => {
-  app = await electron.launch({ args: ['dist/main.cjs'] });
+  app = await electron.launch({ args: ['dist/main.cjs'], env: { ...process.env, SCOPEPILOT_DISABLE_NUCLEI: '1' } });
   page = await app.firstWindow();
   await expect(page).toHaveTitle(/ScopePilot2/);
   await page.getByRole('button', { name: 'アドバンスド' }).click();

@@ -28,6 +28,15 @@ describe('LoginFlow', () => {
     assert.throws(() => validateLoginFlow([{ kind: 'execScript' } as unknown as LoginFlowStep]), /not allowed/);
   });
 
+  test('select/assertValue は非秘密の選択値だけを受け付ける', () => {
+    assert.deepEqual(validateLoginFlow([
+      { kind: 'select', target: 'select[name="security"]', value: 'low' },
+      { kind: 'assertValue', target: 'select[name="security"]', value: 'low' },
+    ]), { stepCount: 2 });
+    assert.throws(() => validateLoginFlow([{ kind: 'select', target: '#security' }]), /requires a non-empty option value/);
+    assert.throws(() => validateLoginFlow([{ kind: 'click', target: '#save', value: 'low' }]), /only accepted/);
+  });
+
   test('[F09-UT-002] URL 一致でも assert 不一致なら未認証と判定する', () => {
     assert.equal(detectAuthState({ expectedUrlPrefix: 'http://x.test/home', finalUrl: 'http://x.test/home', assertResult: true }), 'authenticated');
     assert.equal(detectAuthState({ expectedUrlPrefix: 'http://x.test/home', finalUrl: 'http://x.test/home', assertResult: false }), 'unauthenticated');

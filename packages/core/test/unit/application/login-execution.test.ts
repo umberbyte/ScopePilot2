@@ -28,6 +28,7 @@ class SessionRecordingExplorer implements ExplorationPort {
   readonly engineVersion = 'session-explorer-1';
   readonly sessionCookiesPerCall: (readonly LoginSessionCookie[])[] = [];
   observeCalls = 0;
+  links: readonly string[] = [];
 
   async observe(): Promise<PageObservation | null> {
     throw new Error('observe should not be called when a role session is given');
@@ -46,7 +47,7 @@ class SessionRecordingExplorer implements ExplorationPort {
       discoveredFrom: null,
       depth: 0,
       originType: 'crawl',
-      links: [],
+      links: this.links,
       forms: [],
     };
   }
@@ -64,7 +65,11 @@ describe('runLogin (service・design/f09)', () => {
   test('登録済み flow を実行し session を保存、探索の role 指定で cookie が使われる', async () => {
     const executor = new FakeLoginExecutor();
     const explorer = new SessionRecordingExplorer();
-    const { service, operator } = await bootstrapFlow({ loginExecutor: executor, explorer });
+    const { service, operator } = await bootstrapFlow({
+      loginExecutor: executor,
+      loginProxyServer: 'http://127.0.0.1:8080',
+      explorer,
+    });
     service.registerLoginFlow(operator, { role: 'admin', flowVersion: 'flow-1', steps: [...LOGIN_STEPS] });
 
     const login = await service.runLogin(operator, {
@@ -79,6 +84,7 @@ describe('runLogin (service・design/f09)', () => {
     assert.equal(executor.inputs.length, 1);
     assert.equal(executor.inputs[0]?.steps.length, 5);
     assert.equal(executor.inputs[0]?.secretValues['vault://admin-pass'], 'password123');
+    assert.equal(executor.inputs[0]?.proxyServer, 'http://127.0.0.1:8080');
 
     // 探索 (role 指定) は session cookie を explorer へ渡す。
     const { plan } = service.buildExplorationPlan(operator, ['http://fixture.target.test/']);
@@ -95,6 +101,39 @@ describe('runLogin (service・design/f09)', () => {
     assert.ok(eventsText.includes('vault://admin-user'));
     assert.ok(!eventsText.includes('password123'));
     assert.ok(!eventsText.includes('session-secret-value'));
+  });
+
+  test('authenticated exploration rejects logout and setup URLs before browser navigation', async () => {
+    const executor = new FakeLoginExecutor();
+    const explorer = new SessionRecordingExplorer();
+    explorer.links = [
+      'http://fixture.target.test/logout.php',
+      'http://fixture.target.test/setup.php',
+      'http://fixture.target.test/safe.php',
+    ];
+    const { service, operator } = await bootstrapFlow({ loginExecutor: executor, explorer });
+    service.registerLoginFlow(operator, { role: 'admin', flowVersion: 'flow-safe-crawl', steps: [...LOGIN_STEPS] });
+    await service.runLogin(operator, {
+      role: 'admin',
+      baseUrl: 'http://fixture.target.test',
+      secretValues: { 'vault://admin-user': 'admin', 'vault://admin-pass': 'password123' },
+      expectedUrlPrefix: 'http://fixture.target.test/',
+    });
+
+    const { plan } = service.buildExplorationPlan(operator, ['http://fixture.target.test/']);
+    service.authorizePlan(plan);
+    const confirmation = service.confirmPlan(plan, operator);
+    const run = await service.runExploration(operator, plan, confirmation, { maxDepth: 1, role: 'admin' });
+
+    assert.equal(explorer.observeCalls, 2);
+    assert.deepEqual(run.observations.map((observation) => observation.url), [
+      'http://fixture.target.test/',
+      'http://fixture.target.test/safe.php',
+    ]);
+    assert.deepEqual(run.deniedUrls.map((entry) => entry.url), [
+      'http://fixture.target.test/logout.php',
+      'http://fixture.target.test/setup.php',
+    ]);
   });
 
   test('未登録 role・秘密値不足・executor 未構成・assert 失敗はそれぞれ拒否/未保存', async () => {

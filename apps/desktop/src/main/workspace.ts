@@ -9,6 +9,7 @@ import {
   AuthorizationRepository,
   AiInvocationRepository,
   CaseRepository,
+  FindingRepository,
   migrate,
   openDatabase,
   RunRepository,
@@ -28,6 +29,10 @@ export interface WorkspaceSettingsInput {
   readonly aiModel: string;
 }
 
+export interface WorkspaceSettingsUpdateInput extends WorkspaceSettingsInput {
+  readonly allowedOrigins: readonly string[];
+}
+
 export type WorkspaceOpenMode = 'create' | 'open';
 
 export interface ActivatedWorkspace {
@@ -45,6 +50,7 @@ export interface ActiveWorkspaceRepositories {
   readonly authorizations: AuthorizationRepository;
   readonly runs: RunRepository;
   readonly evidence: SqliteEvidenceStore;
+  readonly findings: FindingRepository;
   readonly workspace: WorkspaceRepository;
   readonly aiInvocations: AiInvocationRepository;
 }
@@ -116,7 +122,9 @@ async function importOne(root: string, repository: WorkspaceRepository, sourcePa
   }
 
   repository.saveInput({
-    inputId: `input-${sha256.slice(0, 20)}`,
+    // 同一内容でも別名で受領した資料は別の入力として扱う。SHAだけでは input_id が
+    // 衝突するため、DBの一意条件 (sha256, original_name) と同じ情報から安定IDを作る。
+    inputId: `input-${sha256.slice(0, 12)}-${createHash('sha256').update(originalName.normalize('NFKC'), 'utf8').digest('hex').slice(0, 12)}`,
     relativePath: `inputs/${fileName}`,
     originalName,
     sha256,
@@ -182,7 +190,8 @@ export class DesktopWorkspaceManager {
         cases: new CaseRepository(db),
         authorizations: new AuthorizationRepository(db),
         runs: new RunRepository(db),
-        evidence: new SqliteEvidenceStore(db),
+        evidence: new SqliteEvidenceStore(db, join(root, 'evidence', 'blobs')),
+        findings: new FindingRepository(db),
         workspace: new WorkspaceRepository(db),
         aiInvocations: new AiInvocationRepository(db),
       };
@@ -201,7 +210,14 @@ export class DesktopWorkspaceManager {
         aiModel: input.aiModel.trim(),
         updatedAt: new Date().toISOString(),
       };
-      const settings = cases.length === 1 ? repositories.workspace.getSettings() ?? requestedSettings : requestedSettings;
+      const storedSettings = cases.length === 1 ? repositories.workspace.getSettings() : null;
+      const settings: WorkspaceSettings = storedSettings === null ? requestedSettings : {
+        ...storedSettings,
+        // AI選択は案件設定ではなくアプリ共通設定を正本とする。案件DBには実行時の監査用snapshotを保存する。
+        aiProvider: requestedSettings.aiProvider,
+        aiModel: requestedSettings.aiModel,
+        updatedAt: requestedSettings.updatedAt,
+      };
       repositories.workspace.saveSettings(settings);
       for (const source of materialPaths) await importOne(root, repositories.workspace, source);
 
@@ -222,6 +238,58 @@ export class DesktopWorkspaceManager {
       db.close();
       throw cause;
     }
+  }
+
+  updateSettings(input: WorkspaceSettingsUpdateInput): ActivatedWorkspace {
+    if (this.activeDirectory === null || this.active === null) throw new Error('案件フォルダを先に開いてください');
+    let parsedStart: URL;
+    try { parsedStart = new URL(input.startUrl.trim()); } catch { throw new Error('開始URLが不正です'); }
+    if (!['http:', 'https:'].includes(parsedStart.protocol)) throw new Error('開始URLはHTTPまたはHTTPSで指定してください');
+    const allowedOrigins = [...new Set(input.allowedOrigins.map((value) => new URL(value).origin))];
+    if (allowedOrigins.length === 0 || !allowedOrigins.includes(parsedStart.origin)) {
+      throw new Error(`開始URLのOrigin「${parsedStart.origin}」を許可Originへ追加してください`);
+    }
+    const currentCase = this.active.cases.list()[0];
+    if (currentCase === undefined) throw new Error('案件を作成してから設定を保存してください');
+    const settings: WorkspaceSettings = {
+      startUrl: parsedStart.toString(),
+      supportingOrigins: [...new Set(input.supportingOrigins.map((value) => new URL(value).origin))],
+      targetRoles: [...new Set(input.targetRoles.map((value) => value.trim()).filter(Boolean))],
+      forbiddenActions: [...new Set(input.forbiddenActions.map((value) => value.trim()).filter(Boolean))],
+      aiProvider: input.aiProvider,
+      aiModel: input.aiModel.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+    if (currentCase.scope.allowedOrigins.length !== allowedOrigins.length
+      || currentCase.scope.allowedOrigins.some((origin) => !allowedOrigins.includes(origin))) {
+      throw new Error('許可Originを先に案件scopeへ保存してください');
+    }
+    this.active.workspace.saveSettings(settings);
+    return {
+      directory: this.activeDirectory,
+      dbPath: join(this.activeDirectory, 'scopepilot.db'),
+      existingCase: currentCase,
+      existingAuthorization: this.active.authorizations.latest(currentCase.caseId),
+      settings,
+      inputs: this.active.workspace.listInputs(),
+    };
+  }
+
+  async removeInput(inputId: string): Promise<readonly WorkspaceInputSource[]> {
+    if (this.activeDirectory === null || this.active === null) throw new Error('案件フォルダを先に開いてください');
+    const input = this.active.workspace.listInputs().find((entry) => entry.inputId === inputId);
+    if (input === undefined) throw new Error('指定された入力資料が見つかりません');
+    const path = resolve(this.activeDirectory, input.relativePath);
+    ensureChild(this.activeDirectory, path);
+    await rm(path, { force: true });
+    this.active.workspace.deleteInput(inputId);
+    return this.active.workspace.listInputs();
+  }
+
+  async importInputs(materialPaths: readonly string[]): Promise<readonly WorkspaceInputSource[]> {
+    if (this.activeDirectory === null || this.active === null) throw new Error('案件フォルダを先に開いてください');
+    for (const source of materialPaths) await importOne(this.activeDirectory, this.active.workspace, source);
+    return this.active.workspace.listInputs();
   }
 
   async saveReport(content: string, modelHash: string): Promise<SavedReportFiles> {

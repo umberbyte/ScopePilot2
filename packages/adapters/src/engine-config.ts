@@ -5,7 +5,7 @@
 import { existsSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname } from 'node:path';
-import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort } from '@scopepilot2/core';
+import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, NucleiScanPort } from '@scopepilot2/core';
 import type { ActiveScanRequest, EngineAlert, EngineCapabilitySnapshot, EngineProgress } from '@scopepilot2/contracts';
 import { NodeFuzzTransport } from './fuzz-transport.ts';
 import { InteractshCliProvider } from './interactsh-provider.ts';
@@ -15,8 +15,10 @@ import { NodeSequencerTransport } from './sequencer-transport.ts';
 import { NodeWebSocketTransport } from './websocket-transport.ts';
 import { NodeHttp2Transport } from './http2-transport.ts';
 import { PlaywrightDomObserver } from './dom-observer.ts';
+import { PlaywrightInteractiveBrowser } from './interactive-browser.ts';
 import { ZapEngineAdapter } from './zap-engine.ts';
 import { PlaywrightExplorerAdapter } from './playwright-explorer.ts';
+import { NucleiRunner } from './nuclei-runner.ts';
 
 const DEFAULT_ZAP_BASE_URL = 'http://127.0.0.1:8080';
 
@@ -27,6 +29,8 @@ export interface EngineSelection {
   readonly oastServerUrl?: string;
   readonly interactshConfigPath?: string;
   readonly zapExecutable?: string;
+  readonly nucleiExecutable?: string;
+  readonly nucleiTemplateManifest?: string;
 }
 
 function canonicalOrigins(origins: readonly string[]): readonly string[] {
@@ -47,6 +51,8 @@ export function resolveEngineSelection(
   const interactshConfigPath = env['SCOPEPILOT_INTERACTSH_CONFIG']?.trim();
   if (oastServerUrl && !interactshConfigPath) throw new Error('SCOPEPILOT_OAST_SERVER_URL requires SCOPEPILOT_INTERACTSH_CONFIG');
   const zapExecutable = env['SCOPEPILOT_ZAP_EXECUTABLE']?.trim();
+  const nucleiExecutable = env['SCOPEPILOT_NUCLEI_EXECUTABLE']?.trim();
+  const nucleiTemplateManifest = env['SCOPEPILOT_NUCLEI_TEMPLATE_MANIFEST']?.trim();
   return {
     zapBaseUrl: explicitZap || DEFAULT_ZAP_BASE_URL,
     zapBaseUrlWasExplicit: Boolean(explicitZap),
@@ -54,6 +60,8 @@ export function resolveEngineSelection(
     ...(oastServerUrl ? { oastServerUrl } : {}),
     ...(interactshConfigPath ? { interactshConfigPath } : {}),
     ...(zapExecutable ? { zapExecutable } : {}),
+    ...(nucleiExecutable ? { nucleiExecutable } : {}),
+    ...(nucleiTemplateManifest ? { nucleiTemplateManifest } : {}),
   };
 }
 
@@ -61,8 +69,11 @@ export function createScanEngine(selection: EngineSelection): ActiveScanEnginePo
   return new ZapEngineAdapter({ baseUrl: selection.zapBaseUrl });
 }
 
-export function createExplorerEngine(selection: EngineSelection): PlaywrightExplorerAdapter {
-  return new PlaywrightExplorerAdapter({ scope: { allowedOrigins: selection.explorerAllowedOrigins, deniedOrigins: [] } });
+export function createExplorerEngine(selection: EngineSelection, proxyServer?: string): PlaywrightExplorerAdapter {
+  return new PlaywrightExplorerAdapter({
+    scope: { allowedOrigins: selection.explorerAllowedOrigins, deniedOrigins: [] },
+    ...(proxyServer === undefined ? {} : { proxyServer }),
+  });
 }
 
 class UnavailableActiveScanEngine implements ActiveScanEnginePort {
@@ -81,6 +92,7 @@ function capabilitySnapshots(input: {
   readonly zapAvailable: boolean;
   readonly explorerVersion: string;
   readonly measuredAt: string;
+  readonly nucleiVersion?: string;
 }): readonly EngineCapabilitySnapshot[] {
   const unsupported = {
     preSendScopeEnforcement: 'Unsupported', stopControl: 'Unsupported', budgetLease: 'Unsupported', rateLimit: 'Unsupported',
@@ -98,6 +110,19 @@ function capabilitySnapshots(input: {
         : unsupported,
       maxOvershootRatio: input.zapAvailable ? 0.05 : 0, measuredAt: input.measuredAt,
     },
+    ...(input.nucleiVersion === undefined ? [] : [{
+      engineKind: 'nuclei' as const,
+      engineVersion: input.nucleiVersion,
+      source: 'measured' as const,
+      guaranteeLevels: {
+        preSendScopeEnforcement: 'Delegated' as const,
+        stopControl: 'Delegated' as const,
+        budgetLease: 'Delegated' as const,
+        rateLimit: 'Delegated' as const,
+      },
+      maxOvershootRatio: 0.05,
+      measuredAt: input.measuredAt,
+    }]),
   ];
 }
 
@@ -155,16 +180,46 @@ async function resolveZap(selection: EngineSelection): Promise<{
     '-config', `api.addrs.addr.name=${endpoint.hostname}`,
     '-config', 'api.addrs.addr.regex=false',
   ], { cwd: dirname(executable), windowsHide: true, stdio: 'ignore' });
-  const started = await waitForZap(selection.zapBaseUrl, 90);
+  // Keep desktop startup bounded. A configured-but-unhealthy local installation must not hold
+  // the UI for several minutes; the user can correct the path in Settings and restart.
+  const started = await waitForZap(selection.zapBaseUrl, 35);
   if (started !== null) return { engine: started, available: true, ownedProcess: child };
   child.kill();
   return { engine: new UnavailableActiveScanEngine(`daemon did not become ready at ${selection.zapBaseUrl}`), available: false };
+}
+
+async function resolveNuclei(selection: EngineSelection): Promise<NucleiScanPort | undefined> {
+  // A binary alone is not a safe capability. Production execution is exposed only
+  // when a reviewed, hash-pinned HTTP template manifest is configured as well.
+  if (selection.nucleiExecutable === undefined || selection.nucleiTemplateManifest === undefined) return undefined;
+  const runner = new NucleiRunner({
+    command: selection.nucleiExecutable,
+    templateManifestPath: selection.nucleiTemplateManifest,
+  });
+  try {
+    const reviewed = await runner.verifyTemplateBundle();
+    const engineVersion = await runner.version();
+    return {
+      engineVersion,
+      templateBundleHash: reviewed.bundleHash,
+      run: async (input) => {
+        const result = await runner.run(input);
+        if (result.templateBundleHash !== reviewed.bundleHash) {
+          throw new Error('reviewed Nuclei template bundle changed after capability verification');
+        }
+        return { lines: result.lines };
+      },
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export interface ComposedEngines {
   readonly mode: 'real';
   readonly explorer: ExplorationPort;
   readonly scanEngine: ActiveScanEnginePort;
+  readonly nucleiRunner?: NucleiScanPort;
   readonly loginExecutor: LoginExecutorPort;
   readonly repeaterTransport: import('@scopepilot2/core').RepeaterTransportPort;
   readonly fuzzTransport: import('@scopepilot2/core').FuzzTransportPort;
@@ -173,6 +228,7 @@ export interface ComposedEngines {
   readonly webSocketTransport: import('@scopepilot2/core').WebSocketTransportPort;
   readonly advancedTransport: import('@scopepilot2/core').AdvancedTransportPort;
   readonly domObserver: import('@scopepilot2/core').DomObservationPort;
+  readonly interactiveBrowser: import('@scopepilot2/core').InteractiveBrowserPort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   readonly runtimeBundleHash: string;
   updateExplorationScope(scope: { readonly allowedOrigins: readonly string[]; readonly deniedOrigins: readonly string[] }): void;
@@ -184,8 +240,9 @@ export async function composeEngines(
   allowedOrigins: readonly string[] = [],
 ): Promise<ComposedEngines> {
   const selection = resolveEngineSelection(env, allowedOrigins);
-  const explorer = createExplorerEngine(selection);
   const zap = await resolveZap(selection);
+  const explorer = createExplorerEngine(selection, zap.available ? selection.zapBaseUrl : undefined);
+  const nucleiRunner = await resolveNuclei(selection);
   const loginExecutor = new PlaywrightLoginExecutor();
   const repeaterTransport = new NodeRepeaterTransport();
   const fuzzTransport = new NodeFuzzTransport();
@@ -193,6 +250,7 @@ export async function composeEngines(
   const webSocketTransport = new NodeWebSocketTransport();
   const advancedTransport = new NodeHttp2Transport();
   const domObserver = new PlaywrightDomObserver();
+  const interactiveBrowser = new PlaywrightInteractiveBrowser();
   const interactshProvider = selection.oastServerUrl && selection.interactshConfigPath
     ? new InteractshCliProvider({ serverUrl: selection.oastServerUrl, configPath: selection.interactshConfigPath })
     : undefined;
@@ -200,13 +258,19 @@ export async function composeEngines(
     supportedProtocols: [], async startSession(): Promise<never> { throw new Error('OAST provider is not configured'); },
   };
   return {
-    mode: 'real', explorer, scanEngine: zap.engine, loginExecutor, repeaterTransport, fuzzTransport,
-    sequencerTransport, oastProvider, webSocketTransport, advancedTransport, domObserver,
+    mode: 'real', explorer, scanEngine: zap.engine, ...(nucleiRunner === undefined ? {} : { nucleiRunner }), loginExecutor,
+    // Login runs in an isolated browser without the ZAP proxy.  ZAP may retain an
+    // active HTTP session from a previous scan and inject that session into a new
+    // browser, causing the login page (and its fields) to disappear.  The scan
+    // adapter receives the freshly authenticated cookies explicitly instead.
+    repeaterTransport, fuzzTransport,
+    sequencerTransport, oastProvider, webSocketTransport, advancedTransport, domObserver, interactiveBrowser,
     capabilities: capabilitySnapshots({
       zapVersion: zap.engine.engineVersion, zapAvailable: zap.available,
       explorerVersion: explorer.engineVersion, measuredAt: new Date().toISOString(),
+      ...(nucleiRunner === undefined ? {} : { nucleiVersion: nucleiRunner.engineVersion }),
     }),
-    runtimeBundleHash: `production-engines:${explorer.engineVersion}:${zap.engine.engineVersion}`,
+    runtimeBundleHash: `production-engines:${explorer.engineVersion}:${zap.engine.engineVersion}:${nucleiRunner?.engineVersion ?? 'nuclei-unavailable'}:${nucleiRunner?.templateBundleHash ?? 'templates-unavailable'}`,
     updateExplorationScope: (scope) => explorer.updateScope(scope),
     close: async () => {
       await explorer.close();

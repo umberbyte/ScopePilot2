@@ -18,7 +18,7 @@ describe('active scan session (design/08)', () => {
         return { authenticated: true, finalUrl: 'http://fixture.target.test/', cookies: [...this.nextCookies] };
       }
     })();
-    const { service, operator } = await bootstrapFlow({ loginExecutor: executor });
+    const { service, operator, scanEngine } = await bootstrapFlow({ loginExecutor: executor });
     service.registerLoginFlow(operator, {
       role: 'admin',
       flowVersion: 'f1',
@@ -46,6 +46,8 @@ describe('active scan session (design/08)', () => {
     const result = await service.runActiveScan(operator, plan, confirmation, adopted, 'admin');
     assert.equal(result.runRecord.state, 'Completed');
     assert.deepEqual(result.scanRequest.sessionCookieNames, ['PHPSESSID']);
+    assert.equal(scanEngine.startCalls[0]?.sessionCookies[0]?.value, 'session-value', 'cookie value reaches only the engine execution context');
+    assert.equal(scanEngine.startCalls[0]?.requestSeeds.length, 1);
     assert.equal(JSON.stringify(result.scanRequest).includes('session-value'), false, 'cookie 値は要求に入れない');
 
     // role 未指定は従来どおり session なし。
@@ -65,6 +67,69 @@ describe('active scan session (design/08)', () => {
     });
     const filtered = await service.runActiveScan(operator, plan, service.confirmPlan(plan, operator), adopted, 'admin');
     assert.deepEqual(filtered.scanRequest.sessionCookieNames, [], '別 Origin の cookie は適用しない');
+  });
+
+  test('browser-dom経路はPlaywright観測を実行し、fingerprint化した候補を所見へ取り込む', async () => {
+    const { service, operator } = await bootstrapFlow({
+      domObserver: {
+        async observe() {
+          return {
+            observations: [
+              { api: 'location.search', marker: 'scopepilot-dom-marker' },
+              { api: 'innerHTML', marker: 'scopepilot-dom-marker' },
+            ],
+            nodes: [],
+          };
+        },
+      },
+    });
+    const target = 'http://fixture.target.test/vulnerabilities/xss_d/?default=English';
+    const { plan } = service.buildActiveScanPlan(operator, [target]);
+    service.authorizePlan(plan);
+    const result = await service.runActiveScan(operator, plan, service.confirmPlan(plan, operator), [{
+      candidateId: 'dom-1',
+      url: target,
+      method: 'GET',
+      category: 'page',
+      guidelineBasis: [],
+      confidence: 0.8,
+      observationUrl: target,
+      diagnosticTracks: ['zap-active', 'browser-dom'],
+      inputPoints: [{ name: 'default', location: 'query', type: 'text' }],
+    }]);
+
+    const domRoute = result.diagnosticRoutes.find((route) => route.track === 'browser-dom');
+    assert.equal(domRoute?.status, 'executed');
+    assert.equal(domRoute?.findingCount, 1);
+    const domFinding = result.findings.find((finding) => finding.source.kind === 'observation');
+    assert.equal(domFinding?.severity, 'low');
+    assert.equal(JSON.stringify(result).includes('scopepilot-dom-marker'), false);
+  });
+
+  test('credential-changing forms stay in the interactive workflow and are not seeded into ZAP', async () => {
+    const { service, operator, scanEngine } = await bootstrapFlow();
+    const safeTarget = 'http://fixture.target.test/vulnerabilities/sqli/?id=1';
+    const mutationTarget = 'http://fixture.target.test/vulnerabilities/csrf/';
+    const { plan } = service.buildActiveScanPlan(operator, [safeTarget, mutationTarget]);
+    service.authorizePlan(plan);
+    const result = await service.runActiveScan(operator, plan, service.confirmPlan(plan, operator), [{
+      candidateId: 'safe', url: safeTarget, method: 'GET', category: 'page', guidelineBasis: [], confidence: 1,
+      observationUrl: safeTarget, inputPoints: [{ name: 'id', location: 'query', type: 'text' }], diagnosticTracks: ['zap-active'],
+    }, {
+      candidateId: 'credential-change', url: mutationTarget, method: 'GET', category: 'form', guidelineBasis: [], confidence: 1,
+      observationUrl: mutationTarget,
+      inputPoints: [
+        { name: 'password_new', location: 'query', type: 'password' },
+        { name: 'password_conf', location: 'query', type: 'password' },
+        { name: 'Change', location: 'query', type: 'submit' },
+      ],
+      diagnosticTracks: ['zap-active', 'workflow-state'],
+    }]);
+
+    assert.deepEqual(scanEngine.startCalls[0]?.requestSeeds.map((seed) => seed.url), [safeTarget]);
+    assert.equal(result.scanRequest.requestSeedCount, 1);
+    assert.equal(result.diagnosticRoutes.some((route) => route.track === 'zap-active' && route.targetUrl === mutationTarget), false);
+    assert.equal(result.diagnosticRoutes.find((route) => route.track === 'workflow-state' && route.targetUrl === mutationTarget)?.status, 'needs-input');
   });
 });
 

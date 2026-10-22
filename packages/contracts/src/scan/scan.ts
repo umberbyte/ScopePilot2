@@ -18,6 +18,8 @@ export interface ActiveScanRequest {
    * login で jar へ session を作る既存経路を使い、ここは trace と検証に使う。
    */
   readonly sessionCookieNames?: readonly string[];
+  /** Sanitised insertion-point count supplied to the delegated engine. */
+  readonly requestSeedCount?: number;
 }
 
 /** ZAP 形式の alert 要約。取込時に重複除外し、実影響は未確認として扱う。 */

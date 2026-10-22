@@ -10,6 +10,7 @@ import { PlaywrightLoginExecutor, type StubLoginBrowser, type StubLoginPage } fr
  */
 class StubLoginPageImpl implements StubLoginPage {
   readonly filled: { selector: string; value: string }[] = [];
+  readonly selected: { selector: string; value: string }[] = [];
   readonly clicked: string[] = [];
   urlValue = 'http://target.test/login.php';
   contentValue = '<html><body>Welcome back</body></html>';
@@ -25,6 +26,10 @@ class StubLoginPageImpl implements StubLoginPage {
     this.filled.push({ selector, value });
   }
 
+  async selectOption(selector: string, value: string): Promise<void> {
+    this.selected.push({ selector, value });
+  }
+
   async click(selector: string): Promise<void> {
     this.clicked.push(selector);
     this.urlValue = 'http://target.test/index.php';
@@ -32,8 +37,8 @@ class StubLoginPageImpl implements StubLoginPage {
 
   async waitFor(): Promise<void> {}
 
-  async inputValue(): Promise<string> {
-    return 'token-xyz';
+  async inputValue(selector: string): Promise<string> {
+    return this.selected.findLast((entry) => entry.selector === selector)?.value ?? 'token-xyz';
   }
 
   async content(): Promise<string> {
@@ -129,6 +134,26 @@ describe('login executor (stub browser 契約検証)', () => {
     assert.deepEqual(stub.proxyOptions, [undefined, 'http://127.0.0.1:8090']);
   });
 
+  test('login assertion failure stops before post-login actions', async () => {
+    const stub = createStubBrowser();
+    stub.page.contentValue = '<html><body>Login failed</body></html>';
+    const executor = new PlaywrightLoginExecutor({ launcher: async () => stub.browser });
+    const result = await executor.execute({
+      baseUrl: 'http://target.test',
+      steps: [
+        { kind: 'navigate', target: '/login.php' },
+        { kind: 'assert', target: 'Welcome back' },
+        { kind: 'navigate', target: '/security.php' },
+        { kind: 'select', target: 'select[name="security"]', value: 'low' },
+      ],
+      secretValues: {},
+      expectedUrlPrefix: 'http://target.test/',
+    });
+    assert.equal(result.authenticated, false);
+    assert.equal(result.finalUrl, 'http://target.test/login.php');
+    assert.deepEqual(stub.page.selected, []);
+  });
+
   test('extract で得た値を fill の参照として使える (CSRF token 等)', async () => {
     const stub = createStubBrowser();
     const executor = new PlaywrightLoginExecutor({ launcher: async () => stub.browser });
@@ -145,5 +170,25 @@ describe('login executor (stub browser 契約検証)', () => {
     });
     assert.equal(result.authenticated, true);
     assert.deepEqual(stub.page.filled, [{ selector: 'input[name=csrf]', value: 'token-xyz' }]);
+  });
+  test('ログイン後に設定画面へ移動し、選択・送信・反映確認を実行する', async () => {
+    const stub = createStubBrowser();
+    const executor = new PlaywrightLoginExecutor({ launcher: async () => stub.browser });
+    const result = await executor.execute({
+      baseUrl: 'http://target.test',
+      steps: [
+        { kind: 'navigate', target: '/login.php' },
+        { kind: 'assert', target: 'Welcome back' },
+        { kind: 'navigate', target: '/security.php' },
+        { kind: 'select', target: 'select[name="security"]', value: 'low' },
+        { kind: 'click', target: 'input[name="seclev_submit"]' },
+        { kind: 'assertValue', target: 'select[name="security"]', value: 'low' },
+      ],
+      secretValues: {},
+      expectedUrlPrefix: 'http://target.test/',
+    });
+    assert.equal(result.authenticated, true);
+    assert.deepEqual(stub.page.selected, [{ selector: 'select[name="security"]', value: 'low' }]);
+    assert.deepEqual(stub.page.clicked, ['input[name="seclev_submit"]']);
   });
 });

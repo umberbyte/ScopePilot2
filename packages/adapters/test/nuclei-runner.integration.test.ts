@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -44,9 +45,19 @@ gated('Nuclei runner (実 binary 結合)', () => {
     try {
       const templateFile = join(workdir, 'marker.yaml');
       await writeFile(templateFile, MARKER_TEMPLATE, 'utf8');
+      const manifestFile = join(workdir, 'manifest.json');
+      await writeFile(manifestFile, JSON.stringify({
+        schemaVersion: 'scopepilot2.nuclei-template-bundle.v1',
+        templates: [{
+          id: 'scopepilot-it-marker',
+          path: 'marker.yaml',
+          sha256: createHash('sha256').update(MARKER_TEMPLATE, 'utf8').digest('hex'),
+          protocol: 'http',
+        }],
+      }), 'utf8');
       const runner = new NucleiRunner({
         command: nucleiCommand,
-        argsPrefix: ['-t', templateFile],
+        templateManifestPath: manifestFile,
         timeoutMs: 120_000,
       });
 

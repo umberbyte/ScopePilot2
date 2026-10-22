@@ -7,8 +7,8 @@
  * 解決する (extract で変数化した値も同じ key 空間で参照できる)。
  *
  * CSRF token 等の hidden 項目は form submit 時に browser が現在値を自動送付する
- * (実測: DVWA login は token の再取得不要)。proxyServer 指定時は login を
- * proxy 経由で行い、engine 側 (ZAP) の cookie jar へ session を渡せる。
+ * (実測: DVWA login は token の再取得不要)。認証後の cookie は scan adapter へ
+ * 明示的に渡す。proxyServer は高度な画面から明示指定された場合のみ利用する。
  */
 import type { LoginExecutionInput, LoginExecutionResult, LoginExecutorPort, LoginSessionCookie } from '@scopepilot2/core';
 import { detectAuthState } from '@scopepilot2/core';
@@ -18,6 +18,7 @@ import type { LoginFlowStep } from '@scopepilot2/core';
 export interface StubLoginPage {
   goto(url: string): Promise<void>;
   fill(selector: string, value: string): Promise<void>;
+  selectOption(selector: string, value: string): Promise<void>;
   click(selector: string): Promise<void>;
   waitFor(selector: string, timeoutMs: number): Promise<void>;
   inputValue(selector: string): Promise<string>;
@@ -50,8 +51,16 @@ const defaultLauncher: LoginBrowserLauncher = async () => {
         fill: async (selector: string, value: string) => {
           await page.fill(selector, value);
         },
+        selectOption: async (selector: string, value: string) => {
+          await page.selectOption(selector, value);
+        },
         click: async (selector: string) => {
+          // Register the navigation waiter before clicking. DVWA can update the
+          // URL before the new document body is ready, which otherwise makes
+          // the following authentication assertion race the response render.
+          const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10_000 }).catch(() => null);
           await page.click(selector);
+          await navigation;
         },
         waitFor: async (selector: string, timeoutMs: number) => {
           await page.waitForSelector(selector, { timeout: timeoutMs });
@@ -120,6 +129,18 @@ export class PlaywrightLoginExecutor implements LoginExecutorPort {
           const content = await page.content();
           if (marker !== '' && !content.includes(marker)) {
             assertResult = false;
+            // The remaining steps are post-login actions. Continuing after a
+            // failed authentication assertion obscures the real cause with an
+            // unrelated selector timeout on the destination page.
+            break;
+          }
+        }
+        if (step.kind === 'assertValue') {
+          sawAssert = true;
+          const actualValue = await page.inputValue(step.target ?? '');
+          if (actualValue !== step.value) {
+            assertResult = false;
+            break;
           }
         }
       }
@@ -164,6 +185,9 @@ export class PlaywrightLoginExecutor implements LoginExecutorPort {
       case 'click':
         await page.click(target);
         return;
+      case 'select':
+        await page.selectOption(target, step.value ?? '');
+        return;
       case 'wait':
         await page.waitFor(target, 10_000);
         return;
@@ -173,6 +197,7 @@ export class PlaywrightLoginExecutor implements LoginExecutorPort {
         return;
       }
       case 'assert':
+      case 'assertValue':
         return;
     }
   }

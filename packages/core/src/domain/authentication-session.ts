@@ -8,12 +8,14 @@ export const LOGIN_FLOW_MAX_STEPS = 10;
 export const LOGIN_FLOW_TIMEOUT_MS = 60_000;
 export const LOGIN_FLOW_MAX_RETRIES = 1;
 
-const ALLOWED_STEP_KINDS: readonly string[] = ['navigate', 'fill', 'click', 'wait', 'extract', 'assert'];
+const ALLOWED_STEP_KINDS = ['navigate', 'fill', 'click', 'wait', 'extract', 'assert', 'select', 'assertValue'] as const;
 
 export interface LoginFlowStep {
   readonly kind: (typeof ALLOWED_STEP_KINDS)[number];
   readonly target?: string;
   readonly secretReference?: string;
+  /** Non-secret option value used by select/assertValue. */
+  readonly value?: string;
 }
 
 /** 11 step は validation error (F09-UT-001)。allowlist 外 step も同様。 */
@@ -27,6 +29,16 @@ export function validateLoginFlow(steps: readonly LoginFlowStep[]): { stepCount:
     }
     if (step.kind === 'fill' && step.secretReference === undefined) {
       throw domainError('NeedsInput', 'fill step requires a secret reference (no inline secret values)');
+    }
+    if (step.kind === 'select' || step.kind === 'assertValue') {
+      if (step.target?.trim() === '' || step.target === undefined) {
+        throw domainError('ValidationFailed', `${step.kind} step requires a CSS selector target`);
+      }
+      if (step.value?.trim() === '' || step.value === undefined) {
+        throw domainError('ValidationFailed', `${step.kind} step requires a non-empty option value`);
+      }
+    } else if (step.value !== undefined) {
+      throw domainError('ValidationFailed', `value is only accepted by select and assertValue steps`);
     }
   }
   return { stepCount: steps.length };

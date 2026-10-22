@@ -2422,6 +2422,51 @@
         }
       }
     },
+    "/api/diagnostics/interactive": {
+      "post": {
+        "operationId": "runInteractiveDiagnostics",
+        "summary": "Run an operator-confirmed, AI-planned specialized diagnostic using the constrained browser DSL",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["confirmed", "items", "files", "apiDocuments"],
+                "properties": {
+                  "confirmed": { "type": "boolean", "const": true },
+                  "items": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "type": "object", "additionalProperties": true } },
+                  "files": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+                  "apiDocuments": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Specialized diagnostic results and evidence references",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["results"],
+                  "properties": {
+                    "results": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/api/oast/attempts": {
       "get": {
         "operationId": "listOastAttempts",
@@ -4989,6 +5034,11 @@
             },
             "minItems": 1
           },
+          "enableNuclei": {
+            "type": "boolean",
+            "default": false,
+            "description": "NucleiScanを独立ステップとして明示追加する。既定はfalse。"
+          },
           "limits": {
             "type": "object",
             "description": "任意の上限指定 (案件上限へクランプ。未指定なら既定)",
@@ -5185,6 +5235,28 @@
           }
         }
       },
+      "RequestInputPoint": {
+        "type": "object",
+        "required": ["name", "location", "type"],
+        "properties": {
+          "name": { "type": "string" },
+          "location": { "enum": ["query", "body", "path", "header", "cookie", "file"] },
+          "type": { "type": "string" }
+        }
+      },
+      "ObservedHttpRequest": {
+        "type": "object",
+        "required": ["requestId", "url", "method", "resourceType", "inputPoints", "sourceUrl"],
+        "properties": {
+          "requestId": { "type": "string" },
+          "url": { "type": "string" },
+          "method": { "type": "string" },
+          "resourceType": { "type": "string" },
+          "contentType": { "type": "string" },
+          "inputPoints": { "type": "array", "items": { "$ref": "#/components/schemas/RequestInputPoint" } },
+          "sourceUrl": { "type": "string" }
+        }
+      },
       "PageObservation": {
         "type": "object",
         "required": [
@@ -5239,6 +5311,12 @@
             "items": {
               "$ref": "#/components/schemas/FormDescriptor"
             }
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObservedHttpRequest"
+            }
           }
         }
       },
@@ -5288,6 +5366,21 @@
           "observationUrl": {
             "type": "string",
             "description": "provenance: この候補の根拠となった観測 URL。"
+          }
+          ,
+          "detectionReason": { "type": "string" },
+          "dynamic": { "type": "boolean" },
+          "requestId": { "type": "string" },
+          "contentType": { "type": "string" },
+          "inputPoints": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RequestInputPoint" }
+          },
+          "diagnosticTracks": {
+            "type": "array",
+            "items": {
+              "enum": ["zap-active", "browser-dom", "workflow-state", "session-analysis", "authorization-differential", "upload-workflow", "api-schema", "cryptography-review"]
+            }
           }
         }
       },
@@ -5419,6 +5512,11 @@
             "items": {
               "type": "string"
             }
+          }
+          ,
+          "requestSeedCount": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
@@ -5648,6 +5746,11 @@
               "type": "string"
             },
             "minItems": 1
+          },
+          "excludeLowAndInfo": {
+            "type": "boolean",
+            "default": false,
+            "description": "Low / Info findings are retained internally but omitted from the generated report"
           }
         }
       },
@@ -7043,7 +7146,9 @@
               "click",
               "wait",
               "extract",
-              "assert"
+              "assert",
+              "select",
+              "assertValue"
             ]
           },
           "target": {
@@ -7051,6 +7156,10 @@
           },
           "secretReference": {
             "type": "string"
+          },
+          "value": {
+            "type": "string",
+            "description": "Non-secret option value for select/assertValue steps"
           }
         },
         "additionalProperties": false

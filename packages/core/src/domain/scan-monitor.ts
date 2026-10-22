@@ -7,10 +7,11 @@ import type { EngineAlert } from '@scopepilot2/contracts';
 import type { ActiveScanEnginePort } from '../ports/engines.ts';
 
 export interface ScanMonitorResult {
-  readonly status: 'complete' | 'failed';
+  readonly status: 'complete' | 'failed' | 'stopped';
   readonly failureReason?: string;
   readonly alerts: readonly EngineAlert[];
   readonly iterations: number;
+  readonly progress: number;
 }
 
 export class ScanMonitor {
@@ -21,13 +22,25 @@ export class ScanMonitor {
   private readonly pollIntervalMs: number;
   /** 完了後も alert が遅れて現れる engine 向けの落ち着き待ち (実 ZAP の pscan 遅延)。 */
   private readonly alertSettleMs: number;
+  private readonly signal: AbortSignal | undefined;
+  private readonly onProgress: ((progress: import('@scopepilot2/contracts').EngineProgress) => void) | undefined;
 
-  constructor(engine: ActiveScanEnginePort, engineRunId: string, maxIterations = 1000, pollIntervalMs = 2_000, alertSettleMs = 0) {
+  constructor(
+    engine: ActiveScanEnginePort,
+    engineRunId: string,
+    maxIterations = 1000,
+    pollIntervalMs = 2_000,
+    alertSettleMs = 0,
+    signal?: AbortSignal,
+    onProgress?: (progress: import('@scopepilot2/contracts').EngineProgress) => void,
+  ) {
     this.engine = engine;
     this.engineRunId = engineRunId;
     this.maxIterations = maxIterations;
     this.pollIntervalMs = pollIntervalMs;
     this.alertSettleMs = alertSettleMs;
+    this.signal = signal;
+    this.onProgress = onProgress;
   }
 
   /** 停止要求は冪等。engine.stop を呼ぶのは初回だけ。 */
@@ -50,13 +63,20 @@ export class ScanMonitor {
     let status: 'running' | 'complete' | 'failed' = 'running';
     let failureReason: string | undefined;
     let iterations = 0;
+    let lastProgress = 0;
 
     while (iterations < this.maxIterations) {
+      if (this.signal?.aborted === true) {
+        await this.requestStop();
+        return { status: 'stopped', alerts, iterations, progress: lastProgress };
+      }
       iterations += 1;
       const batch = await this.engine.alerts(this.engineRunId, cursor);
       cursor = batch.nextCursor;
       alerts.push(...batch.alerts);
       const progress = await this.engine.progress(this.engineRunId);
+      lastProgress = progress.progress;
+      this.onProgress?.(progress);
       status = progress.status;
       if (progress.status === 'failed' && progress.failureReason !== undefined) {
         failureReason = progress.failureReason;
@@ -67,9 +87,19 @@ export class ScanMonitor {
       // 実 engine (Delegated) は完了まで分単位でかかる: poll 間隔を空けて
       // API を叩き続けない (stub は即座に完了するので sleep しない)。
       if (this.pollIntervalMs > 0) {
-        await new Promise((resolve) => {
-          setTimeout(resolve, this.pollIntervalMs);
-        });
+        if (!this.signal?.aborted) {
+          await new Promise<void>((resolve) => {
+            const onAbort = (): void => {
+              clearTimeout(timer);
+              resolve();
+            };
+            const timer = setTimeout(() => {
+              this.signal?.removeEventListener('abort', onAbort);
+              resolve();
+            }, this.pollIntervalMs);
+            this.signal?.addEventListener('abort', onAbort, { once: true });
+          });
+        }
       }
     }
     if (status === 'running') {
@@ -96,6 +126,7 @@ export class ScanMonitor {
       ...(failureReason === undefined ? {} : { failureReason }),
       alerts,
       iterations,
+      progress: lastProgress,
     };
   }
 }

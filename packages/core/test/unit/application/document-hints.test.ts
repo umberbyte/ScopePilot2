@@ -13,28 +13,28 @@ describe('document hints (入力ドキュメントの活用)', () => {
     const registered = service.registerDocumentHints(operator, {
       documentLabel: '操作手順書 v2',
       urls: [
-        'http://fixture.target.test/setup.php',
+        'http://fixture.target.test/guided.php',
         'http://elsewhere.example/out-of-scope', // 許可外 → 計数に含まれない
       ],
     });
     assert.equal(registered.urlCount, 2);
     assert.equal(registered.acceptedUrlCount, 1);
     assert.deepEqual(service.listDocumentHints(), [
-      { documentLabel: '操作手順書 v2', urls: ['http://fixture.target.test/setup.php', 'http://elsewhere.example/out-of-scope'] },
+      { documentLabel: '操作手順書 v2', urls: ['http://fixture.target.test/guided.php', 'http://elsewhere.example/out-of-scope'] },
     ]);
 
     // 計画の target snapshot に hint が統合される (確認対象に含まれる)。
     const { plan } = service.buildExplorationPlan(operator, ['http://fixture.target.test/']);
     service.authorizePlan(plan);
-    assert.deepEqual(plan.steps[0]?.targetSnapshot, ['http://fixture.target.test/', 'http://fixture.target.test/setup.php']);
+    assert.deepEqual(plan.steps[0]?.targetSnapshot, ['http://fixture.target.test/', 'http://fixture.target.test/guided.php']);
 
     const confirmation = service.confirmPlan(plan, operator);
     const run = await service.runExploration(operator, plan, confirmation, { maxDepth: 1 });
     assert.equal(run.runRecord.state, 'Completed');
 
     // hint 由来の観測は originType=document-hint、明示 seed と link は crawl。
-    const setup = service.listObservations().find((observation) => observation.url === 'http://fixture.target.test/setup.php');
-    assert.equal(setup?.originType, 'document-hint');
+    const guided = service.listObservations().find((observation) => observation.url === 'http://fixture.target.test/guided.php');
+    assert.equal(guided?.originType, 'document-hint');
     const home = service.listObservations().find((observation) => observation.url === 'http://fixture.target.test/');
     assert.equal(home?.originType, 'crawl');
 
@@ -95,7 +95,7 @@ describe('document hints (入力ドキュメントの活用)', () => {
     });
     assert.deepEqual(service.listDocumentPriorityRules(), [{ urlIncludes: '/login.php', category: 'pii' }]);
 
-    const { plan } = service.buildExplorationPlan(operator, ['http://fixture.target.test/setup.php', 'http://fixture.target.test/login.php']);
+    const { plan } = service.buildExplorationPlan(operator, ['http://fixture.target.test/ordinary.php', 'http://fixture.target.test/login.php']);
     service.authorizePlan(plan);
     const confirmation = service.confirmPlan(plan, operator);
     await service.runExploration(operator, plan, confirmation, { maxDepth: 1 });

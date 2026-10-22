@@ -1,5 +1,5 @@
 /** 外部 engine への port。adapters が実装し、simulation は固定 fixture で実装する。 */
-import type { ActiveScanRequest, EngineAlert, EngineProgress, PageObservation } from '@scopepilot2/contracts';
+import type { ActiveScanRequest, EngineAlert, EngineProgress, PageObservation, RequestInputPoint } from '@scopepilot2/contracts';
 import type { LoginFlowStep } from '../domain/authentication-session.ts';
 
 /** 探索 (Playwright 相当)。実 adapter は browser context の request interception で scope を強制する。 */
@@ -19,10 +19,48 @@ export interface LoginSessionCookie {
 /** 能動診断 engine (ZAP 相当、Delegated)。停止は冪等とする (F11-UT-005)。 */
 export interface ActiveScanEnginePort {
   readonly engineVersion: string;
-  start(request: ActiveScanRequest): Promise<string>;
+  start(request: ActiveScanRequest, context?: ActiveScanExecutionContext): Promise<string>;
   progress(engineRunId: string): Promise<EngineProgress>;
   alerts(engineRunId: string, cursor: number): Promise<{ readonly alerts: readonly EngineAlert[]; readonly nextCursor: number }>;
   stop(engineRunId: string): Promise<void>;
+}
+
+/**
+ * Sensitive and request-specific data used only at the Core -> adapter call.
+ * It is intentionally separate from ActiveScanRequest because that object is
+ * returned by the local API and rendered in the UI.
+ */
+export interface ActiveScanExecutionContext {
+  readonly sessionCookies?: readonly LoginSessionCookie[];
+  readonly requestSeeds: readonly {
+    readonly url: string;
+    readonly method: string;
+    readonly contentType?: string;
+    readonly inputPoints: readonly RequestInputPoint[];
+  }[];
+  readonly expectedAuthenticatedUrlPrefix?: string;
+  readonly authenticationProbe?: {
+    readonly url: string;
+    readonly markers: readonly string[];
+  };
+}
+
+/** Nuclei CLIによる既知脆弱性診断。対象snapshotはCoreでscope確認してから渡す。 */
+export interface NucleiScanPort {
+  readonly engineVersion: string;
+  readonly templateBundleHash?: string;
+  run(input: {
+    readonly targets: readonly string[];
+    readonly limits: {
+      readonly maxRequests: number;
+      readonly maxDurationMinutes: number;
+      readonly maxConcurrency: number;
+      readonly requestsPerSecond: number;
+    };
+    readonly signal?: AbortSignal;
+    /** Nuclei の進捗・統計出力。JSONL 所見とは分離された表示専用ログ。 */
+    readonly onLog?: (line: string) => void;
+  }): Promise<{ readonly lines: readonly string[] }>;
 }
 
 export interface LoginExecutionInput {
@@ -198,6 +236,46 @@ export interface DomObservationPort {
   }): Promise<{
     readonly observations: readonly { readonly api: string; readonly marker: string }[];
     readonly nodes: readonly { readonly text: string; readonly looksLikePii: boolean }[];
+  }>;
+}
+
+/** A deliberately small browser action DSL used by AI-planned, operator-confirmed diagnostics. */
+export type InteractiveBrowserStep =
+  | { readonly kind: 'navigate' | 'click' | 'wait' | 'assert'; readonly target: string }
+  | { readonly kind: 'fill' | 'select' | 'assertValue'; readonly target: string; readonly value: string }
+  | { readonly kind: 'upload'; readonly target: string; readonly inputRef: string };
+
+export interface InteractiveBrowserFile {
+  readonly inputRef: string;
+  readonly name: string;
+  readonly mimeType: string;
+  readonly dataBase64: string;
+}
+
+/**
+ * Executes only the allow-listed browser DSL. The adapter must enforce scope for the top-level
+ * navigation and every subrequest, and must not retain cookies or uploaded bytes.
+ */
+export interface InteractiveBrowserPort {
+  readonly engineVersion: string;
+  execute(input: {
+    readonly targetUrl: string;
+    readonly scope: {
+      readonly allowedOrigins: readonly string[];
+      readonly deniedOrigins: readonly string[];
+    };
+    readonly steps: readonly InteractiveBrowserStep[];
+    readonly sessionCookies?: readonly LoginSessionCookie[];
+    readonly files?: readonly InteractiveBrowserFile[];
+  }): Promise<{
+    readonly finalUrl: string;
+    readonly status: number | null;
+    readonly bodyHash: string;
+    /** Transient, bounded response material for allow-listed assertions. Callers must not persist it. */
+    readonly bodyText: string;
+    readonly headers: readonly (readonly [string, string])[];
+    readonly elapsedMs: number;
+    readonly assertions: readonly { readonly kind: 'assert' | 'assertValue'; readonly target: string; readonly passed: boolean }[];
   }>;
 }
 

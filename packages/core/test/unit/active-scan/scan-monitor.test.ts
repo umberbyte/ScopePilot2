@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { ScanMonitor } from '@scopepilot2/core';
 import { FakeScanEngine } from '../support/test-flow.ts';
+import type { ActiveScanEnginePort } from '@scopepilot2/core';
 
 describe('ScanMonitor', () => {
   test('[F11-UT-005] 停止の二重要求でも adapter stop は 1 回だけ呼ぶ (冪等)', async () => {
@@ -21,5 +22,23 @@ describe('ScanMonitor', () => {
     assert.equal(result.status, 'complete');
     assert.deepEqual(result.alerts, []);
     assert.equal(result.iterations, 1);
+  });
+
+  test('AbortSignalで実行中ZAPを一度だけ停止する', async () => {
+    let stopCalls = 0;
+    const engine: ActiveScanEnginePort = {
+      engineVersion: 'zap-test',
+      async start() { return 'scan-1'; },
+      async alerts(_runId, cursor) { return { alerts: [], nextCursor: cursor }; },
+      async progress() { return { status: 'running', progress: 10, lastActivityAt: new Date().toISOString(), messageCount: 1 }; },
+      async stop() { stopCalls += 1; },
+    };
+    const controller = new AbortController();
+    const monitor = new ScanMonitor(engine, 'scan-1', 10, 10_000, 0, controller.signal);
+    const running = monitor.collectUntilDone();
+    controller.abort();
+    const result = await running;
+    assert.equal(result.status, 'stopped');
+    assert.equal(stopCalls, 1);
   });
 });

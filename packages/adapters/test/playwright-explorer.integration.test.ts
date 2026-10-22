@@ -66,4 +66,23 @@ gated('Playwright explorer adapter (実 browser 結合)', () => {
       target.server.close();
     }
   });
+
+  test('attachment 応答は実 chromium でも探索を中断しない', { timeout: 60_000 }, async () => {
+    const target = await startVulnerableTarget();
+    const adapter = new PlaywrightExplorerAdapter({
+      scope: { allowedOrigins: [target.base], deniedOrigins: [] },
+    });
+    try {
+      const observation = await adapter.observe(target.downloadUrl);
+      assert.ok(observation !== null);
+      assert.equal(observation.url, target.downloadUrl);
+      assert.equal(observation.status, 200);
+      assert.equal(observation.contentType, 'application/octet-stream');
+      assert.deepEqual(observation.links, []);
+      assert.deepEqual(observation.forms, []);
+    } finally {
+      await adapter.close();
+      target.server.close();
+    }
+  });
 });
