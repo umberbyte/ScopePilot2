@@ -9,7 +9,6 @@ public sealed record JapaneseDiagnosticReport(string Markdown, int AlertGroupCou
 
 public sealed class JapaneseDiagnosticReportService
 {
-    public const string SampleUrl = "https://www.digicert.com/content/dam/digicert/jp/pdfs/sample/webapp-or-report-sample.pdf";
 
     public async Task<JapaneseDiagnosticReport> BuildAsync(EngagementProject project, DateTimeOffset generatedAt)
     {
@@ -200,7 +199,7 @@ public sealed class JapaneseDiagnosticReportService
         Block(sb, "報告書に関する連絡先", "未記録（提出前に記入）");
 
         Heading(sb, "8. 付録・出典");
-        sb.AppendLine($"構成の参考: [デジサート・ジャパンの公開サンプル報告書]({SampleUrl})。章立てと報告項目を参考にし、本文と評価はプロジェクトの記録から作成しています。").AppendLine();
+        sb.AppendLine("報告項目は、意思決定情報、診断保証情報、技術証跡の三層に分けた ScopePilot 独自の構成です。").AppendLine();
         sb.AppendLine("日本語解説はアプリ内の辞書を使用し、外部サービスへ案件情報を送信しません。未登録の警告は未翻訳と明示し、検証済み原文を掲載します。サンプルの総合評価や診断済み項目を現在の案件に転用していません。").AppendLine();
         sb.AppendLine("同時出力: engagement-report.json（案件データ）、engagement-report.html（既存の案件レポート）、diagnostic-summary.json（警告と出典）、candidate-review.tsv（対象選定の作業表）。").AppendLine();
         return new(sb.ToString(), groups.Length, untranslated, unavailable);

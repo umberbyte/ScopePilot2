@@ -13,6 +13,23 @@ namespace ScopePilot.Tests;
 public sealed class ZapExtensionTests
 {
     [Fact]
+    public void AutomationPlanCollectsRequestAndResponseEvidence()
+    {
+        var plan = ZapHandoffService.CreatePlan(["https://example.test/path"], 1);
+        Assert.Contains("template: traditional-json-plus", plan);
+        Assert.DoesNotContain("template: traditional-json\n", plan);
+    }
+
+    [Theory]
+    [InlineData("https://example.test/security.php")]
+    [InlineData("https://example.test/setup.php?reset=1")]
+    public void ConfigurationPagesAreExcludedFromActiveScan(string url)
+    {
+        Assert.True(ZapHandoffService.IsActiveScanExcluded(url));
+        Assert.False(ZapHandoffService.IsActiveScanExcluded("https://example.test/vulnerabilities/sqli/"));
+    }
+
+    [Fact]
     public async Task MissingAddonIsInstalledOnlyIntoProjectCacheAndInventoryDetectsTampering()
     {
         using var temp = new TestFolder();

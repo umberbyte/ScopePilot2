@@ -20,6 +20,7 @@ public sealed class EngagementProject
 {
     [System.Text.Json.Serialization.JsonIgnore] public string ProjectFilePath { get; set; } = "";
     public int FormatVersion { get; set; } = 1;
+    public ReportSettings Report { get; set; } = new();
     public DiagnosticToolSettings DiagnosticTools { get; set; } = new();
     public ObservableCollection<EvidenceReference> Inputs { get; set; } = [];
     public ObservableCollection<DiagnosticObservation> DiagnosticObservations { get; set; } = [];
@@ -39,7 +40,7 @@ public sealed class EngagementProject
     public string SupportingOrigins { get; set; } = string.Empty;
     public string Roles { get; set; } = "未認証\n一般ユーザー";
     public string ActiveRole { get; set; } = "未認証";
-    public string ForbiddenActions { get; set; } = "削除\n購入・決済\n申請・承認\nメール・通知送信\nファイルアップロード\nログアウト";
+    public string ForbiddenActions { get; set; } = "削除\n購入・決済\n申請・承認\nメール・通知送信\nファイルアップロード\n設定変更\nログアウト";
     public int MaxPages { get; set; } = 500;
     public int MaxMinutes { get; set; } = 30;
     public int MaxRequests { get; set; } = 5000;

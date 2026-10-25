@@ -27,3 +27,8 @@ exports/
 reports/
 backups/
 outputs/
+
+# Downloaded scanner binaries are kept out of the repository.
+nuclei.exe
+# Word lock files while templates are open.
+~$*

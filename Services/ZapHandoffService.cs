@@ -51,7 +51,10 @@ public sealed class ZapHandoffService
         }
         var recordedTargets = entries.Select(x => x.GetProperty("request").GetProperty("url").GetString() ?? "")
             .Where(x => x.Length > 0).Select(x => ApiRequestFormatter.ValidateUrl(x).AbsoluteUri)
+            .Where(x => !activeScan || !IsActiveScanExcluded(x))
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (activeScan && recordedTargets.Length == 0)
+            throw new InvalidOperationException("/security.php と /setup.php は設定変更を伴うため、アクティブ診断の対象にできません。");
         if (activeScan && recordedTargets.Length > maxTargets)
             throw new InvalidOperationException($"アクティブ診断の観測済み対象は{maxTargets}件以下に絞ってください。（診断設定の対象URL上限で変更できます）");
         var auth = useRecordedAuth ? ExtractAuthCookies(entries) : null;
@@ -154,6 +157,13 @@ public sealed class ZapHandoffService
             .Select(x => Regex.Escape(new Uri(ApiRequestFormatter.ValidateUrl(x).AbsoluteUri).GetLeftPart(UriPartial.Authority)))
             .Distinct(StringComparer.OrdinalIgnoreCase)) + ")(?:[/:?#].*)?$";
 
+    internal static bool IsActiveScanExcluded(string url)
+    {
+        var path = ApiRequestFormatter.ValidateUrl(url).AbsolutePath.TrimEnd('/');
+        return path.EndsWith("/security.php", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith("/setup.php", StringComparison.OrdinalIgnoreCase);
+    }
+
     internal static string CreatePlan(IEnumerable<string> targetUrls, int minutes, bool activeScan = false,
         string strength = ZapActiveScanProfile.DefaultStrength, string threshold = ZapActiveScanProfile.DefaultThreshold,
         string? sessionCookie = null, string? cookieScope = null, ZapScanTuning? tuning = null)
@@ -187,7 +197,7 @@ public sealed class ZapHandoffService
             $"      maxScanDurationInMins: {minutes}\n" +
             $"      addQueryParam: {limits.AddQueryParam.ToString().ToLowerInvariant()}\n      delayInMs: {limits.DelayInMs}\n      handleAntiCSRFTokens: true\n" +
             $"      scanHeadersAllRequests: {limits.ScanHeadersAllRequests.ToString().ToLowerInvariant()}\n      threadPerHost: {limits.ThreadPerHost}\n      maxAlertsPerRule: {limits.MaxAlertsPerRule}\n")) : "") +
-        "  - type: report\n    parameters:\n      template: traditional-json\n      reportDir: reports\n      reportFile: zap-report\n      displayReport: false\n" +
+        "  - type: report\n    parameters:\n      template: traditional-json-plus\n      reportDir: reports\n      reportFile: zap-report\n      displayReport: false\n" +
         "  - type: report\n    parameters:\n      template: traditional-html\n      reportDir: reports\n      reportFile: zap-report\n      displayReport: false\n";
         return plan;
     }

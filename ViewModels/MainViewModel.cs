@@ -1516,6 +1516,8 @@ public sealed partial class MainViewModel : ObservableObject
             var result = await _findingReport.ExportAsync(Project);
             Log($"案件レポートを出力しました: 採用候補{result.CandidateCount:N0}件、所見{result.FindingCount:N0}件 / {result.Directory}");
             Log($"日本語Markdown: {result.MarkdownPath} / ツール警告{result.AlertGroupCount}種類・ロール別");
+            Log($"顧客向けWord: {result.WordReportPath}");
+            Log($"構造化レポートv2: {result.StructuredReportPath}");
             RememberMarkdownReport(result.MarkdownPath);
             if (result.UntranslatedGroupCount > 0) Log($"日本語解説が未登録の警告: {result.UntranslatedGroupCount}件。検証済み原文を掲載しています。");
             if (result.UnavailableEvidenceCount > 0) Log($"原本詳細を掲載できない発生記録: {result.UnavailableEvidenceCount}件。Markdownの出典検証欄を確認してください。");

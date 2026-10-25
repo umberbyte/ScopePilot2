@@ -48,6 +48,7 @@ public sealed class ProjectStore
         project.Findings ??= [];
         project.Inputs ??= [];
         project.BrunoVerifications ??= [];
+        project.Report ??= new();
         project.ExplorationDocument ??= new();
         project.ExplorationAi ??= new();
         project.ExplorationProxy ??= new();

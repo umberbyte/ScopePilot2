@@ -597,7 +597,7 @@
                         <StackPanel>
                             <WrapPanel>
                                 <Button x:Name="ImportBrunoEvidenceButton" Content="Bruno確認を記録" Click="ImportBrunoEvidence_Click" IsEnabled="{Binding CanConvertWordReport}" />
-                                <Button Content="日本語Markdownを出力" Command="{Binding ExportFindingsCommand}" Style="{StaticResource PrimaryActionButton}" />
+                                <Button Content="診断レポートを出力" Command="{Binding ExportFindingsCommand}" Style="{StaticResource PrimaryActionButton}" />
                                 <Button x:Name="ConvertMarkdownWordButton" Content="MarkdownをWordへ変換" Click="ConvertMarkdownWord_Click" IsEnabled="{Binding CanConvertWordReport}" />
                                 <Button Content="Wordを開く" Command="{Binding OpenWordReportCommand}" />
                                 <Button Content="保存" Command="{Binding SaveCommand}" AutomationProperties.Name="診断所見を保存" />
@@ -727,7 +727,7 @@
                             <Button Content="{Binding BurpExportActionText}" Command="{Binding ExportBurpScopeCommand}" Style="{StaticResource PrimaryActionButton}" />
                             <StackPanel Style="{StaticResource BurpOnly}"><Button Content="次をコピー" Command="{Binding CopyNextBurpRegexCommand}" /></StackPanel>
                             <Button Content="出力フォルダーを開く" Command="{Binding OpenBurpExportFolderCommand}" />
-                            <StackPanel Style="{StaticResource ZapOnly}"><Button x:Name="ZapJapaneseReportButton" Content="日本語Markdownを出力" Command="{Binding ExportFindingsCommand}" /></StackPanel>
+                            <StackPanel Style="{StaticResource ZapOnly}"><Button x:Name="ZapJapaneseReportButton" Content="診断レポートを出力" Command="{Binding ExportFindingsCommand}" /></StackPanel>
                         </WrapPanel>
                         <GroupBox Grid.Row="2" Header="{Binding BurpListHeader}" Style="{StaticResource BurpOnly}">
                           <Grid>

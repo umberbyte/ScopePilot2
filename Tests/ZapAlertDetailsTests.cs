@@ -24,7 +24,10 @@ public sealed class ZapAlertDetailsTests
         {"site":[{"alerts":[{"pluginid":"10020","name":"Missing header","riskcode":"1","confidence":"2","cweid":"693","wascid":"15",
           "desc":"<p>Description &amp; context.</p><p>Second line.</p>","solution":"<p>Set the appropriate header.</p>",
           "reference":"<p><a href='https://example.test/docs'>https://example.test/docs</a></p>",
-          "instances":[{"uri":"https://example.test/api?token=SECRET","method":"GET","param":"token","evidence":"SECRET","attack":"INPUT","otherinfo":"Instance notes","messageId":"42"}]}]}]}
+          "instances":[{"uri":"https://example.test/api?token=SECRET","method":"POST","param":"token","evidence":"SECRET","attack":"INPUT","otherinfo":"CVE-2026-12345 interaction notes","messageId":"42",
+          "request-header":"POST /api?token=SECRET HTTP/1.1\r\nHost: example.test\r\nAuthorization: Bearer RAW_AUTH_SECRET\r\nCookie: sid=RAW_COOKIE_SECRET\r\nContent-Type: application/json\r\n",
+          "request-body":"{\"email\":\"person@example.test\",\"password\":\"RAW_PASSWORD\"}",
+          "response-header":"HTTP/1.1 200 OK\r\nSet-Cookie: sid=RAW_COOKIE_SECRET\r\n","response-body":"{\"email\":\"person@example.test\"}"}]}]}]}
         """);
         await new ZapResultImporter().ImportAsync(project, path);
         return (project, Assert.Single(project.DiagnosticObservations));
@@ -47,6 +50,17 @@ public sealed class ZapAlertDetailsTests
         Assert.Contains(alert.Evidence.Pointer, details.DisplayText);
         Assert.Contains("危険度: 低", details.Summary);
         Assert.Contains("CWE: 693", details.Summary);
+        Assert.Contains("POST /api?token=", details.Request);
+        Assert.Contains("伏せ字", details.Request);
+        Assert.Contains("Authorization: [伏せ字]", details.Request);
+        Assert.Contains("Cookie: [伏せ字]", details.Request);
+        Assert.DoesNotContain("RAW_AUTH_SECRET", details.Request);
+        Assert.DoesNotContain("RAW_COOKIE_SECRET", details.Response);
+        Assert.DoesNotContain("RAW_PASSWORD", details.Request);
+        Assert.DoesNotContain("person@example.test", details.Request + details.Response);
+        Assert.Equal("[伏せ字]", details.AttackInput);
+        Assert.Equal("[伏せ字]", details.ObservedEvidence);
+        Assert.Contains("CVE-2026-12345", details.CveIds);
         Assert.Equal(before, JsonSerializer.Serialize(project));
         Assert.DoesNotContain("SECRET", before);
     }

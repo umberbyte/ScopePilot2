@@ -10,6 +10,20 @@ public sealed record BrunoExchangeDisplay(string Request, string Response, strin
 
 public static partial class BrunoEvidenceReportFormatter
 {
+    internal static string RedactForReport(string value) => RedactBody(value ?? "");
+    internal static string RedactUrlForReport(string value) => RedactUrl(value ?? "");
+    internal static bool IsSensitiveFieldForReport(string value) => IsSensitiveKey(value ?? "");
+    internal static string RedactHttpForReport(string header, string body, bool request)
+    {
+        var normalized = (header ?? "").Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        var lines = normalized.Split('\n');
+        if (request && lines.Length > 0) lines[0] = RedactRequestLine(lines[0]);
+        var output = RedactBody(string.Join('\n', lines).TrimEnd());
+        var safeBody = RedactBody(body ?? "").Trim();
+        if (safeBody.Length > 0) output = output.Length == 0 ? safeBody : output + "\n\n" + safeBody;
+        return LimitTranscript(output);
+    }
+
     public static async Task<BrunoExchangeDisplay> ReadAsync(EngagementProject project, BrunoVerification item)
     {
         try
@@ -75,13 +89,34 @@ public static partial class BrunoEvidenceReportFormatter
         return builder.Uri.ToString();
     }
 
+    private static string RedactRequestLine(string value)
+    {
+        var match = RequestLine().Match(value);
+        if (!match.Success) return value;
+        var target = match.Groups["target"].Value;
+        var absolute = Uri.TryCreate(target, UriKind.Absolute, out _);
+        var candidate = absolute ? target : "https://scopepilot.invalid" + (target.StartsWith('/') ? target : "/" + target);
+        var redacted = RedactUrl(candidate);
+        if (!absolute && Uri.TryCreate(redacted, UriKind.Absolute, out var parsed))
+            redacted = parsed.PathAndQuery;
+        return $"{match.Groups["method"].Value} {redacted} {match.Groups["version"].Value}";
+    }
+
     private static string RedactBody(string value)
     {
         value = value.Length > 100_000 ? value[..100_000] + "\n[本文は100,000文字で省略。原本を参照]" : value;
+        value = HeaderSecret().Replace(value, "$1[伏せ字]");
         value = JsonSecret().Replace(value, "$1[伏せ字]$3");
+        value = JsonPersonalData().Replace(value, "$1[個人情報伏せ字]$3");
         value = FormSecret().Replace(value, "$1[伏せ字]");
+        value = EmailAddress().Replace(value, "[メールアドレス伏せ字]");
+        value = BearerToken().Replace(value, "$1[伏せ字]");
+        value = InvalidXmlCharacter().Replace(value, "�");
         return value;
     }
+
+    private static string LimitTranscript(string value) => value.Length <= 24_000
+        ? value : value[..24_000] + "\n[提出用表示は24,000文字で省略。原本を参照]";
 
     private static bool IsSensitiveKey(string value) => Regex.IsMatch(value,
         @"(?i)(authorization|cookie|password|passwd|secret|token|api[_-]?key|session|csrf|credential)");
@@ -89,6 +124,24 @@ public static partial class BrunoEvidenceReportFormatter
     [GeneratedRegex("(?i)(\"(?:[^\"]*?(?:authorization|cookie|password|passwd|secret|token|api[_-]?key|session|csrf|credential)[^\"]*)\"\\s*:\\s*\")[^\"]*(\")")]
     private static partial Regex JsonSecret();
 
+    [GeneratedRegex("(?i)(\"(?:e-?mail|phone|telephone|address|first[_-]?name|last[_-]?name|full[_-]?name|ssn|credit[_-]?card|card[_-]?number)\"\\s*:\\s*\")[^\"]*(\")")]
+    private static partial Regex JsonPersonalData();
+
     [GeneratedRegex("(?i)((?:^|[&;\\s])(?:[^=&\\s]*(?:authorization|cookie|password|passwd|secret|token|api[_-]?key|session|csrf|credential)[^=&\\s]*)=)[^&;\\s]*")]
     private static partial Regex FormSecret();
+
+    [GeneratedRegex("(?im)^((?:authorization|cookie|set-cookie|x-api-key|api-key|password|passwd|secret|token|session|csrf|credential)\\s*:\\s*).*$")]
+    private static partial Regex HeaderSecret();
+
+    [GeneratedRegex("^(?<method>[A-Za-z]+)\\s+(?<target>\\S+)\\s+(?<version>HTTP/\\d(?:\\.\\d)?)$")]
+    private static partial Regex RequestLine();
+
+    [GeneratedRegex(@"(?i)(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![A-Z0-9.-])")]
+    private static partial Regex EmailAddress();
+
+    [GeneratedRegex(@"(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}")]
+    private static partial Regex BearerToken();
+
+    [GeneratedRegex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]")]
+    private static partial Regex InvalidXmlCharacter();
 }

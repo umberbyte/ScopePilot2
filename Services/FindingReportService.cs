@@ -2,6 +2,8 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using ScopePilot.Domain;
+using ScopePilot.Services.Reports;
+using ScopePilot.Services.WordReports;
 
 namespace ScopePilot.Services;
 
@@ -12,6 +14,8 @@ public sealed record FindingReportResult(string Directory, string JsonPath, stri
     public int AlertGroupCount { get; init; }
     public int UntranslatedGroupCount { get; init; }
     public int UnavailableEvidenceCount { get; init; }
+    public string StructuredReportPath { get; init; } = "";
+    public string WordReportPath { get; init; } = "";
 }
 
 public sealed class FindingReportService
@@ -31,6 +35,12 @@ public sealed class FindingReportService
         var markdownPath = Path.Combine(directory, "engagement-report.ja.md");
         var generatedAt = DateTimeOffset.Now;
         var japaneseReport = await new JapaneseDiagnosticReportService().BuildAsync(project, generatedAt);
+        var reportDocument = await new ReportDocumentV2Builder().BuildAsync(project, generatedAt);
+        var structuredReportPath = Path.Combine(directory, "report-document-v2.json");
+        await File.WriteAllTextAsync(structuredReportPath,
+            JsonSerializer.Serialize(reportDocument, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+        var wordReportPath = Path.Combine(directory, "engagement-report.ja.v2.docx");
+        await new AssuranceWordReportService().WriteAsync(reportDocument, wordReportPath);
         var selected = project.Candidates.Where(x => x.Selected).ToArray();
         var payload = new
         {
@@ -72,7 +82,8 @@ public sealed class FindingReportService
         return new(directory, jsonPath, htmlPath, checklistPath, project.Findings.Count, selected.Length)
         {
             MarkdownPath = markdownPath, AlertGroupCount = japaneseReport.AlertGroupCount,
-            UntranslatedGroupCount = japaneseReport.UntranslatedGroupCount, UnavailableEvidenceCount = japaneseReport.UnavailableEvidenceCount
+            UntranslatedGroupCount = japaneseReport.UntranslatedGroupCount, UnavailableEvidenceCount = japaneseReport.UnavailableEvidenceCount,
+            StructuredReportPath = structuredReportPath, WordReportPath = wordReportPath
         };
     }
 

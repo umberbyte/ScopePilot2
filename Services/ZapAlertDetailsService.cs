@@ -15,11 +15,17 @@ public sealed record ZapAlertDetails(string Title, string Summary, string Displa
     public string References { get; init; } = "";
     public string Cwe { get; init; } = "";
     public string Wasc { get; init; } = "";
+    public IReadOnlyList<string> CveIds { get; init; } = Array.Empty<string>();
+    public string Request { get; init; } = "";
+    public string Response { get; init; } = "";
+    public string AttackInput { get; init; } = "";
+    public string ObservedEvidence { get; init; } = "";
+    public string ExternalInteraction { get; init; } = "";
 }
 
 public sealed record ZapAlertReadResult(DiagnosticObservation Observation, ZapAlertDetails? Details, string Error);
 
-public sealed class ZapAlertDetailsService
+public sealed partial class ZapAlertDetailsService
 {
     public async Task<ZapAlertDetails> ReadAsync(EngagementProject project, DiagnosticObservation observation)
     {
@@ -87,20 +93,42 @@ public sealed class ZapAlertDetailsService
             throw new InvalidDataException("原本の警告ルールと選択した警告が一致しません。");
         var cwe = Value(alert, "cweid");
         var wasc = Value(alert, "wascid");
+        var description = Plain(Value(alert, "desc"));
+        var recommendation = Plain(Value(alert, "solution"));
+        var references = Plain(Value(alert, "reference"));
+        var parameter = Value(instance, "param");
+        var attack = Value(instance, "attack");
+        var observedEvidence = Value(instance, "evidence");
+        var instanceOther = Value(instance, "otherinfo");
+        var alertOther = Plain(Value(alert, "otherinfo"));
+        var externalInteraction = string.Join("\n", new[] { instanceOther, alertOther }
+            .Where(x => !string.IsNullOrWhiteSpace(x) && x != "未記載").Distinct(StringComparer.Ordinal));
         var summary = $"危険度: {metadata.SeverityDisplay}　確度: {metadata.ConfidenceDisplay}　状態: 要確認\n" +
             $"ルールID: {rule}　CWE: {Present(cwe)}　WASC: {Present(wasc)}\nロール: {observation.Role}";
-        var display = includeInstanceValues ? $"説明\n{Plain(Value(alert, "desc"))}\n\n" +
-            $"対策\n{Plain(Value(alert, "solution"))}\n\n" +
-            $"参考情報\n{Plain(Value(alert, "reference"))}\n\n" +
+        var display = includeInstanceValues ? $"説明\n{description}\n\n" +
+            $"対策\n{recommendation}\n\n" +
+            $"参考情報\n{references}\n\n" +
             $"該当通信・証拠（原本の値）\n" +
             $"URL: {Value(instance, "uri")}\nメソッド: {Value(instance, "method")}\nパラメータ: {Present(Value(instance, "param"))}\n" +
-            $"証拠: {Present(Value(instance, "evidence"))}\n入力値: {Present(Value(instance, "attack"))}\n" +
-            $"追加情報: {Present(Value(instance, "otherinfo"))}\nメッセージID: {Present(Value(instance, "messageId"))}\n\n" +
+            $"証拠: {Present(observedEvidence)}\n入力値: {Present(attack)}\n" +
+            $"追加情報: {Present(instanceOther)}\nメッセージID: {Present(Value(instance, "messageId"))}\n\n" +
             $"出典\nファイル: {observation.Evidence.LocalPath}\nJSON Pointer: {observation.Evidence.Pointer}\nSHA-256: {hash}" : "";
         return new(title, summary, display, path)
         {
-            Description = Plain(Value(alert, "desc")), Recommendation = Plain(Value(alert, "solution")),
-            References = Plain(Value(alert, "reference")), Cwe = Present(cwe), Wasc = Present(wasc)
+            Description = description, Recommendation = recommendation,
+            References = references, Cwe = Present(cwe), Wasc = Present(wasc),
+            CveIds = Cve().Matches(string.Join("\n", new[] { description, references, externalInteraction })).Cast<Match>()
+                .Select(x => x.Value.ToUpperInvariant())
+                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
+            Request = BrunoEvidenceReportFormatter.RedactHttpForReport(
+                Value(instance, "request-header"), Value(instance, "request-body"), request: true),
+            Response = BrunoEvidenceReportFormatter.RedactHttpForReport(
+                Value(instance, "response-header"), Value(instance, "response-body"), request: false),
+            AttackInput = BrunoEvidenceReportFormatter.IsSensitiveFieldForReport(parameter)
+                ? "[伏せ字]" : BrunoEvidenceReportFormatter.RedactForReport(attack),
+            ObservedEvidence = BrunoEvidenceReportFormatter.IsSensitiveFieldForReport(parameter)
+                ? "[伏せ字]" : BrunoEvidenceReportFormatter.RedactForReport(observedEvidence),
+            ExternalInteraction = BrunoEvidenceReportFormatter.RedactForReport(externalInteraction)
         };
     }
 
@@ -119,4 +147,7 @@ public sealed class ZapAlertDetailsService
         var breaks = Regex.Replace(value, @"<br\s*/?>|</(?:p|li|div|h[1-6])>", "\n", RegexOptions.IgnoreCase);
         return Present(WebUtility.HtmlDecode(Regex.Replace(breaks, @"<[^>]+>", "")).Trim());
     }
+
+    [GeneratedRegex(@"(?i)\bCVE-\d{4}-\d{4,7}\b")]
+    private static partial Regex Cve();
 }
