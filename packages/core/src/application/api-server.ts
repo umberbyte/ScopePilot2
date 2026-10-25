@@ -1,0 +1,1519 @@
+/**
+ * Core API (ローカル REST) の seed。`docs/design/18-extension-api.md`、design/19 §3。
+ * UI と CLI が共有するローカル契約の実体。node:http のみで実装し、依存を追加しない。
+ *
+ * - 変更系は原則 JSON body を 1 MiB 上限で受ける。Sequencer再送bodyを含む経路だけは、
+ *   JSON escapeの膨張を含めて8 MiBの専用envelope上限を使う。
+ * - wildcard CORS は許可しない (loopback 既定・F20 §5)。
+ * - /api/events は cursor (since) 以降の監査 event を NDJSON で返す (SSE 実装への土台)。
+ */
+import type { Server } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
+import { DomainError, DocumentAuthMethods, hashStable, type DocumentAuthMethod, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
+import type { BaselineFlowService } from './baseline-flow.ts';
+import { CodecRegistry, compareText, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
+import type { LoginFlowStep } from '../domain/authentication-session.ts';
+
+const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_SEQUENCER_ENVELOPE_BYTES = 8 * 1024 * 1024;
+const MAX_INTERACTIVE_ENVELOPE_BYTES = 16 * 1024 * 1024;
+const HTTP_STATUS_BY_CODE: Record<DomainErrorCode, number> = {
+  ValidationFailed: 400,
+  PermissionDenied: 403,
+  OutOfScope: 403,
+  ConfirmationRequired: 409,
+  Conflict: 409,
+  CapabilityUnavailable: 503,
+  NeedsInput: 409,
+  Unsupported: 501,
+  EngineFailure: 502,
+  Cancelled: 409,
+};
+
+export interface CoreApiServerOptions {
+  readonly service: BaselineFlowService;
+  readonly operator: OperatorProfile;
+  /** run 記録の照会・Interrupted 検出 (design/22 §6)。任意。 */
+  readonly runRepository?: {
+    listInterruptedCandidates(): readonly import('@scopepilot2/contracts').RunRecord[];
+    markInterrupted(): readonly import('@scopepilot2/contracts').RunRecord[];
+  };
+}
+
+export function createCoreApiServer(options: CoreApiServerOptions): Server {
+  const { service, operator, runRepository } = options;
+  type ScanResult = Awaited<ReturnType<BaselineFlowService['runActiveScan']>>;
+  interface ScanExecution {
+    readonly executionId: string;
+    readonly controller: AbortController;
+    state: 'queued' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed';
+    currentEngine: 'zap' | 'nuclei' | 'scopepilot';
+    currentCommand: string;
+    progress: number;
+    logs: string[];
+    result?: ScanResult;
+    error?: string;
+  }
+  const scanExecutions = new Map<string, ScanExecution>();
+
+  const server = createServer((request, response) => {
+    void handle(request, response).catch((cause: unknown) => {
+      respondError(response, 500, 'InternalError', 'unexpected server error', false);
+      server.emit('core-api-error', cause);
+    });
+  });
+
+  async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const url = new URL(request.url ?? '/', 'http://localhost');
+    const method = request.method ?? 'GET';
+    const route = `${method} ${url.pathname}`;
+
+    // wildcard CORS は付与しない。同一 machine の契約クライアントのみ想定。
+    response.setHeader('Cache-Control', 'no-store');
+
+    if (route === 'GET /api/health') {
+      return respondJson(response, 200, { schemaVersion: 'scopepilot2.api.v1', status: 'ok' });
+    }
+    if (route === 'GET /api/case') {
+      try {
+        return respondJson(response, 200, service.currentCase());
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/case') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const record = service.createCase(operator, {
+          name: stringField(body, 'name'),
+          allowedOrigins: stringArrayField(body, 'allowedOrigins'),
+          deniedOrigins: stringArrayField(body, 'deniedOrigins'),
+          limits: limitsField(body),
+        });
+        return respondJson(response, 201, record);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/case/scope') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const outcome = service.updateCaseScope(operator, {
+          expectedRevision: numberField(body, 'expectedRevision'),
+          allowedOrigins: stringArrayField(body, 'allowedOrigins'),
+          deniedOrigins: stringArrayField(body, 'deniedOrigins'),
+          limits: limitsField(body),
+        });
+        return respondJson(response, 200, outcome);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/authorization') {
+      try {
+        return respondJson(response, 200, service.currentAuthorization());
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/authorization') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const record = await service.grantAuthorization(operator, {
+          allowedOperationClasses: stringArrayField(body, 'allowedOperationClasses') as never,
+          targetRoles: stringArrayField(body, 'targetRoles'),
+          validFrom: stringField(body, 'validFrom'),
+          validUntil: stringField(body, 'validUntil'),
+          evidence: {
+            label: stringField(body, 'evidenceLabel'),
+            content: stringField(body, 'evidenceContent'),
+          },
+        });
+        return respondJson(response, 201, record);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/plan/explore') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.buildExplorationPlan(operator, stringArrayField(body, 'seeds'), optionalLimitsField(body));
+        service.authorizePlan(result.plan);
+        return respondJson(response, 200, { plan: result.plan, planHash: result.planHash });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/plan/scan') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        if (body.enableNuclei !== undefined && typeof body.enableNuclei !== 'boolean') {
+          throw new DomainError('ValidationFailed', 'enableNuclei must be boolean');
+        }
+        const result = service.buildActiveScanPlan(
+          operator,
+          stringArrayField(body, 'targets'),
+          optionalLimitsField(body),
+          { includeNuclei: body.enableNuclei === true },
+        );
+        service.authorizePlan(result.plan);
+        return respondJson(response, 200, { plan: result.plan, planHash: result.planHash });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/candidates/adopt') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const adopted = service.adoptCandidates(operator, candidateArrayField(body, 'candidates'));
+        return respondJson(response, 200, { adopted });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/report') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        if (body.excludeLowAndInfo !== undefined && typeof body.excludeLowAndInfo !== 'boolean') {
+          throw new DomainError('ValidationFailed', 'field excludeLowAndInfo must be a boolean');
+        }
+        const artifact = service.generateReport(operator, {
+          guidelines: stringArrayField(body, 'guidelines'),
+          ...(body.excludeLowAndInfo === undefined ? {} : { excludeLowAndInfo: body.excludeLowAndInfo }),
+        });
+        return respondJson(response, 200, artifact);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/capabilities') {
+      return respondJson(response, 200, { capabilities: service.capabilities() });
+    }
+    if (route === 'POST /api/plan/confirm') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const plan = planField(body);
+        const confirmation = service.confirmPlan(plan, operator);
+        return respondJson(response, 200, confirmation);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/run/explore') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = await service.runExploration(operator, planField(body), confirmationField(body), {
+          maxDepth: positiveIntegerField(body, 'maxDepth'),
+          // role 指定時は runLogin 済み session で観測する (design/f09)。
+          ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/run/scan/start') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const plan = planField(body);
+        const confirmation = confirmationField(body);
+        const adopted = adoptedField(body);
+        const role = typeof body.role === 'string' ? stringField(body, 'role') : undefined;
+        const executionId = randomUUID();
+        const controller = new AbortController();
+        const execution: ScanExecution = {
+          executionId,
+          controller,
+          state: 'queued',
+          currentEngine: 'scopepilot',
+          currentCommand: '',
+          progress: 0,
+          logs: [`${new Date().toISOString()} [ScopePilot] 診断実行を受け付けました`],
+        };
+        scanExecutions.set(executionId, execution);
+        void (async () => {
+          execution.state = 'running';
+          try {
+            const result = await service.runActiveScan(operator, plan, confirmation, adopted, role, {
+              signal: controller.signal,
+              onEvent: (event) => {
+                execution.currentEngine = event.engine;
+                execution.progress = event.progress ?? execution.progress;
+                if (event.command !== undefined) execution.currentCommand = event.command;
+                execution.logs.push(`${event.at} [${event.engine.toUpperCase()}] ${event.message}${event.command === undefined ? '' : `\n  $ ${event.command}`}`);
+                if (execution.logs.length > 500) execution.logs.splice(0, execution.logs.length - 500);
+                if (event.phase === 'stopped') execution.state = 'stopped';
+              },
+            });
+            execution.result = result;
+            execution.state = 'completed';
+            execution.progress = 100;
+          } catch (cause) {
+            const cancelled = controller.signal.aborted || (cause instanceof DomainError && cause.code === 'Cancelled');
+            execution.state = cancelled ? 'stopped' : 'failed';
+            execution.error = cause instanceof Error ? cause.message : String(cause);
+            execution.logs.push(`${new Date().toISOString()} [ScopePilot] ${cancelled ? '停止しました' : `エラー: ${execution.error}`}`);
+          }
+        })();
+        return respondJson(response, 202, { executionId });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/run/scan/status') {
+      const executionId = url.searchParams.get('executionId') ?? '';
+      const execution = scanExecutions.get(executionId);
+      if (execution === undefined) {
+        return respondError(response, 404, 'ValidationFailed', 'scan execution was not found', false);
+      }
+      return respondJson(response, 200, {
+        executionId: execution.executionId,
+        state: execution.state,
+        currentEngine: execution.currentEngine,
+        currentCommand: execution.currentCommand,
+        progress: execution.progress,
+        logs: execution.logs,
+        ...(execution.result === undefined ? {} : {
+          result: {
+            runRecord: execution.result.runRecord,
+            planHash: execution.result.planHash,
+            scanRequest: execution.result.scanRequest,
+            overshootReservation: execution.result.overshootReservation,
+            engineVersion: execution.result.engineVersion,
+            requestCorpusEvidenceRef: execution.result.requestCorpusEvidenceRef,
+            findings: execution.result.findings,
+            diagnosticRoutes: execution.result.diagnosticRoutes,
+            ...(execution.result.nuclei === undefined ? {} : { nuclei: execution.result.nuclei }),
+          },
+        }),
+        ...(execution.error === undefined ? {} : { error: execution.error }),
+      });
+    }
+    if (route === 'POST /api/run/scan/stop') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      const executionId = stringField(body, 'executionId');
+      const execution = scanExecutions.get(executionId);
+      if (execution === undefined) {
+        return respondError(response, 404, 'ValidationFailed', 'scan execution was not found', false);
+      }
+      if (execution.state === 'queued' || execution.state === 'running') {
+        execution.state = 'stopping';
+        execution.logs.push(`${new Date().toISOString()} [ScopePilot] 停止要求を送信しました`);
+        execution.controller.abort();
+      }
+      return respondJson(response, 202, { executionId, state: execution.state });
+    }
+    if (route === 'POST /api/run/scan') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        // role 指定時はその role の session cookie 適用を診断へ指示する (design/08)。
+        const role = typeof body.role === 'string' ? stringField(body, 'role') : undefined;
+        const result = await service.runActiveScan(operator, planField(body), confirmationField(body), adoptedField(body), role);
+        return respondJson(response, 200, {
+          runRecord: result.runRecord,
+          planHash: result.planHash,
+          scanRequest: result.scanRequest,
+          overshootReservation: result.overshootReservation,
+          engineVersion: result.engineVersion,
+          requestCorpusEvidenceRef: result.requestCorpusEvidenceRef,
+          findings: result.findings,
+          diagnosticRoutes: result.diagnosticRoutes,
+          ...(result.nuclei === undefined ? {} : { nuclei: result.nuclei }),
+        });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/import/nuclei') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = await service.importNucleiResults(operator, {
+          lines: stringArrayField(body, 'lines'),
+          engineVersion: stringField(body, 'engineVersion'),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/findings') {
+      return respondJson(response, 200, { findings: service.listFindings() });
+    }
+    if (route === 'GET /api/observations') {
+      // site map の素材 (design/02 A04)。観測 URL と scope 拒否を開示する。
+      return respondJson(response, 200, { observations: service.listObservations(), deniedUrls: service.listDeniedUrls() });
+    }
+    if (route === 'GET /api/tools/sequencer/runs') {
+      return respondJson(response, 200, { sessions: service.listSequencerSessions() });
+    }
+    if (route === 'POST /api/tools/sequencer/runs') {
+      const body = await readJsonBody(request, response, MAX_SEQUENCER_ENVELOPE_BYTES);
+      if (body === undefined) {
+        return;
+      }
+      const cancellation = new AbortController();
+      const cancelOnDisconnect = (): void => {
+        if (!response.writableEnded) {
+          cancellation.abort();
+        }
+      };
+      request.once('aborted', cancelOnDisconnect);
+      response.once('close', cancelOnDisconnect);
+      try {
+        const tokenSource = body.tokenSource ?? 'body';
+        if (tokenSource !== 'body' && tokenSource !== 'cookie' && tokenSource !== 'hidden' && tokenSource !== 'bearer' && tokenSource !== 'custom') {
+          throw new DomainError('ValidationFailed', 'tokenSource must be body, cookie, hidden, bearer, or custom');
+        }
+        const result = await service.runSequencerSession(operator, {
+          targetUrl: stringField(body, 'targetUrl'),
+          samples: numberField(body, 'samples'),
+          ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
+          tokenSource,
+          ...(body.tokenCookieName === undefined ? {} : { tokenCookieName: stringField(body, 'tokenCookieName') }),
+          ...(body.tokenFieldName === undefined ? {} : { tokenFieldName: stringField(body, 'tokenFieldName') }),
+          ...(body.tokenStartDelimiter === undefined ? {} : { tokenStartDelimiter: stringField(body, 'tokenStartDelimiter') }),
+          ...(body.tokenEndDelimiter === undefined ? {} : { tokenEndDelimiter: stringField(body, 'tokenEndDelimiter') }),
+          ...(body.replayRequest === undefined ? {} : { replayRequest: sequencerReplayRequestField(body) }),
+          signal: cancellation.signal,
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        if (cancellation.signal.aborted) {
+          return;
+        }
+        return respondDomainError(response, cause);
+      } finally {
+        request.off('aborted', cancelOnDisconnect);
+        response.off('close', cancelOnDisconnect);
+      }
+    }
+    if (route === 'GET /api/import/api-spec') {
+      return respondJson(response, 200, { imports: service.listApiSpecImports() });
+    }
+    if (route === 'POST /api/import/api-spec') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.importApiSpec(operator, {
+          documentLabel: stringField(body, 'documentLabel'),
+          document: body.document,
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/diagnostics/interactive') {
+      const body = await readJsonBody(request, response, MAX_INTERACTIVE_ENVELOPE_BYTES);
+      if (body === undefined) return;
+      try {
+        const result = await service.runInteractiveDiagnostics(operator, interactiveDiagnosticInputField(body));
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/oast/attempts') {
+      return respondJson(response, 200, { attempts: service.listOastAttempts() });
+    }
+    if (route === 'POST /api/oast/attempts') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const protocol = stringField(body, 'protocol');
+        if (protocol !== 'http' && protocol !== 'dns' && protocol !== 'smtp' && protocol !== 'icmp') {
+          return respondError(response, 400, 'ValidationFailed', 'field protocol must be one of http/dns/smtp/icmp', false);
+        }
+        const result = await service.startOastAttempt(operator, { targetUrl: stringField(body, 'targetUrl'), protocol });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/oast/callbacks') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const eventsValue = body.events;
+        if (!Array.isArray(eventsValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field events must be an array', false);
+        }
+        const events = eventsValue.map((event, index) => {
+          if (typeof event !== 'object' || event === null) {
+            throw new DomainError('ValidationFailed', `events[${index}] must be an object`);
+          }
+          const record = event as Record<string, unknown>;
+          return { eventId: stringField(record, 'eventId'), token: stringField(record, 'token'), payload: stringField(record, 'payload') };
+        });
+        const result = service.recordOastCallbacks(operator, { events });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/websocket/frames') {
+      return respondJson(response, 200, { frames: service.listWsFrames() });
+    }
+    if (route === 'POST /api/websocket/frames') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const framesValue = body.frames;
+        if (!Array.isArray(framesValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field frames must be an array', false);
+        }
+        const frames = framesValue.map((frame, index) => {
+          if (typeof frame !== 'object' || frame === null) {
+            throw new DomainError('ValidationFailed', `frames[${index}] must be an object`);
+          }
+          const record = frame as Record<string, unknown>;
+          const direction = stringField(record, 'direction');
+          if (direction !== 'sent' && direction !== 'received') {
+            throw new DomainError('ValidationFailed', `frames[${index}]: direction must be sent or received`);
+          }
+          return { direction: direction as 'sent' | 'received', payload: stringField(record, 'payload') };
+        });
+        const result = service.importWsFrames(operator, { targetUrl: stringField(body, 'targetUrl'), frames });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/websocket/send') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const messages = stringArrayField(body, 'messages');
+        const result = await service.sendWsMessages(operator, {
+          targetUrl: stringField(body, 'targetUrl'),
+          messages,
+          ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
+          ...(body.subprotocols === undefined ? {} : { subprotocols: stringArrayField(body, 'subprotocols') }),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/tools/transport/negotiate') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const requested = typeof body.requested === 'string' ? stringField(body, 'requested') : undefined;
+        if (requested !== undefined && requested !== 'h2' && requested !== 'http/1.1' && requested !== 'h3') {
+          return respondError(response, 400, 'ValidationFailed', 'field requested must be one of h2/http/1.1/h3', false);
+        }
+        const result = await service.negotiateTransportFor(operator, {
+          targetUrl: stringField(body, 'targetUrl'),
+          allowFallback: body.allowFallback === true,
+          ...(requested === undefined ? {} : { requested: requested as 'h2' | 'http/1.1' | 'h3' }),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/tools/transport/validate-headers') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const headersValue = body.headers;
+        if (!Array.isArray(headersValue) || headersValue.some((entry) => !Array.isArray(entry) || entry.length !== 2 || entry.some((value) => typeof value !== 'string'))) {
+          return respondError(response, 400, 'ValidationFailed', 'field headers must be an array of [name, value] string pairs', false);
+        }
+        const result = service.validateTransportHeaders(operator, {
+          headers: headersValue as readonly (readonly [string, string])[],
+          scheme: stringField(body, 'scheme'),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/tools/dom-flows') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const observationsValue = body.observations;
+        if (!Array.isArray(observationsValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field observations must be an array', false);
+        }
+        const observations = observationsValue.map((observation, index) => {
+          if (typeof observation !== 'object' || observation === null) {
+            throw new DomainError('ValidationFailed', `observations[${index}] must be an object`);
+          }
+          const record = observation as Record<string, unknown>;
+          return { api: stringField(record, 'api'), marker: stringField(record, 'marker') };
+        });
+        const nodesValue = body.nodes;
+        const nodes = nodesValue === undefined || !Array.isArray(nodesValue) ? undefined : nodesValue.map((node: unknown, index: number) => {
+          if (typeof node !== 'object' || node === null) {
+            throw new DomainError('ValidationFailed', `nodes[${index}] must be an object`);
+          }
+          const record = node as Record<string, unknown>;
+          return { text: stringField(record, 'text'), looksLikePii: record.looksLikePii === true };
+        });
+        const result = await service.analyzeDomFlows(operator, {
+          targetUrl: stringField(body, 'targetUrl'),
+          observations,
+          ...(nodes === undefined ? {} : { nodes }),
+          live: body.live === true,
+          ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/extensions') {
+      return respondJson(response, 200, { extensions: service.listExtensions() });
+    }
+    if (route === 'POST /api/extensions') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.installExtension(operator, {
+          extensionId: stringField(body, 'extensionId'),
+          version: stringField(body, 'version'),
+          signature: stringField(body, 'signature'),
+          publisherTrusted: body.publisherTrusted === true,
+          permissions: stringArrayField(body, 'permissions'),
+          apiRange: stringArrayField(body, 'apiRange'),
+        });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/certificates/ca') {
+      return respondJson(response, 200, { profiles: service.listCaProfiles() });
+    }
+    if (route === 'POST /api/certificates/ca/trust') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.setCaProfileTrust(operator, stringField(body, 'profileId'), body.trusted === true);
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/documents/hints') {
+      return respondJson(response, 200, { hints: service.listDocumentHints() });
+    }
+    if (route === 'POST /api/documents/hints') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.registerDocumentHints(operator, {
+          documentLabel: stringField(body, 'documentLabel'),
+          urls: stringArrayField(body, 'urls'),
+        });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/documents/priority-hints') {
+      return respondJson(response, 200, { rules: service.listDocumentPriorityRules() });
+    }
+    if (route === 'POST /api/documents/priority-hints') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const rulesValue = body.rules;
+        if (!Array.isArray(rulesValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field rules must be an array', false);
+        }
+        const rules = rulesValue.map((rule: unknown, index: number) => {
+          if (typeof rule !== 'object' || rule === null) {
+            throw new DomainError('ValidationFailed', `rules[${index}] must be an object`);
+          }
+          const record = rule as Record<string, unknown>;
+          const category = stringField(record, 'category');
+          if (category !== 'pii' && category !== 'payment') {
+            throw new DomainError('ValidationFailed', `rules[${index}]: category must be pii or payment`);
+          }
+          return { urlIncludes: stringField(record, 'urlIncludes'), category: category as 'pii' | 'payment' };
+        });
+        const result = service.registerDocumentPriorityHints(operator, {
+          documentLabel: stringField(body, 'documentLabel'),
+          rules,
+        });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/documents/parameter-hints') {
+      return respondJson(response, 200, { hints: service.listDocumentParameterHints() });
+    }
+    if (route === 'POST /api/documents/parameter-hints') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const parametersValue = body.parameters;
+        if (!Array.isArray(parametersValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field parameters must be an array', false);
+        }
+        const parameters = parametersValue.map((parameter: unknown, index: number) => {
+          if (typeof parameter !== 'object' || parameter === null) {
+            throw new DomainError('ValidationFailed', `parameters[${index}] must be an object`);
+          }
+          const record = parameter as Record<string, unknown>;
+          return { name: stringField(record, 'name'), values: stringArrayField(record, 'values') };
+        });
+        const result = service.registerDocumentParameterHints(operator, {
+          documentLabel: stringField(body, 'documentLabel'),
+          parameters,
+        });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/documents/auth-hints') {
+      return respondJson(response, 200, { hints: service.listDocumentAuthHints() });
+    }
+    if (route === 'POST /api/documents/auth-hints') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const entriesValue = body.entries;
+        if (!Array.isArray(entriesValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field entries must be an array', false);
+        }
+        const entries = entriesValue.map((entry, index) => {
+          if (typeof entry !== 'object' || entry === null) {
+            throw new DomainError('ValidationFailed', `entries[${index}] must be an object`);
+          }
+          const record = entry as Record<string, unknown>;
+          if (record.secretValue !== undefined || record.secret !== undefined) {
+            throw new DomainError('ValidationFailed', `entries[${index}]: secret values are not accepted; document location only`);
+          }
+          const authMethod = stringField(record, 'authMethod');
+          if (!DocumentAuthMethods.includes(authMethod as DocumentAuthMethod)) {
+            throw new DomainError('ValidationFailed', `entries[${index}]: authMethod not allowed: ${authMethod}`);
+          }
+          return {
+            role: stringField(record, 'role'),
+            authMethod: authMethod as DocumentAuthMethod,
+            documentLocation: stringField(record, 'documentLocation'),
+          };
+        });
+        const result = service.registerDocumentAuthHints(operator, {
+          documentLabel: stringField(body, 'documentLabel'),
+          entries,
+        });
+        return respondJson(response, 201, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/findings/status') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const findingId = stringField(body, 'findingId');
+        const status = stringField(body, 'status');
+        if (status !== 'confirmed' && status !== 'rejected') {
+          return respondError(response, 400, 'ValidationFailed', "field status must be 'confirmed' or 'rejected'", false);
+        }
+        const reproduction = stringField(body, 'reproduction');
+        if (reproduction !== 'reproduced' && reproduction !== 'not-reproduced') {
+          return respondError(response, 400, 'ValidationFailed', "field reproduction must be 'reproduced' or 'not-reproduced'", false);
+        }
+        const cvssVersion = stringField(body, 'cvssVersion');
+        const cvssVector = stringField(body, 'cvssVector');
+        const rawCvssScore = body.cvssScore;
+        const cvssScore = typeof rawCvssScore === 'number' ? rawCvssScore : Number.NaN;
+        const hasCvss = cvssVersion !== '' || cvssVector !== '' || Number.isFinite(cvssScore);
+        if (hasCvss && ((cvssVersion !== '3.1' && cvssVersion !== '4.0') || cvssVector === '' || !Number.isFinite(cvssScore))) {
+          return respondError(response, 400, 'ValidationFailed', 'CVSS version, vector and numeric score must be supplied together', false);
+        }
+        const finding = service.updateFindingStatus(operator, {
+          findingId,
+          next: status,
+          reproduction,
+          notes: stringField(body, 'notes'),
+          severityRationale: stringField(body, 'severityRationale'),
+          ...(hasCvss ? { cvss: { version: cvssVersion as '3.1' | '4.0', vector: cvssVector, score: cvssScore } } : {}),
+        });
+        return respondJson(response, 200, { finding });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/tools/decode') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        // decoder は状態を持たない工具。権限は route と同じ case.read (design/02 §3)。
+        if (!operator.permissions.includes('case.read')) {
+          return respondError(response, 403, 'PermissionDenied', 'decoder requires case.read', false);
+        }
+        const inputText = stringField(body, 'inputText');
+        const codecs = stringArrayField(body, 'codecs');
+        if (codecs.length === 0) {
+          return respondError(response, 400, 'ValidationFailed', 'codecs must not be empty', false);
+        }
+        const registry = new CodecRegistry();
+        for (const name of codecs) {
+          if (!registry.has(name)) {
+            return respondError(response, 400, 'ValidationFailed', `unknown codec: ${name}`, false);
+          }
+        }
+        const output = transformPipeline(registry, Buffer.from(inputText, 'utf8'), codecs);
+        let outputText: string | undefined;
+        try {
+          outputText = new TextDecoder('utf-8', { fatal: true }).decode(output);
+        } catch {
+          // 有効な UTF-8 でない場合は base64 のみ返す (壊れた文字列を出さない)。
+        }
+        return respondJson(response, 200, {
+          ...(outputText === undefined ? {} : { outputText }),
+          outputBase64: output.toString('base64'),
+          outputBytes: output.length,
+        });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/tools/compare-text') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        if (!operator.permissions.includes('case.read')) {
+          return respondError(response, 403, 'PermissionDenied', 'comparer requires case.read', false);
+        }
+        const left = stringField(body, 'left');
+        const right = stringField(body, 'right');
+        const options: CompareOptions = body.normalizeNewlines === true ? { normalizeNewlines: true } : {};
+        const diff = compareText(left, right, options);
+        const provenance = provenanceOf(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'), options);
+        return respondJson(response, 200, { ...diff, provenance });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/proxy/intercept') {
+      return respondJson(response, 200, { items: service.listBreakItems(), events: service.breakQueueEvents() });
+    }
+    if (route === 'POST /api/proxy/intercept/intake') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const direction = stringField(body, 'direction');
+        if (direction !== 'request' && direction !== 'response') {
+          return respondError(response, 400, 'ValidationFailed', "field direction must be 'request' or 'response'", false);
+        }
+        const holdMs = body.holdMs === undefined ? undefined : numberField(body, 'holdMs');
+        const item = service.enqueueBreakItem(operator, {
+          direction,
+          messageReference: stringField(body, 'messageReference'),
+          ...(holdMs === undefined ? {} : { holdMs }),
+        });
+        return respondJson(response, 201, { item });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/proxy/intercept/forward') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const itemId = stringField(body, 'itemId');
+        const targetUrl = stringField(body, 'targetUrl');
+        // 編集後要求 hash は、指定がなければ編集先 URL から決定的に作る。
+        const requestHash =
+          body.requestHash === undefined ? requireHash(targetUrl) : stringField(body, 'requestHash');
+        const decision = service.decideBreakItem(operator, itemId, { requestHash, targetUrl });
+        return respondJson(response, 200, { decision });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/proxy/intercept/drop') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const item = service.dropBreakItem(operator, stringField(body, 'itemId'));
+        return respondJson(response, 200, { item });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/repeater') {
+      return respondJson(response, 200, { drafts: service.listRepeaterDrafts(), attempts: service.repeaterAttemptLog() });
+    }
+    if (route === 'POST /api/repeater/drafts') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const protocol = stringField(body, 'protocol');
+        if (protocol !== 'http/1.1' && protocol !== 'http/2') {
+          return respondError(response, 400, 'ValidationFailed', "field protocol must be 'http/1.1' or 'http/2'", false);
+        }
+        const draft = service.createRepeaterDraft(operator, { targetUrl: stringField(body, 'targetUrl'), protocol });
+        return respondJson(response, 201, { draft });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/repeater/edit') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const headers = headerPairsField(body);
+        const draft = service.editRepeaterDraft(operator, stringField(body, 'draftId'), { headers, body: stringBodyField(body) });
+        return respondJson(response, 200, { draft });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/repeater/send') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        // role 指定時はその role の session cookie を適用する (design/08)。
+        const role = typeof body.role === 'string' ? stringField(body, 'role') : undefined;
+        const result = await service.sendRepeaterDraft(operator, stringField(body, 'draftId'), stringField(body, 'confirmedPlanHash'), role);
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/fuzzer/payload-sets') {
+      return respondJson(response, 200, { sets: service.listPayloadSets() });
+    }
+    if (route === 'POST /api/fuzzer/payload-sets') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.registerPayloadSet(operator, {
+          name: stringField(body, 'name'),
+          source: stringField(body, 'source'),
+          version: stringField(body, 'version'),
+          license: stringField(body, 'license'),
+          sha256: stringField(body, 'sha256'),
+          values: stringArrayField(body, 'values'),
+        });
+        return respondJson(response, 201, { set: result });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/fuzzer/runs') {
+      return respondJson(response, 200, { runs: service.listFuzzRuns() });
+    }
+    if (route === 'POST /api/fuzzer/runs') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const positionsValue = body.positions;
+        if (!Array.isArray(positionsValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field positions must be an array', false);
+        }
+        const positions = positionsValue.map((position, index) => {
+          if (typeof position !== 'object' || position === null) {
+            throw new DomainError('ValidationFailed', `positions[${index}] must be an object`);
+          }
+          const record = position as Record<string, unknown>;
+          return { name: stringField(record, 'name'), values: stringArrayField(record, 'values') };
+        });
+        const result = await service.runFuzzSession(operator, {
+          targetUrl: stringField(body, 'targetUrl'),
+          positions,
+          ...(body.maxRequests === undefined ? {} : { maxRequests: numberField(body, 'maxRequests') }),
+          // role 指定時はその role の session cookie を適用する (design/08)。
+          ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/sessions') {
+      return respondJson(response, 200, { sessions: service.listSessions() });
+    }
+    if (route === 'POST /api/sessions/flows') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const stepsValue = body.steps;
+        if (!Array.isArray(stepsValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field steps must be an array', false);
+        }
+        const steps = stepsValue.map((step, index) => {
+          if (typeof step !== 'object' || step === null) {
+            throw new DomainError('ValidationFailed', `steps[${index}] must be an object`);
+          }
+          const record = step as Record<string, unknown>;
+          if (record.secretValue !== undefined) {
+            throw new DomainError('ValidationFailed', `steps[${index}]: inline secret values are not accepted; use secretReference`);
+          }
+          const kind = stringField(record, 'kind') as LoginFlowStep['kind'];
+          const built: { kind: LoginFlowStep['kind']; target?: string; secretReference?: string; value?: string } = { kind };
+          if (record.target !== undefined) {
+            built.target = stringField(record, 'target');
+          }
+          if (record.secretReference !== undefined) {
+            built.secretReference = stringField(record, 'secretReference');
+          }
+          if (record.value !== undefined) {
+            built.value = stringField(record, 'value');
+          }
+          return built;
+        });
+        const result = service.registerLoginFlow(operator, {
+          role: stringField(body, 'role'),
+          flowVersion: stringField(body, 'flowVersion'),
+          steps,
+        });
+        return respondJson(response, 201, { flow: result });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/sessions/login') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const secretValuesValue = body.secretValues;
+        if (typeof secretValuesValue !== 'object' || secretValuesValue === null || Array.isArray(secretValuesValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field secretValues must be an object of strings', false);
+        }
+        const secretValues: Record<string, string> = {};
+        for (const [name, value] of Object.entries(secretValuesValue)) {
+          if (typeof value !== 'string') {
+            throw new DomainError('ValidationFailed', `secretValues['${name}'] must be a string`);
+          }
+          secretValues[name] = value;
+        }
+        const result = await service.runLogin(operator, {
+          role: stringField(body, 'role'),
+          baseUrl: stringField(body, 'baseUrl'),
+          expectedUrlPrefix: stringField(body, 'expectedUrlPrefix'),
+          secretValues,
+          ...(typeof body.proxyServer === 'string' ? { proxyServer: stringField(body, 'proxyServer') } : {}),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/sessions/refresh') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = await service.refreshSession(operator, stringField(body, 'role'));
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/sessions/cookies') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const result = service.assignRoleCookies(operator, stringField(body, 'role'), stringArrayField(body, 'cookieNames'));
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/business-logic/checks') {
+      return respondJson(response, 200, { checks: service.listBusinessLogicChecks() });
+    }
+    if (route === 'POST /api/business-logic/checks') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const expectationValue = body.expectation;
+        if (typeof expectationValue !== 'object' || expectationValue === null) {
+          return respondError(response, 400, 'ValidationFailed', 'field expectation must be an object', false);
+        }
+        const expectationRecord = expectationValue as Record<string, unknown>;
+        const argsValue = expectationRecord.args;
+        if (!Array.isArray(argsValue)) {
+          return respondError(response, 400, 'ValidationFailed', 'field expectation.args must be an array', false);
+        }
+        const result = await service.runBusinessLogicCheck(operator, {
+          roles: stringArrayField(body, 'roles'),
+          targetUrl: stringField(body, 'targetUrl'),
+          expectation: { expression: stringField(expectationRecord, 'expression'), args: argsValue },
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/auth-bypass/checks') {
+      return respondJson(response, 200, { checks: service.listAuthBypassChecks() });
+    }
+    if (route === 'POST /api/auth-bypass/checks') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const secretValuesValue = body.secretValues;
+        if (secretValuesValue !== undefined && (typeof secretValuesValue !== 'object' || secretValuesValue === null || Array.isArray(secretValuesValue))) {
+          return respondError(response, 400, 'ValidationFailed', 'field secretValues must be an object of strings', false);
+        }
+        const secretValues: Record<string, string> = {};
+        if (secretValuesValue !== undefined) {
+          for (const [name, value] of Object.entries(secretValuesValue as Record<string, unknown>)) {
+            if (typeof value !== 'string') {
+              throw new DomainError('ValidationFailed', `secretValues['${name}'] must be a string`);
+            }
+            secretValues[name] = value;
+          }
+        }
+        const result = await service.runAuthBypassCheck(operator, {
+          role: stringField(body, 'role'),
+          ...(Array.isArray(body.targetUrls) ? { targetUrls: stringArrayField(body, 'targetUrls') } : {}),
+          ...(Array.isArray(body.authCookieNames) ? { authCookieNames: stringArrayField(body, 'authCookieNames') } : {}),
+          ...(body.includeLoginVariants === undefined ? {} : { includeLoginVariants: body.includeLoginVariants === true }),
+          ...(Object.keys(secretValues).length === 0 ? {} : { secretValues }),
+          ...(typeof body.loginBaseUrl === 'string' ? { loginBaseUrl: stringField(body, 'loginBaseUrl') } : {}),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/zap-unsupported/checks') {
+      return respondJson(response, 200, { checks: service.listZapUnsupportedChecks() });
+    }
+    if (route === 'POST /api/zap-unsupported/checks') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const paramsValue = body.params;
+        if (paramsValue !== undefined && (typeof paramsValue !== 'object' || paramsValue === null || Array.isArray(paramsValue))) {
+          return respondError(response, 400, 'ValidationFailed', 'field params must be an object of strings', false);
+        }
+        const params: Record<string, string> = {};
+        if (paramsValue !== undefined) {
+          for (const [name, value] of Object.entries(paramsValue as Record<string, unknown>)) {
+            if (typeof value !== 'string') {
+              throw new DomainError('ValidationFailed', `params['${name}'] must be a string`);
+            }
+            params[name] = value;
+          }
+        }
+        const secretValuesValue = body.secretValues;
+        if (secretValuesValue !== undefined && (typeof secretValuesValue !== 'object' || secretValuesValue === null || Array.isArray(secretValuesValue))) {
+          return respondError(response, 400, 'ValidationFailed', 'field secretValues must be an object of strings', false);
+        }
+        const secretValues: Record<string, string> = {};
+        if (secretValuesValue !== undefined) {
+          for (const [name, value] of Object.entries(secretValuesValue as Record<string, unknown>)) {
+            if (typeof value !== 'string') {
+              throw new DomainError('ValidationFailed', `secretValues['${name}'] must be a string`);
+            }
+            secretValues[name] = value;
+          }
+        }
+        const result = await service.runZapUnsupportedCheck(operator, {
+          themeNo: stringField(body, 'themeNo'),
+          ...(typeof body.role === 'string' && body.role !== '' ? { role: stringField(body, 'role') } : {}),
+          ...(Array.isArray(body.targetUrls) ? { targetUrls: stringArrayField(body, 'targetUrls') } : {}),
+          ...(Object.keys(params).length === 0 ? {} : { params }),
+          ...(Object.keys(secretValues).length === 0 ? {} : { secretValues }),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/traffic') {
+      const limitParam = url.searchParams.get('limit');
+      const limit = limitParam === null ? 100 : Number(limitParam);
+      if (!Number.isInteger(limit)) {
+        return respondError(response, 400, 'ValidationFailed', 'limit must be an integer', false);
+      }
+      try {
+        return respondJson(response, 200, service.listTraffic(limit));
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/traffic/site-map') {
+      return respondJson(response, 200, { endpoints: service.listSiteMapEndpoints() });
+    }
+    if (route === 'GET /api/runs/interrupted') {
+      if (runRepository === undefined) {
+        return respondError(response, 501, 'Unsupported', 'run persistence is not configured for this server', false);
+      }
+      // design/22 §6: 実行中のまま残った run を Interrupted へ。自動再開は行わない。
+      const interrupted = runRepository.markInterrupted();
+      return respondJson(response, 200, { interrupted });
+    }
+    if (route === 'GET /api/events') {
+      const accept = request.headers.accept ?? '';
+      const lastEventIdHeader = Number(request.headers['last-event-id'] ?? '0');
+      const sinceQuery = url.searchParams.get('since');
+      const since = sinceQuery !== null ? Number(sinceQuery) : Number.isFinite(lastEventIdHeader) ? lastEventIdHeader : 0;
+      if (!Number.isInteger(since) || since < 0) {
+        return respondError(response, 400, 'ValidationFailed', 'since must be a non-negative integer', false);
+      }
+      const events = service.events();
+      // cursor は監査 event の連番。以後の event だけを返す (F20-UT-004 と同じ意味論)。
+      if (accept.includes('text/event-stream')) {
+        // SSE 形式 (design/18): Last-Event-ID (または ?since) 以降を再送する。
+        const sseLines = events
+          .slice(since)
+          .map((event, index) => {
+            const eventId = since + index + 1;
+            const body = JSON.stringify({ eventId, ...event });
+            return `id: ${eventId}\nevent: ${event.type}\ndata: ${body}\n\n`;
+          });
+        response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(sseLines.join(''));
+        return;
+      }
+      const lines = events
+        .slice(since)
+        .map((event, index) => JSON.stringify({ eventId: since + index + 1, ...event }));
+      response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8' });
+      response.end(`${lines.join('\n')}${lines.length > 0 ? '\n' : ''}`);
+      return;
+    }
+    if (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+      return respondError(response, 404, 'NotFound', `unknown route: ${route}`, false);
+    }
+    return respondError(response, 405, 'MethodNotAllowed', `method not allowed: ${method}`, false);
+  }
+
+  return server;
+}
+
+async function readJsonBody(request: IncomingMessage, response: ServerResponse, maximumBytes = MAX_BODY_BYTES): Promise<Record<string, unknown> | undefined> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += (chunk as Buffer).length;
+    if (size > maximumBytes) {
+      respondError(response, 400, 'ValidationFailed', `request body exceeds ${maximumBytes} bytes`, false);
+      return undefined;
+    }
+    chunks.push(chunk as Buffer);
+  }
+  if (chunks.length === 0) {
+    respondError(response, 400, 'ValidationFailed', 'request body is required', false);
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      respondError(response, 400, 'ValidationFailed', 'request body must be a JSON object', false);
+      return undefined;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    respondError(response, 400, 'ValidationFailed', 'request body is not valid JSON', false);
+    return undefined;
+  }
+}
+
+function respondDomainError(response: ServerResponse, cause: unknown): void {
+  if (cause instanceof DomainError) {
+    const status = HTTP_STATUS_BY_CODE[cause.code];
+    respondError(response, status, cause.code, cause.message, cause.retryable);
+    return;
+  }
+  respondError(response, 500, 'InternalError', String(cause), false);
+}
+
+function respondError(response: ServerResponse, status: number, code: string, message: string, retryable: boolean): void {
+  respondJson(response, status, { code, message, retryable, schemaVersion: 'scopepilot2.api.v1' });
+}
+
+function respondJson(response: ServerResponse, status: number, body: unknown): void {
+  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  response.end(JSON.stringify(body));
+}
+
+/** headers は [name, value] の pair 配列として受ける (改行入りは domain が拒否)。 */
+function headerPairsField(body: Record<string, unknown>): readonly (readonly [string, string])[] {
+  const value = body.headers;
+  if (!Array.isArray(value) || value.some((entry) => !Array.isArray(entry) || entry.length !== 2 || entry.some((part) => typeof part !== 'string'))) {
+    throw new DomainError('ValidationFailed', 'field headers must be an array of [name, value] string pairs');
+  }
+  return value as readonly (readonly [string, string])[];
+}
+
+function stringBodyField(body: Record<string, unknown>): string {
+  const value = body.body;
+  if (value === undefined) {
+    return '';
+  }
+  if (typeof value !== 'string') {
+    throw new DomainError('ValidationFailed', 'field body must be a string');
+  }
+  return value;
+}
+
+function sequencerReplayRequestField(body: Record<string, unknown>): { method?: string; headers?: readonly (readonly [string, string])[]; body?: string } {
+  const replay = structField(body, 'replayRequest');
+  const result: { method?: string; headers?: readonly (readonly [string, string])[]; body?: string } = {};
+  if (replay.method !== undefined) result.method = stringField(replay, 'method');
+  if (replay.headers !== undefined) result.headers = headerPairsField(replay);
+  if (replay.body !== undefined) result.body = stringField(replay, 'body');
+  return result;
+}
+
+function requireHash(targetUrl: string): string {
+  return hashStable('scopepilot2.request.edited', targetUrl);
+}
+
+function stringField(body: Record<string, unknown>, field: string): string {
+  const value = body[field];
+  if (typeof value !== 'string') {
+    throw new DomainError('ValidationFailed', `field ${field} must be a string`);
+  }
+  return value;
+}
+
+function numberField(body: Record<string, unknown>, field: string): number {
+  const value = body[field];
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new DomainError('ValidationFailed', `field ${field} must be an integer`);
+  }
+  return value;
+}
+
+function stringArrayField(body: Record<string, unknown>, field: string): readonly string[] {
+  const value = body[field];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new DomainError('ValidationFailed', `field ${field} must be an array of strings`);
+  }
+  return value as readonly string[];
+}
+
+/** 計画 API の任意上限指定。未指定なら service 既定。指定時は正の整数 3 点のみ許す。 */
+function optionalLimitsField(body: Record<string, unknown>): { maxRequests: number; maxPages: number; maxDurationMinutes: number } | undefined {
+  if (body.limits === undefined) {
+    return undefined;
+  }
+  return limitsField(body);
+}
+
+function limitsField(body: Record<string, unknown>): { maxRequests: number; maxPages: number; maxDurationMinutes: number } {
+  const limits = body.limits;
+  if (typeof limits !== 'object' || limits === null) {
+    throw new DomainError('ValidationFailed', 'field limits must be an object');
+  }
+  const record = limits as Record<string, unknown>;
+  return {
+    maxRequests: expectPositiveInteger(record.maxRequests, 'limits.maxRequests'),
+    maxPages: expectPositiveInteger(record.maxPages, 'limits.maxPages'),
+    maxDurationMinutes: expectPositiveInteger(record.maxDurationMinutes, 'limits.maxDurationMinutes'),
+  };
+}
+
+function planField(body: Record<string, unknown>): import('@scopepilot2/contracts').ExecutionPlan {
+  return structField(body, 'plan') as unknown as import('@scopepilot2/contracts').ExecutionPlan;
+}
+
+function confirmationField(body: Record<string, unknown>): import('@scopepilot2/contracts').PlanConfirmation {
+  return structField(body, 'confirmation') as unknown as import('@scopepilot2/contracts').PlanConfirmation;
+}
+
+function adoptedField(body: Record<string, unknown>): readonly import('@scopepilot2/contracts').ScanCandidate[] {
+  const value = body.adopted;
+  if (!Array.isArray(value)) {
+    throw new DomainError('ValidationFailed', 'field adopted must be an array of candidates');
+  }
+  return value as readonly import('@scopepilot2/contracts').ScanCandidate[];
+}
+
+function candidateArrayField(body: Record<string, unknown>, field: string): readonly import('@scopepilot2/contracts').ScanCandidate[] {
+  const value = body[field];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'object' || entry === null || Array.isArray(entry))) {
+    throw new DomainError('ValidationFailed', `field ${field} must be an array of candidates`);
+  }
+  return value as readonly import('@scopepilot2/contracts').ScanCandidate[];
+}
+
+function interactiveDiagnosticInputField(body: Record<string, unknown>): import('./baseline-flow.ts').InteractiveDiagnosticRunInput {
+  if (body.confirmed !== true) throw new DomainError('ValidationFailed', 'field confirmed must be true');
+  if (!Array.isArray(body.items) || !Array.isArray(body.files) || !Array.isArray(body.apiDocuments)) {
+    throw new DomainError('ValidationFailed', 'interactive diagnostic items, files, and apiDocuments must be arrays');
+  }
+  const tracks = new Set(['workflow-state', 'session-analysis', 'authorization-differential', 'upload-workflow', 'api-schema', 'cryptography-review']);
+  const tokenSources = new Set(['body', 'cookie', 'hidden', 'bearer', 'custom']);
+  const requiredInputs = new Set(['upload-file', 'api-spec', 'additional-role-session']);
+  const stepKinds = new Set(['navigate', 'fill', 'select', 'click', 'wait', 'assert', 'assertValue', 'upload']);
+  const items = body.items.map((entry, itemIndex) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new DomainError('ValidationFailed', `items[${itemIndex}] must be an object`);
+    const item = entry as Record<string, unknown>;
+    const track = stringField(item, 'track');
+    const tokenSource = stringField(item, 'tokenSource');
+    const expectation = stringField(item, 'expectation');
+    if (!tracks.has(track) || !tokenSources.has(tokenSource) || !['same', 'different'].includes(expectation)) {
+      throw new DomainError('ValidationFailed', `items[${itemIndex}] contains an unsupported enum value`);
+    }
+    if (!Array.isArray(item.steps)) throw new DomainError('ValidationFailed', `items[${itemIndex}].steps must be an array`);
+    const steps = item.steps.map((entryStep, stepIndex) => {
+      if (typeof entryStep !== 'object' || entryStep === null || Array.isArray(entryStep)) throw new DomainError('ValidationFailed', `items[${itemIndex}].steps[${stepIndex}] must be an object`);
+      const step = entryStep as Record<string, unknown>;
+      const kind = stringField(step, 'kind');
+      const target = stringField(step, 'target');
+      if (!stepKinds.has(kind)) throw new DomainError('ValidationFailed', `unsupported browser step kind: ${kind}`);
+      if (kind === 'fill' || kind === 'select' || kind === 'assertValue') return { kind, target, value: stringField(step, 'value') };
+      if (kind === 'upload') return { kind, target, inputRef: stringField(step, 'inputRef') };
+      return { kind, target };
+    });
+    const required = stringArrayField(item, 'requiredInputs');
+    if (required.some((value) => !requiredInputs.has(value))) throw new DomainError('ValidationFailed', `items[${itemIndex}].requiredInputs contains an unsupported value`);
+    return {
+      itemId: stringField(item, 'itemId'),
+      track: track as import('./baseline-flow.ts').InteractiveDiagnosticTrack,
+      targetUrl: stringField(item, 'targetUrl'),
+      role: stringField(item, 'role'),
+      roles: stringArrayField(item, 'roles'),
+      summary: stringField(item, 'summary'),
+      steps: steps as import('../ports/engines.ts').InteractiveBrowserStep[],
+      samples: numberField(item, 'samples'),
+      tokenSource: tokenSource as 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom',
+      tokenName: stringField(item, 'tokenName'),
+      expectation: expectation as 'same' | 'different',
+      requiredInputs: required as ('upload-file' | 'api-spec' | 'additional-role-session')[],
+    };
+  });
+  const files = body.files.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new DomainError('ValidationFailed', `files[${index}] must be an object`);
+    const file = entry as Record<string, unknown>;
+    return { inputRef: stringField(file, 'inputRef'), name: stringField(file, 'name'), mimeType: stringField(file, 'mimeType'), dataBase64: stringField(file, 'dataBase64') };
+  });
+  const apiDocuments = body.apiDocuments.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new DomainError('ValidationFailed', `apiDocuments[${index}] must be an object`);
+    const document = entry as Record<string, unknown>;
+    return { inputRef: stringField(document, 'inputRef'), name: stringField(document, 'name'), document: document.document };
+  });
+  return { confirmed: true, items, files, apiDocuments };
+}
+
+function structField(body: Record<string, unknown>, field: string): Record<string, unknown> {
+  const value = body[field];
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new DomainError('ValidationFailed', `field ${field} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function positiveIntegerField(body: Record<string, unknown>, field: string): number {
+  return expectPositiveInteger(body[field], field);
+}
+
+function expectPositiveInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new DomainError('ValidationFailed', `field ${field} must be a positive integer`);
+  }
+  return value;
+}

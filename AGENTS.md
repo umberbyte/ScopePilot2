@@ -1,19 +1,52 @@
-# ScopePilot2 開発方針
+# ScopePilot 開発方針
 
-## 起動対象の厳守
+本リポジトリ (ScopePilot2) は、`docs/burp-professional-replacement-spec.md`（以下「仕様書」）に基づく Burp Suite Professional 代替の新規実装である。概要設計は `docs/design/**`。旧版 (ScopePilot・C#/WPF) の実装は本リポジトリから削除済みで、本方針に沿って TypeScript で作り直す。
 
-- このリポジトリにはC#/WPF版の `main` と、複数のTypeScript/Electron版Orca worktreeがあり、いずれも過去にScopePilot2と呼ばれている。ディレクトリ名、プロセス名、ウィンドウタイトルだけで正しい起動対象を推測しない。
-- 正式な起動対象のパスまたはブランチが利用者から確定されるまでは、どの実装も起動しない。候補を順番に起動して利用者へ判定させることもしない。
-- C#/WPF版の実行ファイル名やウィンドウ名をScopePilot2へ変更して、別実装の代用にすることを禁止する。
-- 起動対象が確定したら、ソース種別、絶対パス、ブランチ、起動コマンド、画面上の識別点をこの節へ記録してから起動する。
+## 起動対象
 
-### 確定済み起動対象（2026-10-26）
-
+- 正式な起動対象は TypeScript/Electron 版のみとし、削除済みの C#/WPF 版や旧バイナリを代用しない。
 - ソース種別: TypeScript/Electron版
-- 絶対パス: `C:\Users\GoSugawara\orca\workspaces\ScopePilot2\polyp`
-- ブランチ: `umberbyte/review-scopepilot2-design`
+- 絶対パス: `C:\Users\GoSugawara\src\ScopePilot2`
+- ブランチ: `main`
 - 起動コマンド: `npm run start --workspace @scopepilot2/desktop`
-- 画面上の識別点: ウィンドウタイトルが「ScopePilot2」で、上部に「シンプル」と「Advanced」のモード選択が表示される。
+- 画面上の識別点: ウィンドウタイトルが「ScopePilot2」で、上部に「シンプル」と「アドバンスド」のモード選択、左側に「診断ワークフロー」が表示される。
+- 上記は 2026-10-26 に利用者が TypeScript 版を正式な起動対象として確定した内容である。変更時はこの節を先に更新する。
+
+
+
+## プロジェクトのゴール
+
+- 予算的制約、スキル的制約を排除し、誰でもBurpSuite Professionalをプロが扱い、脆弱性診断を行ったものと同じ結果が得られることを目的とする。
+- ZAP及び他のツールのラッパーとして、「検証したいこと」を選ぶと「結果」が返ってくるインタフェースとする。ただし、何の目的でどのようなHTTPリクエストを発信したかはログ等で確認ができる。
+- ユーザーに足りない能力は、生成AI(zcode, claude, codex)が補う
+- 開発完了後、DVWAを用いてテストを行う。
+- 作業全般において、ユーザーが選択した生成AI(zcode, claude, codex)によるアシストを受けることができる。
+
+## 実装方針（言語・フレームワーク）
+
+- フロントからバックエンドまで **TypeScript に統一**する。記述言語を 1 つに保ち、既に複雑な構成（外部エンジンの併用）の明快さを優先する。
+- 構成:
+  - UI は Web 技術 (TypeScript)。デスクトップシェルは Electron（main/renderer が同一の JS ランタイムで動く単一ランタイム構成）。対応 OS は Windows / macOS。
+  - UI のコンポーネント・デザインシステムには [Fluent UI](https://developer.microsoft.com/en-us/fluentui) を使う。renderer は React + Fluent UI React v9 (`@fluentui/react-components`) とし、Simple/Advanced 両モードを同じコンポーネント・トークン基盤の上に作る。版は他の npm 依存と同じく更新管理 (`docs/design/21`) の規律で固定する。
+  - コアは TypeScript (Node)。案件・認可・計画・実行制御・証跡・アダプターを置くヘッドレス層とし、CLI (仕様書 F21) と UI の双方から使う。
+  - ブラウザ操作は Playwright を TypeScript から直接呼ぶ（別言語の子プロセスにしない）。
+  - ZAP (Java)・Nuclei (Go) は HTTP API / CLI 越しに起動する**外部バイナリ**として扱う。ソースを本リポジトリに持たないため、使用言語には数えない。
+  - 保存は SQLite ＋ファイル原本（`docs/design/20-storage-evidence.md`）。大量通信の一覧 (仕様書 6.5) は Web の仮想化で表示する。
+- **UI とコアはローカル API 契約で分離する**。契約（OpenAPI / JSON Schema。`docs/design/18`・`19`）を介してのみ結合し、UI をコア無改修で差し替えられる状態・将来のコア言語移行を契約の内側で段階的に行える状態を保つ。コアとフロントで型定義を共有する。
+- 外部エンジン（ZAP・Nuclei）の内部挙動は制御せず、我々の権限外（版更新で変化しうる）として扱う。ScopePilot が握るのは入力パラメータ・scope・起動と停止であり、エンジンが実際に何をしたかは与えた入力と観測可能な出力から**推測**して記録する。個々の送信を傍受・拒否してエンジンを制御しようとしない（そうするとエンジン連携の利点を失い、更新で壊れる）。安全保証は経路別に線引きし、ScopePilot 自身が発する通信だけ送信前拒否を保証する。外部エンジン由来の通信は入力 scope・事後検知・停止・版ごとの実測・開示で扱い、これらを満たせない機能は公開しない（詳細は `docs/design/22-execution-control.md`）。
+- 技術的負債の主因は npm / ビルドツールの陳腐化である。依存は最小限にし、標準・プラットフォーム API を優先し、版は更新管理 (`docs/design/21`) の規律で固定する。
+- `docs/design/**` の概要設計は旧 C# 資産の再利用を前提に書かれた箇所がある。**再利用対象・クラス名・層割りの記述は本「実装方針」が優先**し、設計文書からは安全制御・データモデル・アダプター境界・証跡の**意図**を踏襲する（設計文書は追って TypeScript 前提へ改訂する）。
+- 移植で最も大きいリスクは、ZAP 連携に蓄積した運用知識（Safe/standard モード境界、`URL Does not Exist` の回避、計画 hash 検証、取込時の重複除外）を落とすこと。シミュレーションハーネス（旧 `docs/SIMULATION-GUIDE.md` 相当）を TypeScript で先に用意し、「探索→能動診断→所見」の自動完走を回帰テストの基準にしてから本体を書く。
+- UIはアドバンスドモードとシンプルモードの2つ
+  - アドバンスドモードでは、対応ガイドラインの選択、クローリング、対象選定、実行内容の変更まで、ユーザが自身の権限で行うことができる
+  - アドバンスドモードでは、ZAP単体では実現できないリクエストの生成を、テンプレートから選んで、他のツールやZAP手動リクエストを用いて実行できる
+  - テンプレートは WebAppPentestGuidelines_診断項目_ScopePilot_作業用.xlsx を参照し、各ガイドラインで必要な診断項目から選択できる
+  - シンプルモードでは、対応ガイドラインの選択、クローリング後の対象選定、リクエスト実行前の最終確認のみが操作対象となり、低スキルのユーザーが安全に診断を実行できる
+
+## 旧版の参照
+
+- 旧版 ScopePilot (C#/WPF) の実装・資産を参照する必要がある場合は、別リポジトリ **ScopePilot**（既定の所在: `C:\Users\GoSugawara\src\ScopePilot`）を見る。本リポジトリには複製しない。
+- `docs/` 配下に残る旧版由来の文書（`PROJECTS-AND-HANDOFF.md`・`SIMULATION-GUIDE.md`・`UI-DESIGN.md`・`JAPANESE-MARKDOWN-REPORT.md`・`MARKDOWN-WORD-REPORT.md`・`ZAP-RESEND-WORKBENCH-PROPOSAL.md`・`detection-improvement-policy.md`・`required-service-spec.md`）は、旧版の実装詳細を含む参考資料である。ScopePilot2 で権威を持つのは仕様書・`docs/design/**`・`docs/work-logs/**`・本 AGENTS.md であり、矛盾する場合はこちらを優先する。
 
 ## ベンチマークについて
 

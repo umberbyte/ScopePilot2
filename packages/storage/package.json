@@ -1,0 +1,15 @@
+{
+  "name": "@scopepilot2/storage",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/integration/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@scopepilot2/contracts": "*",
+    "@scopepilot2/core": "*"
+  }
+}

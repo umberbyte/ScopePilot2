@@ -1,0 +1,25 @@
+# Node / TypeScript build and dependency artifacts.
+node_modules/
+dist/
+out/
+build/
+coverage/
+.cache/
+*.tsbuildinfo
+
+# Playwright's installed browsers are restored separately.
+.playwright/
+
+# Local run data and secrets.
+engagement.json
+runs/
+projects/
+*.local.json
+*.scopepilot.json
+inputs/
+exports/
+reports/
+backups/
+outputs/
+apps/desktop/test-results/
+test-results/

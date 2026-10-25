@@ -1,0 +1,16 @@
+{
+  "name": "@scopepilot2/adapters",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "@scopepilot2/contracts": "*",
+    "@scopepilot2/core": "*"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "test:gated": "node --test --test-concurrency=1 \"test/*.integration.test.ts\""
+  }
+}
