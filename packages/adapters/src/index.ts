@@ -11,3 +11,4 @@ export * from './websocket-transport.ts';
 export * from './http2-transport.ts';
 export * from './dom-observer.ts';
 export * from './interactive-browser.ts';
+export * from './workflow-scan-transport.ts';

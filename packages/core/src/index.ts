@@ -29,6 +29,7 @@ export * from './domain/api-scanning.ts';
 export * from './domain/reporting.ts';
 export * from './domain/product-api.ts';
 export * from './domain/cli-automation.ts';
+export * from './domain/workflow-scan.ts';
 export * from './ports/infra.ts';
 export * from './ports/engines.ts';
 export * from './application/baseline-flow.ts';
