@@ -812,6 +812,21 @@
                                     <Button Content="HARを取り込む" Click="Import_Click" />
                                     <Button Content="ZAP JSON結果を取り込む" Click="ImportZapReport_Click" />
                                 </WrapPanel>
+                                <Border Background="{DynamicResource WarningBackground}" BorderBrush="{DynamicResource WarningBorder}" BorderThickness="1" CornerRadius="4" Margin="0,8,0,8" Padding="10">
+                                    <StackPanel>
+                                        <TextBlock Text="ワークフロー診断（状態遷移・暗号・API操作を要する検出）" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock Style="{StaticResource Hint}" Text="ブルートフォース対策、CSRF・CAPTCHA・保存型XSSの状態遷移、ファイルアップロード、セッションID系列、CSP許可元、クライアント側制御、認可不備、XOR/ECB/CBCの暗号診断、API旧版・マスアサインメント等を、対象のセキュリティレベル（low/medium/high）ごとに自動実行します。変更を伴う検証（パスワード・権限）は実施後に元の値へ戻します。" TextWrapping="Wrap" />
+                                        <Grid Style="{StaticResource EditableWhenIdle}" Margin="0,6,0,0">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <TextBlock Text="診断用ユーザー名" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                            <TextBox Grid.Column="1" Text="{Binding Project.DiagnosticTools.WorkflowScanUsername, UpdateSourceTrigger=PropertyChanged, NotifyOnSourceUpdated=True}" Margin="0,0,12,0" AutomationProperties.Name="ワークフロー診断のユーザー名" />
+                                            <TextBlock Grid.Column="2" Text="パスワード" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                            <TextBox Grid.Column="3" Text="{Binding Project.DiagnosticTools.WorkflowScanPassword, UpdateSourceTrigger=PropertyChanged, NotifyOnSourceUpdated=True}" AutomationProperties.Name="ワークフロー診断のパスワード" />
+                                        </Grid>
+                                        <Button Style="{StaticResource EditableWhenIdle}" Content="ワークフロー診断を開始" Command="{Binding StartWorkflowScanCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" AutomationProperties.Name="ワークフロー診断を開始" />
+                                        <TextBlock Text="{Binding WorkflowScanStatus}" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource TextSecondary}" />
+                                    </StackPanel>
+                                </Border>
                                 <TextBlock Style="{StaticResource Hint}" Text="記録では別ブラウザーを開きます。ログインなどの正常操作を手動で行い、［停止］で保存します。必要add-onは不足分をZAP Marketplaceから取得します。選択ロールはラベルとして保存し、認証主体・実影響を自動確定しません。" />
                                 <TextBlock Text="{Binding DiagnosticObservationSummary}" Margin="0,6" />
                                 <TextBlock Style="{StaticResource Hint}" Text="実施概要・指摘一覧・日本語解説・対策・証拠の出典をまとめます。未登録の警告は原文を掲載します。出力後にレポートのフォルダーを開きます。" />

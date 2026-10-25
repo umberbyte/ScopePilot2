@@ -20,6 +20,10 @@ public sealed class DiagnosticToolSettings
     public int MaxActiveScanTargets { get; set; } = ZapActiveScanProfile.DefaultMaxTargets;
     public bool IncludeReferenceHars { get; set; }
     public bool UseRecordedAuthentication { get; set; }
+    // ワークフロー診断（状態遷移・暗号・API操作を要する診断）で使うアカウント。
+    // 診断対象へのログインにのみ使用し、証跡ログへは出力しない。
+    public string WorkflowScanUsername { get; set; } = "";
+    public string WorkflowScanPassword { get; set; } = "";
 }
 
 public static class ZapActiveScanProfile

@@ -118,6 +118,18 @@ public sealed class RunHistoryService
                 ReadString(engagement, "mode") switch { "zap-browser" => "Playwrightの手動操作記録", "zap-addons" => "必要add-onの準備", "zap-active" => "承認済みURLのアクティブ診断", _ => "保存済みHARのパッシブ診断" }, "主体・実影響は未確認です。")
             { Tool = "ZAP", Role = ReadString(engagement, "activeRole"), DiffSummary = "ZAP診断は探索差分に含めません。" };
         }
+        if (ReadString(engagement, "mode") == "workflow-scan")
+        {
+            var workflow = await ReadJsonAsync(Path.Combine(directory.FullName, "workflow-summary.json"));
+            var workflowStatus = ReadString(workflow, "status");
+            if (string.IsNullOrEmpty(workflowStatus)) workflowStatus = "completed";
+            var detected = ReadInt(workflow, "detectedCount");
+            return new(directory.Name, directory.FullName, ReadDate(engagement, "runStartedAt") ?? directory.CreationTime,
+                workflowStatus, $"ワークフロー診断: {detected}件検出", 0, 0, ReadInt(workflow, "requestCount"), 0,
+                $"状態遷移・暗号・APIを用いた専門チェックで {detected}件の所見を検出しました（検証レベル {ReadString(workflow, "securityLevels")}）。",
+                ReadStringArray(workflow, "limitations"))
+            { Tool = "ScopePilot", Role = ReadString(engagement, "activeRole"), DiffSummary = "ワークフロー診断は探索差分に含めません。" };
+        }
         if (ReadString(engagement, "mode") == "api-document")
         {
             var api = await ReadJsonAsync(Path.Combine(directory.FullName, "api-document-summary.json"));
