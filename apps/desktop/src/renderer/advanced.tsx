@@ -329,6 +329,10 @@ function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactE
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [reportContent, setReportContent] = useState('');
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [severityRationale, setSeverityRationale] = useState('');
+  const [cvssVector, setCvssVector] = useState('');
+  const [cvssScore, setCvssScore] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -348,14 +352,23 @@ function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactE
     setBusy(true);
     setError('');
     try {
-      await callJson(apiBase, 'POST', '/api/findings/status', { findingId, status: next });
+      await callJson(apiBase, 'POST', '/api/findings/status', {
+        findingId,
+        status: next,
+        reproduction: next === 'confirmed' ? 'reproduced' : 'not-reproduced',
+        notes: reviewNotes,
+        severityRationale,
+        ...(cvssVector.trim() === '' && cvssScore.trim() === '' ? {} : {
+          cvssVersion: '3.1', cvssVector: cvssVector.trim(), cvssScore: Number(cvssScore),
+        }),
+      });
       await load();
     } catch (cause) {
       setError(String(cause));
     } finally {
       setBusy(false);
     }
-  }, [apiBase, load]);
+  }, [apiBase, cvssScore, cvssVector, load, reviewNotes, severityRationale]);
 
   const generateReport = useCallback(async () => {
     setBusy(true);
@@ -384,6 +397,14 @@ function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactE
       {findings.length === 0 ? (
         loaded && <Text className={styles.muted}>{t('a11.empty')}</Text>
       ) : (
+        <>
+        <div className={styles.section}>
+          <Text weight="semibold">人による検証記録（確定・誤検知判定の前に入力）</Text>
+          <Field label="再現確認・誤検知判定のメモ" required><Textarea value={reviewNotes} onChange={(_, data) => setReviewNotes(data.value)} /></Field>
+          <Field label="深刻度の根拠" required><Textarea value={severityRationale} onChange={(_, data) => setSeverityRationale(data.value)} /></Field>
+          <Field label="CVSS v3.1 ベクタ（任意）"><Input value={cvssVector} onChange={(_, data) => setCvssVector(data.value)} /></Field>
+          <Field label="CVSS スコア（任意）"><Input type="number" min={0} max={10} step={0.1} value={cvssScore} onChange={(_, data) => setCvssScore(data.value)} /></Field>
+        </div>
         <Table size="small" aria-label={t('a11.table.aria')}>
           <TableHeader>
             <TableRow>
@@ -427,6 +448,7 @@ function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactE
             ))}
           </TableBody>
         </Table>
+        </>
       )}
       <div className={styles.section}>
         <Button appearance="primary" disabled={busy} onClick={() => void generateReport()}>
@@ -1167,7 +1189,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {activeRoute === 'findings' && <FindingsOrganizerScreen apiBase={apiBase} />}
         {activeRoute === 'scan-plans' && <ScanPlansScreen apiBase={apiBase} />}
         {activeRoute === 'browser.site-map' && <SiteMapScreen apiBase={apiBase} />}
-        {activeRoute === 'advanced.guidelines' && <GuidelinesCatalogScreen />}
+        {activeRoute === 'advanced.guidelines' && <GuidelinesCatalogScreen apiBase={apiBase} />}
         {activeRoute === 'proxy.intercept' && <ProxyInterceptScreen apiBase={apiBase} />}
         {activeRoute === 'repeater' && <RepeaterScreen apiBase={apiBase} />}
         {activeRoute === 'fuzzer' && <FuzzerScreen apiBase={apiBase} />}

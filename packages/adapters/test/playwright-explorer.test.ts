@@ -166,8 +166,10 @@ describe('Playwright explorer adapter (stub browser 契約検証)', () => {
 
   test('observeWithSession は session cookie を page 生成へ渡し、scope 強制も同じ入口で効く', async () => {
     const receivedCookies: (readonly { name: string; value: string; domain: string; path: string }[] | undefined)[] = [];
+    const preparedUrls: string[] = [];
     const adapter = new PlaywrightExplorerAdapter({
       scope: { allowedOrigins: ['http://fixture.target.test'], deniedOrigins: [] },
+      beforeSessionObservation: async (url) => { preparedUrls.push(url); },
       launcher: async () => ({
         newPage: async (cookies?: readonly { name: string; value: string; domain: string; path: string }[]) => {
           receivedCookies.push(cookies);
@@ -183,12 +185,25 @@ describe('Playwright explorer adapter (stub browser 契約検証)', () => {
     assert.notEqual(observation, null);
     assert.equal(observation?.title, 'Authed');
     assert.deepEqual(receivedCookies, [session.cookies]);
+    assert.deepEqual(preparedUrls, ['http://fixture.target.test']);
+
+    // 同じ login session / origin の後続ページでは ZAP session 解除を繰り返さない。
+    await adapter.observeWithSession('http://fixture.target.test/second', session);
+    assert.deepEqual(preparedUrls, ['http://fixture.target.test']);
+
+    // 新しい login session は同じ origin でも安全準備をやり直す。
+    const refreshedSession = {
+      cookies: [{ name: 'PHPSESSID', value: 'sid-2', domain: 'fixture.target.test', path: '/' }],
+    };
+    await adapter.observeWithSession('http://fixture.target.test/third', refreshedSession);
+    assert.deepEqual(preparedUrls, ['http://fixture.target.test', 'http://fixture.target.test']);
 
     // scope 外は session があっても送信前に拒否 (page を開かない)。
     receivedCookies.length = 0;
     const denied = await adapter.observeWithSession('http://elsewhere.example/authed', session);
     assert.equal(denied, null);
     assert.deepEqual(receivedCookies, []);
+    assert.deepEqual(preparedUrls, ['http://fixture.target.test', 'http://fixture.target.test']);
     await adapter.close();
   });
 });

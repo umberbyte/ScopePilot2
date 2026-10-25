@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { copyFile, lstat, mkdir, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, relative, resolve, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
-import type { AuthorizationRecord, CaseRecord } from '@scopepilot2/contracts';
+import type { AuthorizationRecord, CaseRecord, ReportModel } from '@scopepilot2/contracts';
+import type { RecoveredZapHttpEvidence, ZapHttpEvidenceLookup } from '@scopepilot2/adapters';
 import {
   AuthorizationRepository,
   AiInvocationRepository,
@@ -19,6 +19,16 @@ import {
   type WorkspaceInputSource,
   type WorkspaceSettings,
 } from '@scopepilot2/storage';
+import {
+  DEFAULT_REPORT_PROFILE,
+  appendAssuranceHttpEvidenceMarkdown,
+  buildAssuranceReport,
+  hasCompleteFindingHttpEvidence,
+  normalizeReportProfile,
+  renderAssuranceReport,
+  type ReportFindingNarrative,
+  type ReportProfile,
+} from './assurance-report.ts';
 
 export interface WorkspaceSettingsInput {
   readonly startUrl: string;
@@ -42,6 +52,7 @@ export interface ActivatedWorkspace {
   readonly existingAuthorization: AuthorizationRecord | null;
   readonly settings: WorkspaceSettings;
   readonly inputs: readonly WorkspaceInputSource[];
+  readonly reportProfile: ReportProfile;
 }
 
 export interface ActiveWorkspaceRepositories {
@@ -58,9 +69,25 @@ export interface ActiveWorkspaceRepositories {
 export interface SavedReportFiles {
   readonly markdownPath: string;
   readonly wordPath: string;
+  readonly structuredJsonPath: string;
 }
 
+export type ReportHttpEvidenceRecovery = (
+  lookups: readonly ZapHttpEvidenceLookup[],
+) => Promise<readonly (RecoveredZapHttpEvidence | null)[]>;
+
 const REQUIRED_DIRECTORIES = ['inputs', 'evidence/blobs', 'runs', 'exports', 'reports', 'backups', 'locks'] as const;
+
+async function readReportProfile(root: string): Promise<ReportProfile> {
+  const path = resolve(root, 'report-profile.json');
+  ensureChild(root, path);
+  try {
+    return normalizeReportProfile(JSON.parse(await readFile(path, 'utf8')) as unknown);
+  } catch (cause) {
+    if (cause instanceof Error && 'code' in cause && cause.code === 'ENOENT') return DEFAULT_REPORT_PROFILE;
+    throw new Error(`報告書プロファイルを読み込めません: ${String(cause)}`);
+  }
+}
 
 async function sha256File(path: string): Promise<string> {
   return await new Promise((resolveHash, reject) => {
@@ -136,6 +163,12 @@ async function importOne(root: string, repository: WorkspaceRepository, sourcePa
 export class DesktopWorkspaceManager {
   private active: ActiveWorkspaceRepositories | null = null;
   private activeDirectory: string | null = null;
+  private activeReportProfile: ReportProfile = DEFAULT_REPORT_PROFILE;
+  private readonly recoverHttpExchanges: ReportHttpEvidenceRecovery | undefined;
+
+  constructor(recoverHttpExchanges?: ReportHttpEvidenceRecovery) {
+    this.recoverHttpExchanges = recoverHttpExchanges;
+  }
 
   repositories(): ActiveWorkspaceRepositories | null {
     return this.active;
@@ -162,6 +195,7 @@ export class DesktopWorkspaceManager {
       if (entries.length > 0) {
         const knownWorkspaceEntries = new Set([
           'scopepilot.db', 'scopepilot.db-shm', 'scopepilot.db-wal',
+          'report-profile.json',
           ...REQUIRED_DIRECTORIES.map((entry) => entry.split('/')[0] ?? entry),
         ]);
         const hasDatabase = entries.includes('scopepilot.db');
@@ -224,6 +258,7 @@ export class DesktopWorkspaceManager {
       const previous = this.active;
       this.active = repositories;
       this.activeDirectory = root;
+      this.activeReportProfile = await readReportProfile(root);
       previous?.db.close();
       const existingCase = cases[0] ?? null;
       return {
@@ -233,6 +268,7 @@ export class DesktopWorkspaceManager {
         existingAuthorization: existingCase === null ? null : repositories.authorizations.latest(existingCase.caseId),
         settings,
         inputs: repositories.workspace.listInputs(),
+        reportProfile: this.activeReportProfile,
       };
     } catch (cause) {
       db.close();
@@ -272,6 +308,7 @@ export class DesktopWorkspaceManager {
       existingAuthorization: this.active.authorizations.latest(currentCase.caseId),
       settings,
       inputs: this.active.workspace.listInputs(),
+      reportProfile: this.activeReportProfile,
     };
   }
 
@@ -292,53 +329,106 @@ export class DesktopWorkspaceManager {
     return this.active.workspace.listInputs();
   }
 
-  async saveReport(content: string, modelHash: string): Promise<SavedReportFiles> {
+  async saveReport(
+    content: string,
+    modelHash: string,
+    reportId: string,
+    model: ReportModel,
+    requestedProfile: unknown,
+    findingNarratives: readonly ReportFindingNarrative[] = [],
+  ): Promise<SavedReportFiles> {
     if (this.activeDirectory === null || this.active === null) throw new Error('案件フォルダを先に開いてください');
     if (content.trim() === '') throw new Error('空の報告書は保存できません');
+    const profile = normalizeReportProfile(requestedProfile);
+    this.activeReportProfile = profile;
+    await writeFile(resolve(this.activeDirectory, 'report-profile.json'), `${JSON.stringify(profile, null, 2)}\n`, 'utf8');
+    const settings = this.active.workspace.getSettings();
+    if (settings === null) throw new Error('案件設定が見つかりません');
+    let storedEvidence = this.active.evidence.list();
+    const evidenceContents: Record<string, string> = Object.fromEntries(await Promise.all(storedEvidence.map(async (item) => [
+      item.evidenceId,
+      await this.active!.evidence.readText(item.evidenceId) ?? '',
+    ] as const)));
+    const recoveredRefs = new Map<string, string[]>();
+    for (const item of storedEvidence) {
+      const match = /^report-http-recovery:(.+)$/u.exec(item.label);
+      if (match?.[1] === undefined) continue;
+      const refs = recoveredRefs.get(match[1]) ?? [];
+      refs.push(item.evidenceId);
+      recoveredRefs.set(match[1], refs);
+    }
+    let reportFindings = model.findings.map((finding) => ({
+      ...finding,
+      evidenceRefs: [...new Set([...finding.evidenceRefs, ...(recoveredRefs.get(finding.findingId) ?? [])])],
+    }));
+    const missing = reportFindings.filter((finding) => !hasCompleteFindingHttpEvidence(finding, evidenceContents));
+    if (missing.length > 0 && this.recoverHttpExchanges !== undefined) {
+      let recovered: readonly (RecoveredZapHttpEvidence | null)[];
+      try {
+        recovered = await this.recoverHttpExchanges(missing.map((finding) => ({
+          ...(finding.enginePluginId === undefined ? {} : { pluginId: finding.enginePluginId }),
+          title: finding.title,
+          url: finding.url,
+          ...(finding.method === undefined ? {} : { method: finding.method }),
+          ...(finding.param === undefined ? {} : { param: finding.param }),
+        })));
+      } catch (cause) {
+        throw new Error(`旧診断のHTTP証跡をZAP履歴から回収できませんでした。ZAPを起動した状態で再度お試しください。${cause instanceof Error ? ` (${cause.message})` : ''}`);
+      }
+      for (let index = 0; index < missing.length; index += 1) {
+        const finding = missing[index]!;
+        const exchange = recovered[index];
+        if (exchange === null || exchange === undefined) continue;
+        const content = JSON.stringify({
+          recovery: { findingId: finding.findingId, recoveredAt: new Date().toISOString(), strategy: exchange.recoveryStrategy },
+          alerts: [exchange],
+        });
+        const evidence = await this.active.evidence.saveText(
+          `report-http-recovery:${finding.findingId}`,
+          content,
+          { mediaType: 'application/json', source: 'zap-history' },
+        );
+        evidenceContents[evidence.evidenceId] = content;
+        reportFindings = reportFindings.map((candidate) => candidate.findingId === finding.findingId
+          ? { ...candidate, evidenceRefs: [...new Set([...candidate.evidenceRefs, evidence.evidenceId])] }
+          : candidate);
+        this.active.findings.addEvidenceRef(model.caseId, finding.findingId, evidence.evidenceId);
+      }
+      storedEvidence = this.active.evidence.list();
+    }
+    const reportModel: ReportModel = { ...model, findings: reportFindings };
+    const structured = buildAssuranceReport({
+      reportId,
+      modelHash,
+      model: reportModel,
+      profile,
+      startUrl: settings.startUrl,
+      forbiddenActions: settings.forbiddenActions,
+      evidence: storedEvidence,
+      evidenceContents,
+      findingNarratives,
+    });
+    // HTTP 証跡の完全性ゲートを通過してから出力先を作る。失敗時に部分的な報告書を残さない。
     const reportDirectory = resolve(this.activeDirectory, 'reports');
     ensureChild(this.activeDirectory, reportDirectory);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const markdownPath = resolve(reportDirectory, `diagnostic-report-${stamp}.md`);
     const wordPath = resolve(reportDirectory, `diagnostic-report-${stamp}.docx`);
+    const structuredJsonPath = resolve(reportDirectory, `diagnostic-report-${stamp}.json`);
     ensureChild(this.activeDirectory, markdownPath);
     ensureChild(this.activeDirectory, wordPath);
-    await writeFile(markdownPath, content, 'utf8');
-
-    const children: Paragraph[] = [];
-    for (const line of content.replaceAll('\r\n', '\n').split('\n')) {
-      if (line.startsWith('### ')) {
-        children.push(new Paragraph({ text: line.slice(4), heading: HeadingLevel.HEADING_3 }));
-      } else if (line.startsWith('## ')) {
-        children.push(new Paragraph({ text: line.slice(3), heading: HeadingLevel.HEADING_2 }));
-      } else if (line.startsWith('# ')) {
-        children.push(new Paragraph({ text: line.slice(2), heading: HeadingLevel.HEADING_1 }));
-      } else if (line.startsWith('- ')) {
-        children.push(new Paragraph({ text: line.slice(2), bullet: { level: 0 } }));
-      } else {
-        children.push(new Paragraph({ children: [new TextRun(line)] }));
-      }
-    }
-    children.push(new Paragraph({
-      children: [new TextRun({ text: `ScopePilot report model hash: ${modelHash}`, color: '666666', size: 18 })],
-      spacing: { before: 240 },
-    }));
-    const document = new Document({
-      creator: 'ScopePilot2',
-      title: '脆弱性診断報告書',
-      description: 'ScopePilot2の検証済み報告モデルから生成した日本語Word報告書',
-      styles: {
-        default: { document: { run: { font: 'Yu Gothic', size: 22 } } },
-      },
-      sections: [{ properties: {}, children }],
-    });
-    await writeFile(wordPath, await Packer.toBuffer(document));
-    return { markdownPath, wordPath };
+    ensureChild(this.activeDirectory, structuredJsonPath);
+    await writeFile(markdownPath, appendAssuranceHttpEvidenceMarkdown(content, structured), 'utf8');
+    await writeFile(structuredJsonPath, `${JSON.stringify(structured, null, 2)}\n`, 'utf8');
+    await writeFile(wordPath, await renderAssuranceReport(structured));
+    return { markdownPath, wordPath, structuredJsonPath };
   }
 
   close(): void {
     this.active?.db.close();
     this.active = null;
     this.activeDirectory = null;
+    this.activeReportProfile = DEFAULT_REPORT_PROFILE;
   }
 }
 

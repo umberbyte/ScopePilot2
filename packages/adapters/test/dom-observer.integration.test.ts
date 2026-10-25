@@ -28,7 +28,8 @@ gated('PlaywrightDomObserver (real browser integration)', () => {
       });
       assert.ok(result.observations.some((event) => event.api === 'location.search' && event.marker === 'scopepilot-dom-marker'));
       assert.ok(result.observations.some((event) => event.api === 'innerHTML' && event.marker === 'scopepilot-dom-marker'));
-      assert.deepEqual(result.nodes, [], 'raw DOM text is not exported by the initial real path');
+      assert.ok(result.nodes.some((node) => node.text === '[coverage:dom-text-classification]' && !node.looksLikePii));
+      assert.equal(result.nodes.some((node) => node.text.includes('scopepilot-dom-marker')), false, 'raw DOM text is never exported');
       assert.equal(outOfScopeRequests, 0, 'out-of-scope subresources are aborted before network send');
     } finally {
       target.server.close();

@@ -8,13 +8,16 @@ import { readFile, stat } from 'node:fs/promises';
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { BaselineFlowService, createCoreApiServer, InMemoryEvidenceStore, SequentialIdGenerator, SystemClock } from '@scopepilot2/core';
 import { composeEngines } from '@scopepilot2/adapters';
-import type { OperatorProfile } from '@scopepilot2/contracts';
+import type { OperatorProfile, ReportModel } from '@scopepilot2/contracts';
 import type { RunRepository } from '@scopepilot2/storage';
 import { DesktopWorkspaceManager, type WorkspaceOpenMode, type WorkspaceSettingsInput, type WorkspaceSettingsUpdateInput } from './workspace.ts';
-import { DesktopAiAssistant } from './ai-assistant.ts';
+import { DesktopAiAssistant, type AiReportFindingInput } from './ai-assistant.ts';
+import type { ReportFindingNarrative } from './assurance-report.ts';
+import { observeLoginPage } from './login-page-observer.ts';
 import { AiAuthService } from './ai-auth.ts';
 import { AiCatalogService } from './ai-catalog.ts';
 import { RuntimeSettingsStore } from './runtime-settings.ts';
+import { presentActivatedWorkspace } from './workspace-presentation.ts';
 import { AiCliLaunchModeValues, AiCliProviders, RuntimeToolIds, type AiCliLaunchModes, type AiCliProvider, type AppAiSelection, type RuntimeSettingsInput, type RuntimeToolId } from '../shared/runtime-settings.ts';
 
 let window: BrowserWindow | null = null;
@@ -114,17 +117,7 @@ function registerDesktopPathHandlers(
     rememberPath(activated.dbPath);
     for (const input of activated.inputs) rememberPath(join(activated.directory, input.relativePath));
     await activateService(activated);
-    return {
-      directory: activated.directory,
-      dbPath: activated.dbPath,
-      existingCase: activated.existingCase,
-      settings: activated.settings,
-      inputs: activated.inputs.map((input) => ({
-        ...input,
-        path: join(activated.directory, input.relativePath),
-        name: input.originalName,
-      })),
-    };
+    return presentActivatedWorkspace(activated);
   });
 
   ipcMain.handle('scopepilot:save-case-workspace-settings', async (_event, request: unknown) => {
@@ -170,13 +163,28 @@ function registerDesktopPathHandlers(
 
   ipcMain.handle('scopepilot:save-report', async (_event, request: unknown) => {
     if (typeof request !== 'object' || request === null) throw new Error('報告書の入力が不正です');
-    const value = request as { content?: unknown; modelHash?: unknown };
-    if (typeof value.content !== 'string' || typeof value.modelHash !== 'string' || value.modelHash.trim() === '') {
+    const value = request as { content?: unknown; modelHash?: unknown; reportId?: unknown; model?: unknown; profile?: unknown; findingNarratives?: unknown };
+    const model = value.model as Partial<ReportModel> | undefined;
+    if (typeof value.content !== 'string' || typeof value.modelHash !== 'string' || value.modelHash.trim() === ''
+      || typeof value.reportId !== 'string' || value.reportId.trim() === ''
+      || model === undefined || typeof model.caseId !== 'string' || typeof model.generatedAt !== 'string'
+      || !Array.isArray(model.findings) || typeof model.assessmentScope !== 'object' || model.assessmentScope === null) {
       throw new Error('報告書本文またはmodel hashが不正です');
     }
-    const saved = await workspaceManager.saveReport(value.content, value.modelHash);
+    const findingNarratives = Array.isArray(value.findingNarratives)
+      ? value.findingNarratives.filter((entry): entry is ReportFindingNarrative => {
+          if (typeof entry !== 'object' || entry === null) return false;
+          const item = entry as Partial<ReportFindingNarrative>;
+          return typeof item.findingId === 'string' && typeof item.summary === 'string'
+            && typeof item.conditions === 'string' && typeof item.cause === 'string' && Array.isArray(item.reproductionSteps)
+            && item.reproductionSteps.every((step) => typeof step === 'string')
+            && typeof item.remediation === 'string' && typeof item.verificationCriteria === 'string';
+        })
+      : [];
+    const saved = await workspaceManager.saveReport(value.content, value.modelHash, value.reportId, model as ReportModel, value.profile, findingNarratives);
     rememberPath(saved.markdownPath);
     rememberPath(saved.wordPath);
+    rememberPath(saved.structuredJsonPath);
     return saved;
   });
 
@@ -205,6 +213,27 @@ function registerDesktopPathHandlers(
   };
 
   ipcMain.handle('scopepilot:analyze-materials', async () => await aiAssistant().analyzeDocuments());
+
+  ipcMain.handle('scopepilot:infer-login-form', async (_event, request: unknown) => {
+    if (typeof request !== 'object' || request === null) throw new Error('ログインフォーム推定の入力が不正です。');
+    const value = request as { loginUrl?: unknown };
+    if (typeof value.loginUrl !== 'string' || value.loginUrl.trim() === '' || value.loginUrl.length > 2_000) {
+      throw new Error('推定するログインURLを入力してください。');
+    }
+    const repositories = workspaceManager.repositories();
+    if (repositories === null) throw new Error('案件フォルダーを先に開いてください。');
+    const settings = repositories.workspace.getSettings();
+    if (settings === null) throw new Error('案件の設定がありません。');
+    const existingCase = repositories.cases.list()[0];
+    let fallbackOrigins: string[] = [];
+    try { fallbackOrigins = [new URL(settings.startUrl).origin]; } catch { /* 保存時に検証済み */ }
+    const allowedOrigins = [...new Set([
+      ...(existingCase?.scope.allowedOrigins ?? fallbackOrigins),
+      ...settings.supportingOrigins,
+    ])];
+    const snapshot = await observeLoginPage(value.loginUrl.trim(), allowedOrigins);
+    return await aiAssistant().inferLoginForm(snapshot);
+  });
 
   ipcMain.handle('scopepilot:plan-post-login-actions', async (_event, request: unknown) => {
     if (typeof request !== 'object' || request === null) throw new Error('ログイン後の事前操作が不正です');
@@ -266,12 +295,20 @@ function registerDesktopPathHandlers(
 
   ipcMain.handle('scopepilot:generate-ai-report', async (_event, request: unknown) => {
     if (typeof request !== 'object' || request === null) throw new Error('AI報告書の入力が不正です');
-    const value = request as { baseContent?: unknown; baseModelHash?: unknown; guidelines?: unknown };
+    const value = request as { baseContent?: unknown; baseModelHash?: unknown; guidelines?: unknown; findings?: unknown };
     if (typeof value.baseContent !== 'string' || typeof value.baseModelHash !== 'string'
-      || !Array.isArray(value.guidelines) || !value.guidelines.every((item) => typeof item === 'string')) {
+      || !Array.isArray(value.guidelines) || !value.guidelines.every((item) => typeof item === 'string')
+      || !Array.isArray(value.findings)) {
       throw new Error('AI報告書の入力形式が不正です');
     }
-    return await aiAssistant().draftReport(value.baseContent, value.baseModelHash, value.guidelines);
+    const findings = value.findings.filter((entry): entry is AiReportFindingInput => {
+      if (typeof entry !== 'object' || entry === null) return false;
+      const item = entry as Partial<AiReportFindingInput>;
+      return typeof item.findingId === 'string' && typeof item.title === 'string' && typeof item.url === 'string'
+        && typeof item.method === 'string' && typeof item.parameter === 'string';
+    });
+    if (findings.length !== value.findings.length) throw new Error('AI報告書の所見入力形式が不正です');
+    return await aiAssistant().draftReport(value.baseContent, value.baseModelHash, value.guidelines, findings);
   });
 }
 
@@ -504,7 +541,7 @@ async function bootstrap(): Promise<void> {
     listInterruptedCandidates: () => activeRuns?.listInterruptedCandidates() ?? [],
     markInterrupted: () => activeRuns?.markInterrupted() ?? [],
   };
-  const workspaceManager = new DesktopWorkspaceManager();
+  const workspaceManager = new DesktopWorkspaceManager(engines.recoverHttpExchanges);
   registerDesktopPathHandlers(workspaceManager, runtimeSettings, async (workspace) => {
     const repositories = workspaceManager.repositories();
     if (repositories === null) throw new Error('案件DBを開けませんでした');

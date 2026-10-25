@@ -147,6 +147,8 @@ export interface BootstrapOptions {
   readonly loginProxyServer?: string;
   /** explorer 差替え (session 対応 explorer の検証用)。 */
   readonly explorer?: import('../../../src/ports/engines.ts').ExplorationPort;
+  /** Repeater 実 transport 経路の検証用 fake。 */
+  readonly repeaterTransport?: import('../../../src/ports/engines.ts').RepeaterTransportPort;
   /** Fuzzer 実 transport 経路の検証用 fake。 */
   readonly fuzzTransport?: import('../../../src/ports/engines.ts').FuzzTransportPort;
   /** Sequencer 実 transport 経路の検証用 fake。 */
@@ -170,7 +172,7 @@ export interface TestFlow {
 
 /** 案件作成前の状態から使える service を組み立てる。 */
 export function createTestService(
-  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'loginProxyServer' | 'explorer' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver' | 'interactiveBrowser' | 'nucleiRunner'> & {
+  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'loginProxyServer' | 'explorer' | 'repeaterTransport' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver' | 'interactiveBrowser' | 'nucleiRunner'> & {
     runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
     caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
   } = {},
@@ -187,6 +189,7 @@ export function createTestService(
     runtimeBundleHash: 'test-runtime-bundle',
     ...(options.loginExecutor === undefined ? {} : { loginExecutor: options.loginExecutor }),
     ...(options.loginProxyServer === undefined ? {} : { loginProxyServer: options.loginProxyServer }),
+    ...(options.repeaterTransport === undefined ? {} : { repeaterTransport: options.repeaterTransport }),
     ...(options.fuzzTransport === undefined ? {} : { fuzzTransport: options.fuzzTransport }),
     ...(options.sequencerTransport === undefined ? {} : { sequencerTransport: options.sequencerTransport }),
     ...(options.oastProvider === undefined ? {} : { oastProvider: options.oastProvider }),

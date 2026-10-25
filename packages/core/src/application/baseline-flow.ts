@@ -67,9 +67,65 @@ import {
   type ComparisonOutcome,
 } from '../domain/business-logic.ts';
 import {
+  derivePasswordVariant,
+  judgeLoginVariant,
+  judgePageProbe,
+  planAuthBypassCheck,
+  sessionCookiesForPattern,
+  summarizeAuthBypassOutcomes,
+  type AuthBypassCheckListItem,
+  type AuthBypassCheckRecord,
+  type AuthBypassCheckSummary,
+  type AuthBypassPagePattern,
+  type AuthBypassProbeOutcome,
+  type AuthBypassProbeResult,
+} from '../domain/auth-bypass.ts';
+import {
+  DEFAULT_CREDENTIAL_PAIRS_MAX,
+  INPUT_ROBUSTNESS_MAX_VALUES,
+  INPUT_ROBUSTNESS_PAYLOADS,
+  PASSWORD_POLICY_CONTROL,
+  RESET_TOKEN_PATTERNS,
+  WEAK_PASSWORD_CANDIDATES,
+  assertRequestBudget,
+  countNucleiMatches,
+  findMixedContent,
+  findSerializationSignature,
+  findSensitiveUrlParamNames,
+  forgeResetToken,
+  judgeCorsPreflight,
+  judgeCorsResponse,
+  judgeInputRobustness,
+  judgeIdorAccess,
+  judgeLockout,
+  judgeMassAssignment,
+  judgeNucleiSpot,
+  judgePasswordEcho,
+  judgePiiExposure,
+  judgePlainHttp,
+  judgeReplay,
+  judgeSensitiveCache,
+  judgeUserEnumeration,
+  mergeJsonFields,
+  normalizeEnumerationResponse,
+  parseDefaultCredentialPairs,
+  parseExtraFieldsJson,
+  planIdorProbes,
+  planLockoutSequence,
+  planReplayCount,
+  requireImplementedTheme,
+  summarizeThemeOutcomes,
+  substituteObjectParam,
+  validateSpotTemplateIds,
+  type ThemeCheckProbeResult,
+  type ThemeCheckSummary,
+  type ZapUnsupportedThemeNo,
+} from '../domain/zap-unsupported.ts';
+import {
   RoleSessionRegistry,
   SessionCoordinator,
   checkFlowDeadline,
+  detectAuthState,
   validateLoginFlow,
   vaultEvidenceProjection,
   type LoginFlowStep,
@@ -344,6 +400,12 @@ export class BaselineFlowService {
   /** 業務ロジック検証の実行履歴 (design/f17)。 */
   private readonly businessChecks: readonly { checkId: string; roles: readonly string[]; targetUrl: string; status: string; comparison: string; restore: string; executedAt: string }[] = [];
 
+  /** ZAP非対応テーマ代替検証の実行履歴 (Excel「ZAP非対応項目と代替検証手段」)。 */
+  private readonly authBypassChecks: readonly AuthBypassCheckRecord[] = [];
+
+  /** テーマ2以降の代替検証実行履歴 (テーマ1は authBypassChecks)。 */
+  private readonly zapUnsupportedChecks: readonly { checkId: string; themeNo: string; role: string | null; status: 'pass' | 'fail' | 'inconclusive'; totalRequests: number; skipped?: readonly string[]; executedAt: string }[] = [];
+
   /** 認証・session 管理 (design/f09)。secret 値は参照のみ保持し、値は受け付けない。 */
   private readonly loginFlows = new Map<string, { flowVersion: string; steps: readonly LoginFlowStep[]; secretReferences: readonly string[] }>();
   private readonly roleRegistry = new RoleSessionRegistry();
@@ -419,6 +481,13 @@ export class BaselineFlowService {
   }>();
   private exploredUrlCount = 0;
   private scannedUrlCount = 0;
+  private latestCandidates: readonly ScanCandidate[] = [];
+  private adoptedCandidateUrls = new Set<string>();
+  private scannedUrls = new Set<string>();
+  private assessmentStartedAt: string | undefined;
+  private assessmentEndedAt: string | undefined;
+  private authenticationRole: string | null = null;
+  private latestDiagnosticRoutes: readonly DiagnosticRouteResult[] = [];
   private delegatedSteps: {
     readonly stepId: string;
     readonly engineKind: 'zap' | 'nuclei';
@@ -866,6 +935,718 @@ export class BaselineFlowService {
     return [...this.businessChecks];
   }
 
+  /**
+   * ZAP非対応テーマ1「認証回避・強制ブラウジング」の代替検証 (作業用 Excel
+   * 「ZAP非対応項目と代替検証手段」No.1、IPA手順「認証回避」相当)。
+   * runLogin 済み role の session を使い、認証用 cookie の書き換え (空値・削除)・
+   * 未認証での直接アクセス・password 書き換え再ログインの応答を観測する。
+   * cookie 値・秘密値・応答本文は監査・応答へ出さない (marker は transient に判定)。
+   */
+  async runAuthBypassCheck(
+    operator: OperatorProfile,
+    input: {
+      readonly role: string;
+      readonly targetUrls?: readonly string[];
+      readonly authCookieNames?: readonly string[];
+      readonly includeLoginVariants?: boolean;
+      readonly secretValues?: Readonly<Record<string, string>>;
+      readonly loginBaseUrl?: string;
+    },
+  ): Promise<AuthBypassCheckSummary> {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const authorization = this.currentAuthorization();
+    if (!authorization.allowedOperationClasses.includes('ActiveScan')) {
+      throw domainError('OutOfScope', 'authorization does not allow ActiveScan for this case');
+    }
+    const session = this.roleSessionCookies.get(input.role);
+    if (session === undefined) {
+      throw domainError('ValidationFailed', `no authenticated session for role '${input.role}'; run login first`);
+    }
+    const targetUrls = input.targetUrls === undefined || input.targetUrls.length === 0
+      ? (session.verificationUrl === undefined ? [] : [session.verificationUrl])
+      : input.targetUrls;
+    for (const target of targetUrls) {
+      if (!businessTargetInScope(target, caseRecord.scope)) {
+        throw domainError('OutOfScope', `auth bypass target is out of scope: ${target}`);
+      }
+    }
+    const includeLoginVariants = input.includeLoginVariants === true;
+    const plan = planAuthBypassCheck({ targetUrls, includeLoginVariants });
+    if (plan.totalRequests > caseRecord.scope.limits.maxRequests) {
+      throw domainError('ValidationFailed', `auth bypass check needs ${plan.totalRequests} requests which exceeds the case limit ${caseRecord.scope.limits.maxRequests}`);
+    }
+    if (this.deps.interactiveBrowser === undefined) {
+      throw domainError('CapabilityUnavailable', 'interactive browser is not configured for this service');
+    }
+    // Excel 注意欄どおり、書き換え対象は利用者が事前に特定した認証用 cookie に限る。
+    // 全 cookie を暗黙に対象にすると、認証回避ではなくセッション破壊を観測してしまう。
+    const requestedCookieNames = (input.authCookieNames ?? []).map((name) => name.trim()).filter((name) => name !== '');
+    if (requestedCookieNames.length === 0) {
+      throw domainError('NeedsInput', 'theme 1 requires explicitly identified authentication cookie names');
+    }
+    const sessionCookieNames = new Set(session.cookies.map((cookie) => cookie.name));
+    const unknownCookieNames = requestedCookieNames.filter((name) => !sessionCookieNames.has(name));
+    if (unknownCookieNames.length > 0) {
+      throw domainError('ValidationFailed', `authentication cookie names are not present in the selected session: ${unknownCookieNames.join(', ')}`);
+    }
+    const authCookieNames = new Set(requestedCookieNames);
+    const markers = session.verificationMarkers ?? [];
+    const containsMarker = (bodyText: string): boolean => markers.some((marker) => bodyText.includes(marker));
+
+    // 観測 → 判定の 2 段階で使うため、判定結果だけ mutable に持つ。
+    const probes: (Omit<AuthBypassProbeResult, 'outcome'> & { outcome: AuthBypassProbeOutcome | null })[] = [];
+    const runPageProbe = async (targetUrl: string, pattern: AuthBypassPagePattern): Promise<void> => {
+      const canonical = ScopePolicy.canonicalUrl(targetUrl);
+      const cookies = sessionCookiesForPattern(applicableSessionCookies([...session.cookies], canonical), pattern, authCookieNames);
+      const response = await this.deps.interactiveBrowser!.execute({
+        targetUrl: canonical,
+        scope: caseRecord.scope,
+        steps: [{ kind: 'navigate', target: canonical }],
+        ...(cookies === undefined ? {} : { sessionCookies: cookies }),
+      });
+      probes.push({
+        kind: 'page',
+        pattern,
+        targetUrl: canonical,
+        status: response.status,
+        finalUrl: response.finalUrl,
+        bodyHash: response.bodyHash,
+        outcome: null,
+        markersFound: markers.length === 0 ? null : containsMarker(response.bodyText),
+      });
+    };
+    for (const targetUrl of plan.targetUrls) {
+      await runPageProbe(targetUrl, 'session-baseline');
+    }
+    // baseline で認証後コンテンツを確認できた target だけ変種を送る (未確認 target は無駄打ちしない)。
+    const baselineByTarget = new Map(plan.targetUrls.map((targetUrl) => {
+      const canonical = ScopePolicy.canonicalUrl(targetUrl);
+      return [canonical, probes.find((probe) => probe.pattern === 'session-baseline' && probe.targetUrl === canonical)];
+    }));
+    for (const targetUrl of plan.targetUrls) {
+      const canonical = ScopePolicy.canonicalUrl(targetUrl);
+      const baseline = baselineByTarget.get(canonical);
+      if (baseline === undefined || baseline.markersFound === false) {
+        continue;
+      }
+      for (const pattern of ['auth-cookie-emptied', 'auth-cookie-removed', 'no-session'] as const) {
+        await runPageProbe(targetUrl, pattern);
+      }
+    }
+    // 判定は観測の後で一括して行う (baseline と変種の hash・marker を比較するため)。
+    for (const probe of probes) {
+      if (probe.pattern === 'session-baseline') {
+        // baseline は判定対象ではなく参照観測。認証後コンテンツ未確認の場合だけ記録する。
+        probe.outcome = probe.markersFound === false ? 'inconclusive' : null;
+        continue;
+      }
+      const baseline = baselineByTarget.get(probe.targetUrl);
+      if (baseline === undefined) {
+        probe.outcome = 'inconclusive';
+        continue;
+      }
+      probe.outcome = judgePageProbe({
+        markers,
+        baseline: { status: baseline.status, bodyHash: baseline.bodyHash, markersFound: baseline.markersFound === true },
+        variant: { status: probe.status, finalUrl: probe.finalUrl, targetUrl: probe.targetUrl, bodyHash: probe.bodyHash, markersFound: probe.markersFound === true },
+      });
+    }
+
+    // IPA手順 ③: ログイン要求の password 書き換え。秘密値はこの実行の間だけ使う。
+    const loginVariantsNotRun: string[] = [];
+    if (includeLoginVariants) {
+      const flow = this.loginFlows.get(input.role);
+      const executor = this.deps.loginExecutor;
+      if (flow === undefined || executor === undefined || input.secretValues === undefined) {
+        loginVariantsNotRun.push(...plan.loginPatterns);
+      } else {
+        const passwordReference = input.secretValues.password !== undefined && flow.secretReferences.includes('password')
+          ? 'password'
+          : flow.secretReferences.find((reference) => flow.steps.some((step) => step.kind === 'fill' && step.secretReference === reference));
+        if (passwordReference === undefined || input.secretValues[passwordReference] === undefined) {
+          throw domainError('NeedsInput', `secret value for reference '${String(passwordReference)}' was not provided for login variants`);
+        }
+        const loginBaseUrl = input.loginBaseUrl ?? session.expectedUrlPrefix ?? new URL(plan.targetUrls[0]!).origin;
+        for (const pattern of plan.loginPatterns) {
+          const variantSecrets: Record<string, string> = { ...input.secretValues };
+          let steps = flow.steps;
+          if (pattern === 'password-omitted') {
+            steps = steps.filter((step) => !(step.kind === 'fill' && step.secretReference === passwordReference));
+          } else {
+            variantSecrets[passwordReference] = derivePasswordVariant(pattern, input.secretValues[passwordReference]!);
+          }
+          const result = await executor.execute({
+            baseUrl: loginBaseUrl,
+            steps,
+            secretValues: variantSecrets,
+            expectedUrlPrefix: session.expectedUrlPrefix ?? loginBaseUrl,
+          });
+          probes.push({
+            kind: 'login',
+            pattern,
+            targetUrl: loginBaseUrl,
+            status: null,
+            finalUrl: result.finalUrl,
+            bodyHash: '',
+            outcome: judgeLoginVariant(result.authenticated),
+            markersFound: null,
+          });
+        }
+      }
+    }
+
+    const judged = probes.filter((probe) => probe.outcome !== null);
+    const summary = summarizeAuthBypassOutcomes(judged.map((probe) => probe.outcome!));
+    const checkId = this.deps.ids.next('authbypass');
+    const record: AuthBypassCheckRecord = {
+      checkId,
+      themeNo: '1',
+      role: input.role,
+      status: summary.status,
+      totalRequests: probes.length,
+      loginVariantsNotRun,
+      executedAt: this.deps.clock.now().toISOString(),
+    };
+    (this.authBypassChecks as AuthBypassCheckRecord[]).push(record);
+    // 監査記録: cookie 名・marker 名・応答の status/hash のみ。値も本文も含めない。
+    await this.deps.evidence.saveText(`auth-bypass:${checkId}`, canonicalJson({
+      checkId,
+      themeNo: record.themeNo,
+      role: input.role,
+      authCookieNames: [...authCookieNames],
+      markers,
+      results: probes.map((probe) => ({
+        kind: probe.kind,
+        pattern: probe.pattern,
+        targetUrl: probe.targetUrl,
+        status: probe.status,
+        finalUrl: probe.finalUrl,
+        bodyHash: probe.bodyHash,
+        outcome: probe.outcome,
+      })),
+      status: summary.status,
+    }), { targetUrl: plan.targetUrls[0] ?? '', kind: 'auth-bypass' });
+    this.record({ type: 'AuthBypassCheckCompleted', at: record.executedAt, checkId, role: input.role, status: summary.status });
+    return { ...record, results: probes };
+  }
+
+  listAuthBypassChecks(): readonly AuthBypassCheckListItem[] {
+    return [...this.authBypassChecks];
+  }
+
+  /**
+   * ZAP非対応テーマ代替検証 (テーマ2以降の Top10 対象分)。テーマごとの handler が
+   * 既存 port (browser・login 実行器・repeater transport・fuzz transport・DOM 観測・
+   * nuclei) を使い、判定は domain の純関数に任せる。cookie 値・秘密値・応答本文は
+   * 監査・応答へ出さない (本文の検査は transient、記録は hash・件数のみ)。
+   */
+  async runZapUnsupportedCheck(
+    operator: OperatorProfile,
+    input: {
+      readonly themeNo: string;
+      readonly role?: string;
+      readonly targetUrls?: readonly string[];
+      readonly params?: Readonly<Record<string, string>>;
+      readonly secretValues?: Readonly<Record<string, string>>;
+    },
+  ): Promise<ThemeCheckSummary> {
+    this.requirePermission(operator, 'run.manage');
+    const themeNo = requireImplementedTheme(input.themeNo);
+    if (themeNo === '1') {
+      // テーマ1は専用 route (POST /api/auth-bypass/checks) を使う。
+      throw domainError('ValidationFailed', 'theme 1 uses POST /api/auth-bypass/checks');
+    }
+    const caseRecord = this.currentCase();
+    const authorization = this.currentAuthorization();
+    if (!authorization.allowedOperationClasses.includes('ActiveScan')) {
+      throw domainError('OutOfScope', 'authorization does not allow ActiveScan for this case');
+    }
+    const targets = (input.targetUrls ?? []).map((url) => url.trim()).filter((url) => url !== '');
+    for (const target of targets) {
+      if (!businessTargetInScope(target, caseRecord.scope)) {
+        throw domainError('OutOfScope', `theme ${themeNo} target is out of scope: ${target}`);
+      }
+    }
+    const params = input.params ?? {};
+    const secrets = input.secretValues ?? {};
+    const requireSession = (): { role: string; cookies: readonly LoginSessionCookie[]; markers: readonly string[] } => {
+      const role = input.role ?? '';
+      const session = this.roleSessionCookies.get(role);
+      if (session === undefined) {
+        throw domainError('ValidationFailed', `no authenticated session for role '${role}'; run login first`);
+      }
+      return { role, cookies: session.cookies, markers: session.verificationMarkers ?? [] };
+    };
+    const requireFlow = (role: string | undefined): { steps: readonly LoginFlowStep[]; markers: readonly string[] } => {
+      const flow = this.loginFlows.get(role ?? '');
+      if (flow === undefined) {
+        throw domainError('ValidationFailed', `login flow for '${role ?? ''}' is not registered`);
+      }
+      return { steps: flow.steps, markers: flow.steps.flatMap((step) => step.kind === 'assert' && step.target !== undefined ? [step.target] : []) };
+    };
+    const browser = () => {
+      if (this.deps.interactiveBrowser === undefined) throw domainError('CapabilityUnavailable', 'interactive browser is not configured for this service');
+      return this.deps.interactiveBrowser;
+    };
+    const repeater = () => {
+      if (this.deps.repeaterTransport === undefined) throw domainError('CapabilityUnavailable', 'repeater transport is not configured for this service');
+      return this.deps.repeaterTransport;
+    };
+    const probes: (Omit<ThemeCheckProbeResult, 'outcome'> & { outcome: AuthBypassProbeOutcome | null })[] = [];
+    let skipped: string[] = [];
+    const requestBudget = (planned: number): void => assertRequestBudget(planned, caseRecord.scope.limits.maxRequests, themeNo);
+
+    /** f09 の flow DSL を browser DSL へ解決する (fill の値はこの呼出の間だけ使う)。 */
+    const translateFlow = (steps: readonly LoginFlowStep[], secretValues: Readonly<Record<string, string>>, baseUrl: string): InteractiveBrowserStep[] => {
+      const resolveTarget = (target: string): string => target.startsWith('http://') || target.startsWith('https://') ? target : `${new URL(baseUrl).origin}/${target.replace(/^\/+/, '')}`;
+      return steps.map((step): InteractiveBrowserStep => {
+        if (step.kind === 'navigate') return { kind: 'navigate', target: resolveTarget(step.target ?? baseUrl) };
+        if (step.kind === 'fill') {
+          const value = secretValues[step.secretReference ?? ''];
+          if (value === undefined) {
+            throw domainError('NeedsInput', `secret value for reference '${step.secretReference ?? ''}' was not provided`);
+          }
+          return { kind: 'fill', target: step.target ?? '', value };
+        }
+        if (step.kind === 'select' || step.kind === 'assertValue') return { kind: step.kind, target: step.target ?? '', value: step.value ?? '' };
+        if (step.kind === 'extract') {
+          throw domainError('ValidationFailed', 'extract step is not supported by the interactive browser DSL');
+        }
+        return { kind: step.kind, target: step.target ?? '' };
+      });
+    };
+    const runFlow = async (pattern: string, targetUrl: string, steps: readonly LoginFlowStep[], secretValues: Readonly<Record<string, string>>): Promise<{ status: number | null; finalUrl: string; bodyHash: string; comparisonHash: string; elapsedMs: number; assertionsPassed: boolean; echoedSecretReferences: readonly string[] }> => {
+      const response = await browser().execute({ targetUrl: ScopePolicy.canonicalUrl(targetUrl), scope: caseRecord.scope, steps: translateFlow(steps, secretValues, targetUrl) });
+      const assertionsPassed = response.assertions.every((assertion) => assertion.passed);
+      // 応答への値の露出は「この実行で渡した値」だけで判定する。'password' は画面に
+      // 出る語であり誤検知になるため除外する (Excel: パスワードが応答に含まれる)。
+      const echoedSecretReferences = Object.entries(secretValues)
+        .filter(([, value]) => value !== '' && value !== 'password' && response.bodyText.includes(value))
+        .map(([reference]) => reference);
+      const comparisonHash = hashStable('scopepilot2.theme.response-comparison', { body: normalizeEnumerationResponse(response.bodyText) });
+      return { status: response.status, finalUrl: response.finalUrl, bodyHash: response.bodyHash, comparisonHash, elapsedMs: response.elapsedMs, assertionsPassed, echoedSecretReferences };
+    };
+    const rawRequest = (method: string, targetUrl: string, headers: readonly (readonly [string, string])[], body: string): string => {
+      const parsed = new URL(targetUrl);
+      return `${method.toUpperCase()} ${parsed.pathname}${parsed.search} HTTP/1.1\nHost: ${parsed.host}\n${headers.map(([name, value]) => `${name}: ${value}`).join('\n')}\n\n${body}`;
+    };
+    const headerValue = (headers: readonly (readonly [string, string])[], name: string): string | null => {
+      const found = headers.find(([headerName]) => headerName.toLocaleLowerCase() === name.toLocaleLowerCase());
+      return found === undefined ? null : found[1];
+    };
+
+    switch (themeNo) {
+      case '2': {
+        // 既定アカウント・既定資格: 文書由来の少数組を login 形式で試行 (辞書攻撃ではない)。
+        const role = input.role ?? '';
+        const flow = requireFlow(role);
+        const session = this.roleSessionCookies.get(role);
+        const expectedUrlPrefix = params.expectedUrlPrefix ?? session?.expectedUrlPrefix ?? new URL(targets[0] ?? 'http://fixture.invalid/').origin;
+        const pairs = parseDefaultCredentialPairs((params.defaultPairs ?? '').split('\n'));
+        requestBudget(pairs.length);
+        const usernameRef = params.usernameReference ?? 'username';
+        const passwordRef = params.passwordReference ?? 'password';
+        for (const pair of pairs) {
+          const run = await runFlow(`default-credential:${pair.username}`, expectedUrlPrefix, flow.steps, { [usernameRef]: pair.username, [passwordRef]: pair.password });
+          const authenticated = detectAuthState({ expectedUrlPrefix, finalUrl: run.finalUrl, assertResult: run.assertionsPassed });
+          probes.push({ kind: 'flow', pattern: `default-credential:${pair.username}`, targetUrl: expectedUrlPrefix, status: run.status, finalUrl: run.finalUrl, bodyHash: run.bodyHash, outcome: authenticated === 'authenticated' ? 'exposed' : 'denied' });
+        }
+        break;
+      }
+      case '3': {
+        // パスワードポリシー: IPA検出パターンの弱い値の受理と、応答への露出 (表示)。
+        const steps = JSON.parse(params.steps ?? '[]') as LoginFlowStep[];
+        validateLoginFlow(steps);
+        const fieldReference = params.fieldReference ?? '';
+        if (fieldReference.trim() === '') {
+          throw domainError('ValidationFailed', 'theme 3 requires fieldReference (the secret reference of the new password field)');
+        }
+        const baseUrl = targets[0];
+        if (baseUrl === undefined) throw domainError('ValidationFailed', 'theme 3 requires a target URL (flow base)');
+        const usernameReference = params.usernameReference ?? 'username';
+        const usernameCandidate = secrets[usernameReference];
+        const candidates: readonly { label: string; value: string; expected: 'reject' | 'accept-control' }[] = [
+          ...WEAK_PASSWORD_CANDIDATES.map((value) => ({ label: value === '' ? '(empty)' : value, value, expected: 'reject' as const })),
+          ...(usernameCandidate === undefined ? [] : [{ label: '(same-as-username)', value: usernameCandidate, expected: 'reject' as const }]),
+          { label: '(IPA-acceptance-control)', value: PASSWORD_POLICY_CONTROL, expected: 'accept-control' as const },
+        ];
+        requestBudget(candidates.length);
+        let echoOutcome: AuthBypassProbeOutcome | null = null;
+        for (const candidate of candidates) {
+          const run = await runFlow(`password-policy:${candidate.label}`, baseUrl, steps, { ...secrets, [fieldReference]: candidate.value });
+          const outcome: AuthBypassProbeOutcome | null = candidate.expected === 'reject'
+            ? (run.assertionsPassed ? 'exposed' : 'denied')
+            : (run.assertionsPassed ? null : 'inconclusive');
+          probes.push({ kind: 'flow', pattern: `password-policy:${candidate.label}`, targetUrl: ScopePolicy.canonicalUrl(baseUrl), status: run.status, finalUrl: run.finalUrl, bodyHash: run.bodyHash, outcome });
+          if (run.echoedSecretReferences.includes(fieldReference)) {
+            echoOutcome = judgePasswordEcho(true);
+          }
+        }
+        if (echoOutcome !== null) {
+          probes.push({ kind: 'browser', pattern: 'password-echo-in-response', targetUrl: ScopePolicy.canonicalUrl(baseUrl), status: null, finalUrl: '', bodyHash: '', outcome: echoOutcome });
+        }
+        skipped = ['reversible-storage verification (requires storage/configuration review)', 'password-change side-effect restoration must be confirmed for the diagnostic account'];
+        break;
+      }
+      case '4': {
+        // パスワードリセット: 無効 token (空・forge・省略) で再設定が成立しないこと。
+        const steps = JSON.parse(params.steps ?? '[]') as LoginFlowStep[];
+        validateLoginFlow(steps);
+        const fieldReference = params.fieldReference ?? '';
+        if (fieldReference.trim() === '') {
+          throw domainError('ValidationFailed', 'theme 4 requires fieldReference (the secret reference of the reset token field)');
+        }
+        const baseUrl = targets[0];
+        if (baseUrl === undefined) throw domainError('ValidationFailed', 'theme 4 requires a target URL (flow base)');
+        requestBudget(RESET_TOKEN_PATTERNS.length);
+        for (const pattern of RESET_TOKEN_PATTERNS) {
+          const variantSteps = pattern === 'token-omitted'
+            ? steps.filter((step) => !(step.kind === 'fill' && step.secretReference === fieldReference))
+            : steps;
+          const variantSecrets = pattern === 'token-emptied' ? { ...secrets, [fieldReference]: '' } : pattern === 'token-forged' ? { ...secrets, [fieldReference]: forgeResetToken() } : secrets;
+          const run = await runFlow(pattern, baseUrl, variantSteps, variantSecrets);
+          probes.push({ kind: 'flow', pattern, targetUrl: ScopePolicy.canonicalUrl(baseUrl), status: run.status, finalUrl: run.finalUrl, bodyHash: run.bodyHash, outcome: run.assertionsPassed ? 'exposed' : 'denied' });
+        }
+        skipped = ['email receipt verification (requires mailbox integration)', 'token randomness analysis (use A10 Sequencer)'];
+        break;
+      }
+      case '5': {
+        // ロックアウト: 合意した少数の連続失敗後、正当資格で認証できるかの観察のみ。
+        const role = input.role ?? '';
+        const flow = requireFlow(role);
+        const executor = this.deps.loginExecutor;
+        if (executor === undefined) throw domainError('CapabilityUnavailable', 'login executor is not configured for this service');
+        for (const reference of flow.steps.flatMap((step) => step.kind === 'fill' && step.secretReference !== undefined ? [step.secretReference] : [])) {
+          if (secrets[reference] === undefined) {
+            throw domainError('NeedsInput', `secret value for reference '${reference}' was not provided`);
+          }
+        }
+        const session = this.roleSessionCookies.get(role);
+        const baseUrl = params.baseUrl ?? session?.expectedUrlPrefix ?? new URL(targets[0] ?? 'http://fixture.invalid/').origin;
+        const failureCount = Number.parseInt(params.failureCount ?? '5', 10);
+        const sequence = planLockoutSequence(failureCount);
+        requestBudget(sequence.length + 1);
+        const fillRefs = flow.steps.flatMap((step) => step.kind === 'fill' && step.secretReference !== undefined ? [step.secretReference] : []);
+        const passwordRef = fillRefs.includes('password') ? 'password' : fillRefs.at(-1) ?? 'password';
+        const wrongSecrets = { ...secrets, [passwordRef]: `${secrets[passwordRef] ?? ''}A` };
+        for (const pattern of sequence) {
+          await executor.execute({ baseUrl, steps: flow.steps, secretValues: wrongSecrets, expectedUrlPrefix: baseUrl });
+          probes.push({ kind: 'login', pattern, targetUrl: baseUrl, status: null, finalUrl: '', bodyHash: '', outcome: null });
+        }
+        let afterFailures: 'authenticated' | 'rejected' | 'errored';
+        try {
+          const final = await executor.execute({ baseUrl, steps: flow.steps, secretValues: secrets, expectedUrlPrefix: baseUrl });
+          afterFailures = final.authenticated ? 'authenticated' : 'rejected';
+        } catch {
+          afterFailures = 'errored';
+        }
+        probes.push({ kind: 'login', pattern: 'correct-after-failures', targetUrl: baseUrl, status: null, finalUrl: '', bodyHash: '', outcome: judgeLockout(afterFailures) });
+        skipped = ['high-volume / high-rate testing (JMeter scope, needs prior agreement)', 'precise rate-limit measurement'];
+        break;
+      }
+      case '7': {
+        // ユーザ列挙: 正常系を確認した上で、既存/不在の誤資格応答を複数回比較する。
+        const role = input.role ?? '';
+        const flow = requireFlow(role);
+        const nonexistentUsername = params.nonexistentUsername ?? '';
+        if (nonexistentUsername.trim() === '') {
+          throw domainError('ValidationFailed', 'theme 7 requires nonexistentUsername (an account that must not exist)');
+        }
+        const usernameRef = params.usernameReference ?? 'username';
+        const passwordRef = params.passwordReference ?? 'password';
+        if (secrets[usernameRef] === undefined || secrets[passwordRef] === undefined) {
+          throw domainError('NeedsInput', `theme 7 requires secret values for '${usernameRef}' and '${passwordRef}'`);
+        }
+        if (secrets[usernameRef] === nonexistentUsername) {
+          throw domainError('ValidationFailed', 'nonexistentUsername must differ from the existing username');
+        }
+        const baseUrl = params.baseUrl ?? new URL(targets[0] ?? 'http://fixture.invalid/').origin;
+        const sampleCount = Number.parseInt(params.sampleCount ?? '3', 10);
+        if (!Number.isInteger(sampleCount) || sampleCount < 2 || sampleCount > 5) {
+          throw domainError('ValidationFailed', 'theme 7 sampleCount must be 2..5');
+        }
+        const timingThresholdMs = Number.parseInt(params.timingThresholdMs ?? '250', 10);
+        if (!Number.isInteger(timingThresholdMs) || timingThresholdMs < 50 || timingThresholdMs > 5_000) {
+          throw domainError('ValidationFailed', 'theme 7 timingThresholdMs must be 50..5000');
+        }
+        requestBudget(sampleCount * 2 + 1);
+        const control = await runFlow('existing-user-correct-password', baseUrl, flow.steps, secrets);
+        probes.push({ kind: 'flow', pattern: 'existing-user-correct-password', targetUrl: baseUrl, status: control.status, finalUrl: control.finalUrl, bodyHash: control.bodyHash, outcome: control.assertionsPassed ? null : 'inconclusive', detail: `elapsedMs=${control.elapsedMs.toFixed(1)}` });
+        const wrongPassword = `${secrets[passwordRef]!}A`;
+        const existingRuns = [];
+        const nonexistentRuns = [];
+        for (let index = 0; index < sampleCount; index += 1) {
+          const existingRun = await runFlow(`existing-user-wrong-password:${index + 1}`, baseUrl, flow.steps, { ...secrets, [passwordRef]: wrongPassword });
+          existingRuns.push(existingRun);
+          probes.push({ kind: 'flow', pattern: `existing-user-wrong-password:${index + 1}`, targetUrl: baseUrl, status: existingRun.status, finalUrl: existingRun.finalUrl, bodyHash: existingRun.bodyHash, outcome: null, detail: `elapsedMs=${existingRun.elapsedMs.toFixed(1)}` });
+          const nonexistentRun = await runFlow(`nonexistent-user-wrong-password:${index + 1}`, baseUrl, flow.steps, { ...secrets, [usernameRef]: nonexistentUsername, [passwordRef]: wrongPassword });
+          nonexistentRuns.push(nonexistentRun);
+          probes.push({ kind: 'flow', pattern: `nonexistent-user-wrong-password:${index + 1}`, targetUrl: baseUrl, status: nonexistentRun.status, finalUrl: nonexistentRun.finalUrl, bodyHash: nonexistentRun.bodyHash, outcome: null, detail: `elapsedMs=${nonexistentRun.elapsedMs.toFixed(1)}` });
+        }
+        const existingRun = existingRuns[0]!;
+        const nonexistentRun = nonexistentRuns[0]!;
+        const average = (runs: readonly { elapsedMs: number }[]): number => runs.reduce((sum, run) => sum + run.elapsedMs, 0) / runs.length;
+        const enumeration = judgeUserEnumeration(
+          { status: existingRun.status, finalUrl: existingRun.finalUrl, bodyHash: existingRun.comparisonHash, averageElapsedMs: average(existingRuns) },
+          { status: nonexistentRun.status, finalUrl: nonexistentRun.finalUrl, bodyHash: nonexistentRun.comparisonHash, averageElapsedMs: average(nonexistentRuns) },
+          timingThresholdMs,
+        );
+        probes.push({ kind: 'browser', pattern: 'response-comparison', targetUrl: baseUrl, status: null, finalUrl: '', bodyHash: '', outcome: control.assertionsPassed ? enumeration : 'inconclusive', detail: `samples=${sampleCount}; existingAvgMs=${average(existingRuns).toFixed(1)}; nonexistentAvgMs=${average(nonexistentRuns).toFixed(1)}` });
+        break;
+      }
+      case '10': {
+        // IDOR: 候補ロールと、そのオブジェクトを正当に参照できる比較ロールの2セッションで比較。
+        const candidateSession = requireSession();
+        const otherRole = params.otherRole ?? '';
+        if (otherRole === '' || otherRole === candidateSession.role) throw domainError('ValidationFailed', 'theme 10 requires a different otherRole with an authenticated session');
+        const authorizedSession = this.roleSessionCookies.get(otherRole);
+        if (authorizedSession === undefined) throw domainError('ValidationFailed', `no authenticated session for comparison role '${otherRole}'; run login first`);
+        const template = targets[0];
+        if (template === undefined) throw domainError('ValidationFailed', 'theme 10 requires a target URL with the object parameter');
+        const objectParam = params.objectParam ?? '';
+        const ownValue = params.ownValue ?? '';
+        const otherValues = (params.otherValues ?? '').split(',').map((value) => value.trim()).filter((value) => value !== '');
+        const planned = planIdorProbes({ targetUrl: template, objectParam, ownValue, otherValues });
+        requestBudget(planned.length);
+        const runPage = async (url: string, cookies: readonly LoginSessionCookie[]) => {
+          const canonical = ScopePolicy.canonicalUrl(url);
+          const applicable = applicableSessionCookies([...cookies], canonical);
+          return await browser().execute({
+            targetUrl: canonical,
+            scope: caseRecord.scope,
+            steps: [{ kind: 'navigate', target: canonical }],
+            ...(applicable === undefined ? {} : { sessionCookies: applicable }),
+          });
+        };
+        const own = await runPage(planned[0]!.url, candidateSession.cookies);
+        probes.push({ kind: 'browser', pattern: 'own-object-baseline', targetUrl: ScopePolicy.canonicalUrl(planned[0]!.url), status: own.status, finalUrl: own.finalUrl, bodyHash: own.bodyHash, outcome: own.status !== null && own.status < 400 ? null : 'inconclusive' });
+        for (let index = 1; index < planned.length; index += 2) {
+          const authorizedPlan = planned[index]!;
+          const candidatePlan = planned[index + 1]!;
+          const authorized = await runPage(authorizedPlan.url, authorizedSession.cookies);
+          probes.push({ kind: 'browser', pattern: authorizedPlan.pattern, targetUrl: ScopePolicy.canonicalUrl(authorizedPlan.url), status: authorized.status, finalUrl: authorized.finalUrl, bodyHash: authorized.bodyHash, outcome: null });
+          const candidate = await runPage(candidatePlan.url, candidateSession.cookies);
+          const outcome = judgeIdorAccess({
+            authorized: { status: authorized.status, finalUrl: authorized.finalUrl, bodyHash: authorized.bodyHash },
+            candidate: { status: candidate.status, finalUrl: candidate.finalUrl, bodyHash: candidate.bodyHash },
+          });
+          probes.push({ kind: 'browser', pattern: candidatePlan.pattern, targetUrl: ScopePolicy.canonicalUrl(candidatePlan.url), status: candidate.status, finalUrl: candidate.finalUrl, bodyHash: candidate.bodyHash, outcome });
+        }
+        break;
+      }
+      case '11': {
+        // マスアサインメント: base JSON に特権 field を merge した要求が受理されるか。
+        const target = targets[0];
+        if (target === undefined) throw domainError('ValidationFailed', 'theme 11 requires a target URL');
+        const method = params.method ?? 'POST';
+        const baseBody = params.jsonBody ?? '';
+        if (baseBody.trim() === '') throw domainError('ValidationFailed', 'theme 11 requires jsonBody (the normal request body)');
+        const extraFields = parseExtraFieldsJson(params.extraFieldsJson ?? '{}');
+        const variantBody = mergeJsonFields(baseBody, extraFields);
+        const sessionCookies = input.role === undefined ? undefined : applicableSessionCookies([...requireSession().cookies], target);
+        requestBudget(2);
+        const headers: readonly (readonly [string, string])[] = [['Content-Type', 'application/json']];
+        const baseline = await repeater().send({ targetUrl: target, requestBytes: rawRequest(method, target, headers, baseBody), ...(sessionCookies === undefined ? {} : { sessionCookies }) });
+        probes.push({ kind: 'http', pattern: 'baseline', targetUrl: target, status: baseline.status, finalUrl: target, bodyHash: hashStable('scopepilot2.theme', { body: baseline.body.toString('utf8') }), outcome: null });
+        const variant = await repeater().send({ targetUrl: target, requestBytes: rawRequest(method, target, headers, variantBody), ...(sessionCookies === undefined ? {} : { sessionCookies }) });
+        const variantText = variant.body.toString('utf8');
+        const successMarker = params.successMarker;
+        const markerFound = successMarker === undefined ? null : variantText.includes(successMarker);
+        probes.push({ kind: 'http', pattern: 'mass-assignment', targetUrl: target, status: variant.status, finalUrl: variant.redirectLocations.at(-1) ?? target, bodyHash: hashStable('scopepilot2.theme', { body: variantText }), outcome: judgeMassAssignment({ variantStatus: variant.status, ...(successMarker === undefined ? {} : { successMarker, markerFound }) }), ...(markerFound === null ? {} : { markersFound: markerFound }) });
+        skipped = successMarker === undefined && variant.status < 400 ? ['field reflection / persisted side-effect was not confirmed; HTTP success alone is not evidence'] : [];
+        break;
+      }
+      case '13': {
+        // CORS: Origin 書き換え再送と プリフライト確認。
+        const target = targets[0];
+        if (target === undefined) throw domainError('ValidationFailed', 'theme 13 requires a target URL');
+        const origins = (params.evilOrigins ?? 'https://scopepilot.invalid').split(',').map((origin) => origin.trim()).filter((origin) => origin !== '');
+        if (origins.length === 0 || origins.length > 3) throw domainError('ValidationFailed', 'theme 13 accepts 1..3 evil origins');
+        const requestMethod = (params.requestMethod ?? 'GET').toUpperCase();
+        const sessionCookies = input.role === undefined ? undefined : applicableSessionCookies([...requireSession().cookies], target);
+        const testOrigins = [...new Set([new URL(target).origin, ...origins, 'null'])];
+        requestBudget(testOrigins.length * 2);
+        for (const origin of testOrigins) {
+          const getResponse = await repeater().send({ targetUrl: target, requestBytes: rawRequest(requestMethod, target, [['Origin', origin]], ''), ...(sessionCookies === undefined ? {} : { sessionCookies }) });
+          const outcome = origin === new URL(target).origin ? null : judgeCorsResponse({ requestOrigin: origin, acao: headerValue(getResponse.headers, 'Access-Control-Allow-Origin'), acac: headerValue(getResponse.headers, 'Access-Control-Allow-Credentials'), credentialsSent: (sessionCookies?.length ?? 0) > 0 });
+          probes.push({ kind: 'http', pattern: `origin-reflect:${origin}`, targetUrl: target, status: getResponse.status, finalUrl: getResponse.redirectLocations.at(-1) ?? target, bodyHash: hashStable('scopepilot2.theme', { body: getResponse.body.toString('utf8') }), outcome, ...(headerValue(getResponse.headers, 'Access-Control-Allow-Origin') === null ? {} : { detail: `acao=${headerValue(getResponse.headers, 'Access-Control-Allow-Origin') ?? ''}` }) });
+          const optionsResponse = await repeater().send({ targetUrl: target, requestBytes: rawRequest('OPTIONS', target, [['Origin', origin], ['Access-Control-Request-Method', requestMethod]], '') });
+          const preflight = origin === new URL(target).origin ? null : judgeCorsPreflight({ requestOrigin: origin, requestMethod, acao: headerValue(optionsResponse.headers, 'Access-Control-Allow-Origin'), acaom: headerValue(optionsResponse.headers, 'Access-Control-Allow-Methods') });
+          probes.push({ kind: 'http', pattern: `preflight:${origin}`, targetUrl: target, status: optionsResponse.status, finalUrl: target, bodyHash: '', outcome: preflight, ...(headerValue(optionsResponse.headers, 'Access-Control-Allow-Methods') === null ? {} : { detail: `acaom=${headerValue(optionsResponse.headers, 'Access-Control-Allow-Methods') ?? ''}` }) });
+        }
+        break;
+      }
+      case '18': {
+        // Excel は「リクエスト中の直列化パターン」を観察する手順。応答本文の存在を
+        // 脆弱性として扱わず、履歴から採取した要求サンプルを一時的に分類する。
+        const requestSamples = params.requestSamples ?? '';
+        if (requestSamples.trim() === '') throw domainError('NeedsInput', 'theme 18 requires requestSamples copied from captured request history');
+        const signature = findSerializationSignature(requestSamples);
+        probes.push({ kind: 'http', pattern: 'serialized-request-observation', targetUrl: targets[0] ?? '', status: null, finalUrl: '', bodyHash: hashStable('scopepilot2.theme18.sample', { sample: requestSamples }), outcome: signature === null ? 'denied' : 'inconclusive', ...(signature === null ? {} : { detail: `candidate-signature=${signature.name}` }) });
+        skipped = ['integrity verification / acceptance was not exercised', 'exploitation with target-specific gadgets is excluded as unsafe'];
+        break;
+      }
+      case '20': {
+        // 業務ロジック・競合: 同一要求の順次再送による観察のみ (同期レースは除外)。
+        const target = targets[0];
+        if (target === undefined) throw domainError('ValidationFailed', 'theme 20 requires a target URL');
+        const method = params.method ?? 'GET';
+        const body = params.body ?? '';
+        const count = planReplayCount(Number.parseInt(params.repeatCount ?? '2', 10));
+        const successMarker = params.successMarker;
+        const sessionCookies = input.role === undefined ? undefined : applicableSessionCookies([...requireSession().cookies], target);
+        requestBudget(count);
+        const replayResponses: { status: number; bodyHash: string; markerFound: boolean | null }[] = [];
+        for (let index = 0; index < count; index += 1) {
+          const response = await repeater().send({ targetUrl: target, requestBytes: rawRequest(method, target, body === '' ? [] : [['Content-Type', 'application/json']], body), ...(sessionCookies === undefined ? {} : { sessionCookies }) });
+          const text = response.body.toString('utf8');
+          const bodyHash = hashStable('scopepilot2.theme', { body: text });
+          const markerFound = successMarker === undefined ? null : text.includes(successMarker);
+          replayResponses.push({ status: response.status, bodyHash, markerFound });
+          probes.push({ kind: 'http', pattern: `replay-${index + 1}`, targetUrl: target, status: response.status, finalUrl: response.redirectLocations.at(-1) ?? target, bodyHash, outcome: null, ...(markerFound === null ? {} : { markersFound: markerFound }) });
+        }
+        probes.push({ kind: 'http', pattern: 'replay-comparison', targetUrl: target, status: null, finalUrl: '', bodyHash: '', outcome: judgeReplay({ responses: replayResponses, ...(successMarker === undefined ? {} : { successMarker }) }) });
+        skipped = ['millisecond-synchronized race detection (excluded as infeasible)'];
+        break;
+      }
+      case '21': {
+        // 入力検証の堃牢性: 境界値・型・長大文字列を query に適用し 5xx を見る。
+        const target = targets[0];
+        if (target === undefined) throw domainError('ValidationFailed', 'theme 21 requires a target URL');
+        const paramName = params.paramName ?? '';
+        if (paramName.trim() === '') throw domainError('ValidationFailed', 'theme 21 requires paramName (query parameter to fuzz)');
+        const extraValues = (params.extraValues ?? '').split(',').map((value) => value.trim()).filter((value) => value !== '');
+        const values = [...INPUT_ROBUSTNESS_PAYLOADS, ...extraValues].slice(0, INPUT_ROBUSTNESS_MAX_VALUES);
+        requestBudget(values.length);
+        if (this.deps.fuzzTransport === undefined) throw domainError('CapabilityUnavailable', 'fuzz transport is not configured for this service');
+        const sessionCookies = input.role === undefined ? undefined : applicableSessionCookies([...requireSession().cookies], target);
+        for (const value of values) {
+          const response = await this.deps.fuzzTransport.send({
+            targetUrl: target,
+            combination: [value],
+            positions: [{ name: paramName, values: [value] }],
+            ...(sessionCookies === undefined ? {} : { sessionCookies: sessionCookies.map((cookie) => ({ name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path })) }),
+          });
+          const label = value === '' ? '(empty)' : value.length > 24 ? `${value.slice(0, 12)}…(${String(value.length)})` : value;
+          probes.push({ kind: 'fuzz', pattern: `robustness:${label}`, targetUrl: response.requestUrl, status: response.status, finalUrl: response.requestUrl, bodyHash: response.bodyHash, outcome: judgeInputRobustness(response.status) });
+        }
+        skipped = ['required-parameter omission, HPP, double-decoding and trusted-header variants are not covered by this query-value run'];
+        break;
+      }
+      case '22': {
+        // TLS・証明書・暗号スイート: 審査済み nuclei template のスポット実行のみ。
+        if (targets.length === 0 || targets.length > 3) throw domainError('ValidationFailed', 'theme 22 accepts 1..3 target origins');
+        const templateIds = validateSpotTemplateIds((params.templateIds ?? '').split(','));
+        if (this.deps.nucleiRunner === undefined) throw domainError('CapabilityUnavailable', 'nuclei runner is not configured for this service');
+        const result = await this.deps.nucleiRunner.run({
+          targets,
+          limits: {
+            maxRequests: caseRecord.scope.limits.maxRequests,
+            maxDurationMinutes: Math.max(1, Math.min(caseRecord.scope.limits.maxDurationMinutes, 10)),
+            maxConcurrency: 2,
+            requestsPerSecond: 5,
+          },
+          templateIds,
+        });
+        const matchCount = countNucleiMatches(result.lines);
+        for (const target of targets) {
+          probes.push({ kind: 'nuclei', pattern: 'tls-spot-templates', targetUrl: target, status: null, finalUrl: '', bodyHash: '', outcome: judgeNucleiSpot(matchCount), detail: `matches=${String(matchCount)}; templates=${templateIds.join(',')}` });
+        }
+        skipped = ['full testssl.sh/OpenSSL-equivalent coverage (spot execution of reviewed templates only)'];
+        break;
+      }
+      case '23': {
+        // 平文送信・混在: http:// 到達性と https ページ内の http:// 参照。
+        const target = targets[0];
+        if (target === undefined || !target.startsWith('https://')) throw domainError('ValidationFailed', 'theme 23 requires an https:// target URL');
+        requestBudget(3);
+        const session = input.role === undefined ? undefined : requireSession();
+        const httpsResponse = await browser().execute({
+          targetUrl: ScopePolicy.canonicalUrl(target),
+          scope: caseRecord.scope,
+          steps: [{ kind: 'navigate', target: ScopePolicy.canonicalUrl(target) }],
+          ...(session === undefined ? {} : { sessionCookies: applicableSessionCookies([...session.cookies], ScopePolicy.canonicalUrl(target)) }),
+        });
+        probes.push({ kind: 'browser', pattern: 'https-baseline', targetUrl: ScopePolicy.canonicalUrl(target), status: httpsResponse.status, finalUrl: httpsResponse.finalUrl, bodyHash: httpsResponse.bodyHash, outcome: null });
+        const mixed = findMixedContent(httpsResponse.bodyText);
+        probes.push({ kind: 'browser', pattern: 'mixed-content', targetUrl: ScopePolicy.canonicalUrl(target), status: httpsResponse.status, finalUrl: httpsResponse.finalUrl, bodyHash: '', outcome: mixed ? 'exposed' : 'denied' });
+        const plainTarget = target.replace(/^https:\/\//, 'http://');
+        if (!businessTargetInScope(plainTarget, caseRecord.scope)) {
+          throw domainError('OutOfScope', `plain http variant is out of scope: ${plainTarget}`);
+        }
+        const plainResponse = await repeater().send({ targetUrl: plainTarget, requestBytes: rawRequest('GET', plainTarget, [], '') });
+        probes.push({ kind: 'http', pattern: 'plain-http', targetUrl: plainTarget, status: plainResponse.status, finalUrl: plainResponse.redirectLocations.at(-1) ?? plainTarget, bodyHash: hashStable('scopepilot2.theme', { body: plainResponse.body.toString('utf8') }), outcome: judgePlainHttp({ status: plainResponse.status, finalUrl: plainResponse.redirectLocations.at(-1) ?? plainTarget, targetUrl: plainTarget }) });
+        break;
+      }
+      case '29': {
+        // データ保護・機微露出: 認証後ページの DOM 観測で PII 疑い node を数える。
+        if (targets.length === 0 || targets.length > 5) throw domainError('ValidationFailed', 'theme 29 accepts 1..5 target URLs');
+        if (this.deps.domObserver === undefined) throw domainError('CapabilityUnavailable', 'DOM observer is not configured for this service');
+        requestBudget(targets.length * 2);
+        const session = input.role === undefined ? undefined : requireSession();
+        for (const target of targets) {
+          const canonical = ScopePolicy.canonicalUrl(target);
+          const sessionCookies = session === undefined ? undefined : applicableSessionCookies([...session.cookies], canonical);
+          const page = await browser().execute({
+            targetUrl: canonical,
+            scope: caseRecord.scope,
+            steps: [{ kind: 'navigate', target: canonical }],
+            ...(sessionCookies === undefined ? {} : { sessionCookies }),
+          });
+          const sensitiveParams = findSensitiveUrlParamNames(canonical);
+          probes.push({ kind: 'browser', pattern: 'sensitive-url-parameters', targetUrl: canonical, status: page.status, finalUrl: page.finalUrl, bodyHash: page.bodyHash, outcome: sensitiveParams.length > 0 ? 'exposed' : 'denied', detail: `parameterNames=${sensitiveParams.length === 0 ? '(none)' : sensitiveParams.join(',')}` });
+          const cacheControl = headerValue(page.headers, 'Cache-Control');
+          probes.push({ kind: 'browser', pattern: 'sensitive-cache-control', targetUrl: canonical, status: page.status, finalUrl: page.finalUrl, bodyHash: '', outcome: judgeSensitiveCache(cacheControl), detail: `cacheControl=${cacheControl ?? '(missing)'}` });
+          const observation = await this.deps.domObserver.observe({
+            targetUrl: canonical,
+            scope: caseRecord.scope,
+            ...(sessionCookies === undefined ? {} : { sessionCookies }),
+          });
+          const piiCount = observation.nodes.filter((node) => node.looksLikePii).length;
+          const confirmedUnmaskedCount = observation.nodes.filter((node) => node.looksLikePii && /(?:payment-card|my-number|pin)-unmasked/u.test(node.text)).length;
+          // 実 adapter は生のDOM本文ではなくカテゴリ化済みnodeだけを返す。nodeが空なら
+          // 古い/代替adapter等で分類自体が未実施なので、問題なしにせず inconclusive とする。
+          const outcome = observation.nodes.length === 0 ? 'inconclusive' : judgePiiExposure(piiCount, confirmedUnmaskedCount);
+          probes.push({ kind: 'dom', pattern: 'pii-exposure', targetUrl: canonical, status: null, finalUrl: canonical, bodyHash: '', outcome, detail: `piiCandidates=${String(piiCount)}; confirmedUnmasked=${String(confirmedUnmaskedCount)}; nodes=${String(observation.nodes.length)}` });
+        }
+        skipped = ['API over-fetching/ownership and third-party transmission require traffic context', 'file metadata (ExifTool) verification'];
+        break;
+      }
+      default:
+        throw domainError('ValidationFailed', `zap-unsupported theme ${themeNo} has no handler`);
+    }
+
+    const judged = probes.filter((probe) => probe.outcome !== null).map((probe) => probe.outcome!);
+    const summary = summarizeThemeOutcomes(judged, skipped);
+    const checkId = this.deps.ids.next('themecheck');
+    const executedAt = this.deps.clock.now().toISOString();
+    const record = {
+      checkId,
+      themeNo,
+      role: input.role ?? null,
+      status: summary.status,
+      totalRequests: probes.length,
+      ...(skipped.length === 0 ? {} : { skipped: [...skipped] }),
+      executedAt,
+    };
+    (this.zapUnsupportedChecks as typeof record[]).push(record);
+    await this.deps.evidence.saveText(`zap-unsupported:${checkId}`, canonicalJson({
+      checkId,
+      themeNo,
+      role: input.role ?? null,
+      results: probes.map((probe) => ({ kind: probe.kind, pattern: probe.pattern, targetUrl: probe.targetUrl, status: probe.status, finalUrl: probe.finalUrl, bodyHash: probe.bodyHash, outcome: probe.outcome, ...(probe.detail === undefined ? {} : { detail: probe.detail }) })),
+      ...(skipped.length === 0 ? {} : { skipped }),
+      status: summary.status,
+    }), { targetUrl: targets[0] ?? '', kind: 'zap-unsupported' });
+    this.record({ type: 'ZapUnsupportedCheckCompleted', at: executedAt, checkId, themeNo, role: input.role ?? '', status: summary.status });
+    return { ...record, results: probes };
+  }
+
+  listZapUnsupportedChecks(): readonly { checkId: string; themeNo: string; role: string | null; status: string; totalRequests: number; skipped?: readonly string[]; executedAt: string }[] {
+    return [...this.zapUnsupportedChecks];
+  }
+
   /** Execute an AI-proposed plan only after the operator has previewed and confirmed it. */
   async runInteractiveDiagnostics(
     operator: OperatorProfile,
@@ -1009,6 +1790,10 @@ export class BaselineFlowService {
         evidenceId: evidence.evidenceId,
       });
     }
+    this.latestDiagnosticRoutes = this.latestDiagnosticRoutes.map((route) => {
+      const result = results.find((candidate) => candidate.track === route.track && ScopePolicy.canonicalUrl(candidate.targetUrl) === route.targetUrl);
+      return result === undefined ? route : { ...route, status: 'executed' as const, detail: result.detail };
+    });
     return { results };
   }
 
@@ -1095,7 +1880,7 @@ export class BaselineFlowService {
   }
 
   /** role ごとの session 状態 (cookie 名・秘密値の参照の一覧のみ。値は保持しない)。 */
-  listSessions(): readonly { role: string; flowVersion: string; stepCount: number; secretReferences: readonly string[]; cookieNames: readonly string[]; sessionRevision: number }[] {
+  listSessions(): readonly { role: string; flowVersion: string; stepCount: number; secretReferences: readonly string[]; cookieNames: readonly string[]; sessionRevision: number; verificationUrl: string | null }[] {
     return [...this.loginFlows.keys()].map((role) => {
       const flow = this.loginFlows.get(role);
       if (flow === undefined) {
@@ -1109,6 +1894,7 @@ export class BaselineFlowService {
         secretReferences: flow.secretReferences,
         cookieNames: jar?.cookieNames ?? [],
         sessionRevision: this.sessionRevisions.get(role) ?? 0,
+        verificationUrl: this.roleSessionCookies.get(role)?.verificationUrl ?? null,
       };
     });
   }
@@ -2105,7 +2891,14 @@ export class BaselineFlowService {
   /** 所見の確認状態変更 (6.3)。変更は監査 event に確認者付きで記録する。 */
   updateFindingStatus(
     operator: OperatorProfile,
-    input: { readonly findingId: string; readonly next: 'confirmed' | 'rejected' },
+    input: {
+      readonly findingId: string;
+      readonly next: 'confirmed' | 'rejected';
+      readonly reproduction: 'reproduced' | 'not-reproduced';
+      readonly notes: string;
+      readonly severityRationale: string;
+      readonly cvss?: { readonly version: '3.1' | '4.0'; readonly vector: string; readonly score: number };
+    },
   ): Finding {
     this.requirePermission(operator, 'finding.confirm');
     const at = this.deps.clock.now().toISOString();
@@ -2113,7 +2906,25 @@ export class BaselineFlowService {
     if (before === undefined) {
       throw domainError('ValidationFailed', `finding ${input.findingId} does not exist`);
     }
-    const updated = this.importer.updateStatus(input.findingId, input.next, { now: at, changedBy: operator.operatorId });
+    if (input.notes.trim() === '' || input.severityRationale.trim() === '') {
+      throw domainError('ValidationFailed', 'human review notes and severity rationale are required');
+    }
+    if ((input.next === 'confirmed') !== (input.reproduction === 'reproduced')) {
+      throw domainError('ValidationFailed', 'review result and reproduction result are inconsistent');
+    }
+    if (input.cvss !== undefined && (input.cvss.vector.trim() === '' || input.cvss.score < 0 || input.cvss.score > 10)) {
+      throw domainError('ValidationFailed', 'CVSS vector and score (0..10) are invalid');
+    }
+    const updated = this.importer.updateStatus(input.findingId, input.next, {
+      now: at,
+      changedBy: operator.operatorId,
+      review: {
+        reproduction: input.reproduction,
+        notes: input.notes.trim(),
+        severityRationale: input.severityRationale.trim(),
+        ...(input.cvss === undefined ? {} : { cvss: input.cvss }),
+      },
+    });
     this.persistFindings([updated]);
     this.record({ type: 'FindingStatusChanged', at, findingId: input.findingId, from: before.status, to: input.next, changedBy: operator.operatorId });
     return updated;
@@ -2406,6 +3217,8 @@ export class BaselineFlowService {
     this.requirePermission(operator, 'run.manage');
     this.requireMatchingConfirmation(plan, confirmation);
     const caseRecord = this.currentCase();
+    this.assessmentStartedAt ??= this.deps.clock.now().toISOString();
+    this.authenticationRole = input.role ?? null;
     const step = plan.steps[0];
     if (step === undefined || step.kind !== 'explore') {
       throw domainError('ValidationFailed', 'plan does not contain an exploration step');
@@ -2542,6 +3355,8 @@ export class BaselineFlowService {
     this.deps.runSink?.save(runRecord);
     this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason });
     const candidates = observations.flatMap((observation) => candidatesFromObservation(observation, this.deps.ids));
+    this.latestCandidates = candidates;
+    this.assessmentEndedAt = this.deps.clock.now().toISOString();
     return { runRecord, planHash, observations, deniedUrls, candidates, engineVersion: this.deps.explorer.engineVersion };
   }
 
@@ -2560,6 +3375,7 @@ export class BaselineFlowService {
       at: this.deps.clock.now().toISOString(),
       adoptedCount: candidates.length,
     });
+    this.adoptedCandidateUrls = new Set(candidates.map((candidate) => ScopePolicy.canonicalUrl(candidate.url)));
     return candidates;
   }
 
@@ -2592,7 +3408,9 @@ export class BaselineFlowService {
     }
 
     // 実行対象は計画の target snapshot を正本とする。scope 外候補は snapshot から除外する (F11-UT-003)。
-    const targets = step.targetSnapshot.filter((url) => ScopePolicy.decide(caseRecord.scope, url).allowed);
+    const targets = step.targetSnapshot.filter((url) => ScopePolicy.decide(caseRecord.scope, url).allowed && !isSessionControlUrl(url));
+    this.assessmentStartedAt ??= this.deps.clock.now().toISOString();
+    this.authenticationRole = role ?? null;
     const adoptedUrls = new Set(adopted.map((candidate) => ScopePolicy.canonicalUrl(candidate.url)));
     const uncovered = [...adoptedUrls].filter((url) => !targets.includes(url));
     if (uncovered.length > 0) {
@@ -2864,6 +3682,7 @@ export class BaselineFlowService {
       `diagnostic-routes:${runId}`,
       canonicalJson({ runId, routes: diagnosticRoutes }),
     );
+    this.latestDiagnosticRoutes = diagnosticRoutes;
 
     const nucleiStep = plan.steps.find((candidate) => candidate.kind === 'nuclei-scan');
     let nucleiSummary: ActiveScanRunResult['nuclei'];
@@ -2950,6 +3769,8 @@ export class BaselineFlowService {
     }
 
     this.scannedUrlCount = targets.length;
+    this.scannedUrls = new Set(targets.map((url) => ScopePolicy.canonicalUrl(url)));
+    this.assessmentEndedAt = this.deps.clock.now().toISOString();
     this.delegatedSteps = [
       { stepId: step.stepId, engineKind: 'zap', engineVersion: this.deps.scanEngine.engineVersion },
       ...(nucleiStep === undefined || this.deps.nucleiRunner === undefined ? [] : [{
@@ -3061,14 +3882,64 @@ export class BaselineFlowService {
       guidelines: input.guidelines,
       findings,
       coverage: {
-        exploredUrlCount: this.exploredUrlCount,
-        scannedUrlCount: this.scannedUrlCount,
+        exploredUrlCount: this.observationsByUrl.size,
+        scannedUrlCount: this.scannedUrls.size,
         delegatedSteps: this.delegatedSteps,
+        exploredUrls: [...this.observationsByUrl.values()].map((observation) => ({
+          url: observation.url,
+          statusCode: observation.status,
+          contentType: observation.contentType,
+          depth: observation.depth,
+          discoveredFrom: observation.discoveredFrom,
+          originType: observation.originType,
+        })),
+        scannedUrls: [...this.scannedUrls],
+        excludedUrls: [...this.observationsByUrl.values()]
+          .filter((observation) => !this.scannedUrls.has(ScopePolicy.canonicalUrl(observation.url)))
+          .map((observation) => {
+            const canonical = ScopePolicy.canonicalUrl(observation.url);
+            const hasCandidate = this.latestCandidates.some((candidate) => ScopePolicy.canonicalUrl(candidate.url) === canonical);
+            const reason = isSessionControlUrl(canonical)
+              ? 'セッション状態を変更する URL のため自動能動診断から除外'
+              : hasCandidate && !this.adoptedCandidateUrls.has(canonical)
+                ? '診断候補として検出されたが、実行対象として選択されなかったため除外'
+                : '探索で観測したが、能動診断可能な入力点が確認できなかったため除外';
+            return { url: observation.url, reason };
+          }),
+          ...this.deniedUrlLog.map((denied) => ({ url: denied.url, reason: `scope判定で拒否: ${denied.reason}` })),
+        ...(this.assessmentStartedAt === undefined ? {} : { startedAt: this.assessmentStartedAt }),
+        endedAt: this.assessmentEndedAt ?? this.deps.clock.now().toISOString(),
+        authenticationRole: this.authenticationRole,
+        scanPolicies: [
+          ...(this.exploredUrlCount > 0 ? ['passive' as const] : []),
+          ...(this.scannedUrlCount > 0 ? ['active' as const] : []),
+        ],
+        diagnosticRoutes: this.latestDiagnosticRoutes.map((route) => ({
+          track: route.track,
+          targetUrl: route.targetUrl,
+          status: route.status,
+          detail: route.detail,
+        })),
         limitations: [
           '外部 engine (Delegated 経路) の個々の送信は送信前に拒否できない。入力 scope・停止・版ごとの実測で管理する。',
           'engine 由来の所見は実影響未確認であり、人の確認なしに確定扱いにしない。',
-          ...(input.excludeLowAndInfo === true ? ['表示設定により重要度 Low / Info の所見を本報告書から除外した。'] : []),
+          ...(input.excludeLowAndInfo === true ? ['お客様のご指示によりLow以下は省略されています。'] : []),
         ],
+      },
+      assessmentScope: {
+        caseName: caseRecord.name,
+        allowedOrigins: caseRecord.scope.allowedOrigins,
+        deniedOrigins: caseRecord.scope.deniedOrigins,
+        limits: caseRecord.scope.limits,
+        ...(this.authorization === null ? {} : {
+          authorization: {
+            allowedOperationClasses: this.authorization.allowedOperationClasses,
+            targetRoles: this.authorization.targetRoles,
+            validFrom: this.authorization.validFrom,
+            validUntil: this.authorization.validUntil,
+            evidenceRef: this.authorization.evidenceRef.evidenceId,
+          },
+        }),
       },
     });
     const reportId = this.deps.ids.next('report');
@@ -3224,7 +4095,7 @@ export function isSessionControlUrl(value: string): boolean {
   try {
     const pathname = new URL(value).pathname.toLowerCase();
     return /\/(?:logout|log-out|logoff|signout|sign-out)(?:\.php)?\/?$/.test(pathname)
-      || /\/(?:setup|install)(?:\.php)?\/?$/.test(pathname);
+      || /\/(?:setup|install|security)(?:\.php)?\/?$/.test(pathname);
   } catch {
     return true;
   }

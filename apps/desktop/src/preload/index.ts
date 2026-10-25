@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('scopepilotDesktop', {
   importCaseInputs: (materialPaths: readonly string[]) => ipcRenderer.invoke('scopepilot:import-case-inputs', materialPaths),
   saveReport: (request: unknown) => ipcRenderer.invoke('scopepilot:save-report', request),
   analyzeMaterials: () => ipcRenderer.invoke('scopepilot:analyze-materials'),
+  inferLoginForm: (request: unknown) => ipcRenderer.invoke('scopepilot:infer-login-form', request),
   planPostLoginActions: (request: unknown) => ipcRenderer.invoke('scopepilot:plan-post-login-actions', request),
   planInteractiveDiagnostics: (request: unknown) => ipcRenderer.invoke('scopepilot:plan-interactive-diagnostics', request),
   selectInteractiveInput: (kind: 'upload-file' | 'api-spec') => ipcRenderer.invoke('scopepilot:select-interactive-input', kind),

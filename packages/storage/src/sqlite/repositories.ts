@@ -71,6 +71,23 @@ export class SqliteEvidenceStore implements EvidenceStorePort {
       ...(row.metadata_json === null ? {} : { metadata: JSON.parse(row.metadata_json) as Record<string, string> }),
     }));
   }
+
+  /** 報告生成など案件内処理向け。相対 path を外へ公開せず、hash 検証済みの原本を返す。 */
+  async readText(evidenceId: string): Promise<string | null> {
+    const row = this.db.prepare('SELECT sha256 FROM evidence_objects WHERE evidence_id = ?').get(evidenceId) as
+      | { sha256: string }
+      | undefined;
+    if (row === undefined || this.blobDirectory === undefined) return null;
+    const content = await readFile(join(this.blobDirectory, `${row.sha256}.txt`), 'utf8').catch((cause: unknown) => {
+      if (cause instanceof Error && 'code' in cause && cause.code === 'ENOENT') return null;
+      throw cause;
+    });
+    if (content === null) return null;
+    if (hashStable('scopepilot2.evidence', content) !== row.sha256) {
+      throw new Error(`evidence blob hash mismatch: ${evidenceId}`);
+    }
+    return content;
+  }
 }
 
 export class CaseRepository {
@@ -182,7 +199,7 @@ export interface WorkspaceInputSource {
   readonly importedAt: string;
 }
 
-export type AiTaskKind = 'DocumentExtract' | 'ReportDraft' | 'BrowserActionPlan' | 'InteractiveDiagnosticPlan';
+export type AiTaskKind = 'DocumentExtract' | 'ReportDraft' | 'BrowserActionPlan' | 'LoginFormInference' | 'InteractiveDiagnosticPlan';
 export type AiInvocationStatus = 'succeeded' | 'failed';
 
 export interface AiInvocationRecord {
@@ -474,6 +491,18 @@ export class FindingRepository {
       finding.occurrences,
       canonicalJson(finding),
     );
+  }
+
+  /** Adds a recovered evidence object without changing occurrence counts or dedupe identity. */
+  addEvidenceRef(caseId: string, findingId: string, evidenceId: string): boolean {
+    const finding = this.list(caseId).find((candidate) => candidate.findingId === findingId);
+    if (finding === undefined) return false;
+    if (finding.evidenceRefs.includes(evidenceId)) return true;
+    const updated: Finding = { ...finding, evidenceRefs: [...finding.evidenceRefs, evidenceId] };
+    const result = this.db.prepare(
+      'UPDATE findings SET finding_json = ? WHERE case_id = ? AND finding_id = ?',
+    ).run(canonicalJson(updated), caseId, findingId);
+    return Number(result.changes) === 1;
   }
 
   list(caseId: string): readonly Finding[] {

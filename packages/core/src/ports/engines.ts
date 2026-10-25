@@ -60,6 +60,8 @@ export interface NucleiScanPort {
     readonly signal?: AbortSignal;
     /** Nuclei の進捗・統計出力。JSONL 所見とは分離された表示専用ログ。 */
     readonly onLog?: (line: string) => void;
+    /** 審査済み manifest のうち指定 id だけを実行する (テーマ22等のスポット実行)。 */
+    readonly templateIds?: readonly string[];
   }): Promise<{ readonly lines: readonly string[] }>;
 }
 

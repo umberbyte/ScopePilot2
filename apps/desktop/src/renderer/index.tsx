@@ -8,6 +8,7 @@ import { AdvancedApp } from './advanced.tsx';
 import { setLocale, t, type Locale } from './resources.ts';
 import { WizardApp } from './wizard.tsx';
 import { RuntimeSettingsWindow } from './runtime-settings-window.tsx';
+import type { RendererReportProfile } from './report-profile.ts';
 import type {
   AiCliAuthStatus,
   AiCatalogSnapshot,
@@ -29,6 +30,7 @@ import {
   webLightTheme,
 } from '@fluentui/react-components';
 import React, { useEffect, useState } from 'react';
+import type { ReportModel } from '@scopepilot2/contracts';
 
 interface DesktopBridge {
   apiBase: string;
@@ -59,6 +61,7 @@ interface DesktopBridge {
       readonly aiModel: string;
     };
     readonly inputs: readonly (DesktopPath & { readonly sha256: string; readonly relativePath: string })[];
+    readonly reportProfile?: RendererReportProfile;
   }>;
   saveCaseWorkspaceSettings(request: {
     readonly startUrl: string;
@@ -81,9 +84,25 @@ interface DesktopBridge {
   }>;
   removeCaseInput(inputId: string): Promise<readonly (DesktopPath & { readonly inputId: string; readonly sha256: string; readonly relativePath: string })[]>;
   importCaseInputs(materialPaths: readonly string[]): Promise<readonly (DesktopPath & { readonly inputId: string; readonly sha256: string; readonly relativePath: string })[]>;
-  saveReport(request: { readonly content: string; readonly modelHash: string }): Promise<{
+  saveReport(request: {
+    readonly content: string;
+    readonly modelHash: string;
+    readonly reportId: string;
+    readonly model: ReportModel;
+    readonly profile: RendererReportProfile;
+    readonly findingNarratives?: readonly {
+      readonly findingId: string;
+      readonly summary: string;
+      readonly conditions: string;
+      readonly cause: string;
+      readonly reproductionSteps: readonly string[];
+      readonly remediation: string;
+      readonly verificationCriteria: string;
+    }[];
+  }): Promise<{
     readonly markdownPath: string;
     readonly wordPath: string;
+    readonly structuredJsonPath: string;
   }>;
   analyzeMaterials(): Promise<{
     readonly provider: 'zcode' | 'codex' | 'claude';
@@ -99,6 +118,20 @@ interface DesktopBridge {
       readonly parameters: readonly { readonly name: string; readonly values: readonly string[] }[];
       readonly warnings: readonly string[];
     }[];
+  }>;
+  inferLoginForm(request: { readonly loginUrl: string }): Promise<{
+    readonly provider: 'zcode' | 'codex' | 'claude';
+    readonly model: string;
+    readonly loginUrl: string;
+    readonly usernameSelector: string;
+    readonly passwordSelector: string;
+    readonly submitSelector: string;
+    readonly expectedUrlPrefix: string;
+    readonly successMarker: string;
+    readonly confidence: number;
+    readonly summary: string;
+    readonly warnings: readonly string[];
+    readonly invocationId: string;
   }>;
   planPostLoginActions(request: { readonly instruction: string }): Promise<{
     readonly provider: 'zcode' | 'codex' | 'claude';
@@ -148,12 +181,26 @@ interface DesktopBridge {
   }>;
   selectInteractiveInput(kind: 'upload-file'): Promise<{ readonly kind: 'upload-file'; readonly inputRef: 'upload-file'; readonly name: string; readonly mimeType: string; readonly dataBase64: string } | null>;
   selectInteractiveInput(kind: 'api-spec'): Promise<{ readonly kind: 'api-spec'; readonly inputRef: 'api-spec'; readonly name: string; readonly document: unknown } | null>;
-  generateAiReport(request: { readonly baseContent: string; readonly baseModelHash: string; readonly guidelines: readonly string[] }): Promise<{
+  generateAiReport(request: {
+    readonly baseContent: string;
+    readonly baseModelHash: string;
+    readonly guidelines: readonly string[];
+    readonly findings: readonly { readonly findingId: string; readonly title: string; readonly url: string; readonly method: string; readonly parameter: string }[];
+  }): Promise<{
     readonly provider: 'zcode' | 'codex' | 'claude';
     readonly model: string;
     readonly content: string;
     readonly modelHash: string;
     readonly invocationId: string;
+    readonly findingNarratives: readonly {
+      readonly findingId: string;
+      readonly summary: string;
+      readonly conditions: string;
+      readonly cause: string;
+      readonly reproductionSteps: readonly string[];
+      readonly remediation: string;
+      readonly verificationCriteria: string;
+    }[];
   }>;
   openSelectedPath(path: string): Promise<void>;
   openSettings(): Promise<void>;
@@ -389,6 +436,49 @@ const container = document.getElementById('root');
 if (container === null) {
   throw new Error('root element not found');
 }
+
+interface RendererErrorBoundaryState {
+  readonly error: Error | null;
+}
+
+class RendererErrorBoundary extends React.Component<React.PropsWithChildren, RendererErrorBoundaryState> {
+  state: RendererErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(cause: unknown): RendererErrorBoundaryState {
+    return { error: cause instanceof Error ? cause : new Error(String(cause)) };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo): void {
+    console.error('ScopePilot2 renderer error', error, info);
+  }
+
+  render(): React.ReactNode {
+    if (this.state.error === null) return this.props.children;
+    return (
+      <div
+        role="alert"
+        style={{
+          display: 'flex',
+          minHeight: '100vh',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '32px',
+          boxSizing: 'border-box',
+        }}
+      >
+        <div style={{ display: 'flex', maxWidth: '640px', flexDirection: 'column', gap: '16px' }}>
+          <Text as="h1" size={600} weight="semibold">{t('app.unexpectedError.title')}</Text>
+          <Text>{t('app.unexpectedError.description')}</Text>
+          <Text size={200}>{this.state.error.message}</Text>
+          <Button appearance="primary" onClick={() => window.location.reload()}>
+            {t('app.unexpectedError.reload')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+}
+
 /** provider の外で明暗を決める wrapper (FluentProvider の theme を切替)。 */
 function ThemedApp(): React.ReactElement {
   const prefersLight = usePrefersLight();
@@ -413,9 +503,11 @@ function ThemedApp(): React.ReactElement {
         backgroundColor: theme.colorNeutralBackground2,
       }}
     >
-      {new URLSearchParams(window.location.search).get('window') === 'settings'
-        ? <RuntimeSettingsWindow />
-        : <App themePreference={themePreference} onThemePreferenceChange={setThemePreference} />}
+      <RendererErrorBoundary>
+        {new URLSearchParams(window.location.search).get('window') === 'settings'
+          ? <RuntimeSettingsWindow />
+          : <App themePreference={themePreference} onThemePreferenceChange={setThemePreference} />}
+      </RendererErrorBoundary>
     </FluentProvider>
   );
 }

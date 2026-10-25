@@ -3,7 +3,7 @@
  * S02 はガイドライン選択のみ、S03 の crawl 上限は表示専用。進行は wizard-state の判定のみを使う。
  * S04〜S07 は次増分で接続する (この file では案内のみ)。
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Checkbox,
@@ -20,6 +20,11 @@ import {
 } from '@fluentui/react-components';
 import { t } from './resources.ts';
 import { parseHttpOriginInput } from './origin-input.ts';
+import {
+  INITIAL_RENDERER_REPORT_PROFILE,
+  normalizeRendererReportProfile,
+  type RendererReportProfile,
+} from './report-profile.ts';
 import type { AiCatalogSnapshot, AiCliProvider, AiProviderCatalog, AppAiSelection } from '../shared/runtime-settings.ts';
 import {
   advance,
@@ -431,6 +436,7 @@ async function waitFor(milliseconds: number): Promise<void> {
 }
 
 type ActivatedDesktopWorkspace = Awaited<ReturnType<NonNullable<Window['scopepilotDesktop']>['activateCaseWorkspace']>>;
+type ReportProfileState = RendererReportProfile;
 
 async function callApi<T>(apiBase: string, method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
@@ -457,7 +463,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
   const [allowedOrigins, setAllowedOrigins] = useState('');
   const [supportingOrigins, setSupportingOrigins] = useState('');
   const [targetRoles, setTargetRoles] = useState('unauthenticated');
-  const [forbiddenActions, setForbiddenActions] = useState('削除\n購入・決済\n認証情報の変更');
+  const [forbiddenActions, setForbiddenActions] = useState('削除\n購入・決済\n認証情報の変更\n設定変更');
   const [aiProvider, setAiProvider] = useState<'zcode' | 'codex' | 'claude'>('codex');
   const [aiModel, setAiModel] = useState('');
   const [aiCatalog, setAiCatalog] = useState<AiCatalogSnapshot | null>(null);
@@ -484,17 +490,18 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
   const [interactiveResults, setInteractiveResults] = useState<readonly InteractiveDiagnosticResult[]>([]);
   const [interactiveStatus, setInteractiveStatus] = useState('');
   const [reportContent, setReportContent] = useState('');
-  const [reportFiles, setReportFiles] = useState<{ markdownPath: string; wordPath: string } | null>(null);
+  const [reportFiles, setReportFiles] = useState<{ markdownPath: string; wordPath: string; structuredJsonPath: string } | null>(null);
+  const [reportProfile, setReportProfile] = useState<ReportProfileState>(INITIAL_RENDERER_REPORT_PROFILE);
   const [analysisStatus, setAnalysisStatus] = useState('');
   const [settingsStatus, setSettingsStatus] = useState('');
   const [credentialEditorOpen, setCredentialEditorOpen] = useState(false);
   const [authRole, setAuthRole] = useState('member');
   const [authLoginUrl, setAuthLoginUrl] = useState('');
   const [authExpectedUrlPrefix, setAuthExpectedUrlPrefix] = useState('');
-  const [authUsernameSelector, setAuthUsernameSelector] = useState('input[name="username"]');
-  const [authPasswordSelector, setAuthPasswordSelector] = useState('input[name="password"]');
-  const [authSubmitSelector, setAuthSubmitSelector] = useState('button[type="submit"], input[type="submit"]');
-  const [authSuccessMarker, setAuthSuccessMarker] = useState('logout');
+  const [authUsernameSelector, setAuthUsernameSelector] = useState('');
+  const [authPasswordSelector, setAuthPasswordSelector] = useState('');
+  const [authSubmitSelector, setAuthSubmitSelector] = useState('');
+  const [authSuccessMarker, setAuthSuccessMarker] = useState('');
   const [postLoginSetupEnabled, setPostLoginSetupEnabled] = useState(false);
   const [postLoginInstruction, setPostLoginInstruction] = useState('');
   const [authUsername, setAuthUsername] = useState('');
@@ -504,6 +511,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
   const [reportAiStatus, setReportAiStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>('');
+  const explorationInFlight = useRef(false);
 
   const progress = useMemo(() => (WIZARD_STEPS.indexOf(step) + 1) / WIZARD_STEPS.length, [step]);
   const visibleFindings = useMemo(
@@ -578,6 +586,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
     setForbiddenActions(effective.forbiddenActions.join('\n'));
     setAiProvider(effective.aiProvider);
     setAiModel(effective.aiModel);
+    setReportProfile(normalizeRendererReportProfile(activated.reportProfile));
     if (mode === 'open' && activated.existingCase === null) throw new Error(t('wizard.s01.existingCaseRequired'));
     const record = activated.existingCase ?? await callApi<{ name: string; revision: number }>(apiBase, 'POST', '/api/case', {
       name: activated.directory.split(/[\\/]/).filter(Boolean).at(-1) ?? activated.directory,
@@ -599,6 +608,10 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
     setAuthRole(effective.targetRoles.find((role) => role !== 'unauthenticated') ?? effective.targetRoles[0] ?? 'member');
     setAuthLoginUrl(effective.startUrl);
     setAuthExpectedUrlPrefix(new URL(effective.startUrl).origin);
+    setAuthUsernameSelector('');
+    setAuthPasswordSelector('');
+    setAuthSubmitSelector('');
+    setAuthSuccessMarker('');
     setData((current) => ({ ...current, caseOpened: true }));
   }, [apiBase]);
 
@@ -635,6 +648,10 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
         setSettingsStatus('');
         setAuthenticatedRole('');
         setAuthStatus('');
+        setAuthUsernameSelector('');
+        setAuthPasswordSelector('');
+        setAuthSubmitSelector('');
+        setAuthSuccessMarker('');
         setData((current) => ({ ...current, caseOpened: false }));
         if (mode === 'open') {
           const bridge = window.scopepilotDesktop;
@@ -844,6 +861,10 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
       setAuthRole(effective.targetRoles.find((role) => role !== 'unauthenticated') ?? effective.targetRoles[0] ?? 'member');
       setAuthLoginUrl(effective.startUrl);
       setAuthExpectedUrlPrefix(new URL(effective.startUrl).origin);
+      setAuthUsernameSelector('');
+      setAuthPasswordSelector('');
+      setAuthSubmitSelector('');
+      setAuthSuccessMarker('');
       setData((current) => ({ ...current, caseOpened: true }));
     } catch (cause) {
       setError(String(cause));
@@ -851,6 +872,42 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
       setBusy(false);
     }
   }, [aiModel, aiProvider, allowedOrigins, apiBase, caseDirectory, forbiddenActions, materialFiles, startUrl, supportingOrigins, targetRoles, workspaceMode]);
+
+  const inferAuthenticationElements = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    setAuthStatus(t('wizard.s03.authInferring', { provider: aiProvider }));
+    try {
+      let loginUrl: URL;
+      try { loginUrl = new URL(authLoginUrl); } catch { throw new Error(t('wizard.s03.authUrlInvalid')); }
+      if (!['http:', 'https:'].includes(loginUrl.protocol)) throw new Error(t('wizard.s03.authUrlInvalid'));
+      const allowed = new Set([
+        ...parseHttpOriginInput(allowedOrigins).origins,
+        ...parseHttpOriginInput(supportingOrigins).origins,
+      ]);
+      if (!allowed.has(loginUrl.origin)) throw new Error(t('wizard.s03.authOriginRequired'));
+      const bridge = window.scopepilotDesktop;
+      if (bridge === undefined) throw new Error(t('wizard.s01.bridgeMissing'));
+      const inferred = await bridge.inferLoginForm({ loginUrl: loginUrl.toString() });
+      setAuthLoginUrl(inferred.loginUrl);
+      setAuthUsernameSelector(inferred.usernameSelector);
+      setAuthPasswordSelector(inferred.passwordSelector);
+      setAuthSubmitSelector(inferred.submitSelector);
+      setAuthExpectedUrlPrefix(inferred.expectedUrlPrefix);
+      setAuthSuccessMarker(inferred.successMarker);
+      setAuthStatus(t('wizard.s03.authInferred', {
+        provider: inferred.provider,
+        confidence: Math.round(inferred.confidence * 100),
+        summary: inferred.summary,
+        warnings: inferred.warnings.length === 0 ? t('wizard.s03.authNoWarnings') : inferred.warnings.join(' / '),
+      }));
+    } catch (cause) {
+      setError(String(cause));
+      setAuthStatus('');
+    } finally {
+      setBusy(false);
+    }
+  }, [aiProvider, allowedOrigins, authLoginUrl, supportingOrigins]);
 
   const addAuthentication = useCallback(async () => {
     setBusy(true);
@@ -962,6 +1019,10 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
   }, [aiProvider, apiBase]);
 
   const runExploration = useCallback(async () => {
+    // React の busy 反映前に連続 click が入っても、同じ browser/ZAP context で
+    // 探索を二重起動しない。二重起動は片方の navigation/API を abort し得る。
+    if (explorationInFlight.current) return;
+    explorationInFlight.current = true;
     setBusy(true);
     setError('');
     try {
@@ -992,6 +1053,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
     } catch (cause) {
       setError(String(cause));
     } finally {
+      explorationInFlight.current = false;
       setBusy(false);
     }
   }, [apiBase, authenticatedRole, startUrl]);
@@ -1182,23 +1244,46 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
     setBusy(true);
     setError('');
     try {
-      const report = await callApi<{ content: string; modelHash: string }>(apiBase, 'POST', '/api/report', {
+      const report = await callApi<{
+        content: string;
+        modelHash: string;
+        reportId: string;
+        model: Parameters<NonNullable<Window['scopepilotDesktop']>['saveReport']>[0]['model'];
+      }>(apiBase, 'POST', '/api/report', {
         guidelines: data.selectedGuidelines,
         excludeLowAndInfo,
       });
       const bridge = window.scopepilotDesktop;
       if (bridge === undefined) throw new Error(t('wizard.s01.bridgeMissing'));
       let content = report.content;
-      let modelHash = report.modelHash;
+      let findingNarratives: Awaited<ReturnType<NonNullable<Window['scopepilotDesktop']>['generateAiReport']>>['findingNarratives'] | undefined;
       try {
-        const drafted = await bridge.generateAiReport({ baseContent: report.content, baseModelHash: report.modelHash, guidelines: data.selectedGuidelines });
+        const drafted = await bridge.generateAiReport({
+          baseContent: report.content,
+          baseModelHash: report.modelHash,
+          guidelines: data.selectedGuidelines,
+          findings: report.model.findings.map((finding) => ({
+            findingId: finding.findingId,
+            title: finding.title,
+            url: finding.url,
+            method: finding.method ?? 'GET',
+            parameter: finding.param ?? '',
+          })),
+        });
         content = drafted.content;
-        modelHash = drafted.modelHash;
+        findingNarratives = drafted.findingNarratives;
         setReportAiStatus(t('wizard.s07.aiGenerated', { provider: drafted.provider, model: drafted.model }));
       } catch (cause) {
         setReportAiStatus(t('wizard.s07.aiFallback', { message: String(cause) }));
       }
-      const saved = await bridge.saveReport({ content, modelHash });
+      const saved = await bridge.saveReport({
+        content,
+        modelHash: report.modelHash,
+        reportId: report.reportId,
+        model: report.model,
+        profile: reportProfile,
+        ...(findingNarratives === undefined ? {} : { findingNarratives }),
+      });
       setReportFiles(saved);
       setReportContent(content);
     } catch (cause) {
@@ -1206,7 +1291,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
     } finally {
       setBusy(false);
     }
-  }, [apiBase, data.selectedGuidelines, excludeLowAndInfo]);
+  }, [apiBase, data.selectedGuidelines, excludeLowAndInfo, reportProfile]);
 
   const advanceResult = advance(step, data);
   const backResult = goBack(step);
@@ -1466,6 +1551,12 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
                 <Field label={t('wizard.s03.authLoginUrl')} required>
                   <Input value={authLoginUrl} onChange={(_event, state) => setAuthLoginUrl(state.value)} />
                 </Field>
+                <div className={`${styles.fullField} ${styles.inlineActions}`}>
+                  <Button disabled={busy || authLoginUrl.trim() === ''} onClick={() => void inferAuthenticationElements()}>
+                    {t('wizard.s03.authInfer')}
+                  </Button>
+                  <Text size={200} className={styles.hint}>{t('wizard.s03.authInferHint', { provider: aiProvider })}</Text>
+                </div>
                 <Field label={t('wizard.s03.authUsername')} required>
                   <Input value={authUsername} autoComplete="off" onChange={(_event, state) => setAuthUsername(state.value)} />
                 </Field>
@@ -1876,6 +1967,87 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
       {step === 'S07' && (
         <>
           <Text id="wizard-S07-title" size={400} weight="semibold">{t('wizard.s07.title')}</Text>
+          <Text className={styles.hint}>{t('wizard.s07.profileHint')}</Text>
+          <div className={styles.pathCard}>
+            <Text weight="semibold">{t('wizard.s07.profileTitle')}</Text>
+            <div className={styles.formGrid}>
+              <Field label={t('wizard.s07.systemName')}>
+                <Input value={reportProfile.systemName} onChange={(_event, state) => setReportProfile((current) => ({ ...current, systemName: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.clientName')}>
+                <Input value={reportProfile.clientName} onChange={(_event, state) => setReportProfile((current) => ({ ...current, clientName: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.serviceProvider')}>
+                <Input value={reportProfile.serviceProvider} onChange={(_event, state) => setReportProfile((current) => ({ ...current, serviceProvider: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.version')}>
+                <Input value={reportProfile.version} onChange={(_event, state) => setReportProfile((current) => ({ ...current, version: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.documentStatus')}>
+                <Input value={reportProfile.documentStatus} onChange={(_event, state) => setReportProfile((current) => ({ ...current, documentStatus: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.classification')}>
+                <Input value={reportProfile.classification} onChange={(_event, state) => setReportProfile((current) => ({ ...current, classification: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.author')}>
+                <Input value={reportProfile.author} onChange={(_event, state) => setReportProfile((current) => ({ ...current, author: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.reviewer')}>
+                <Input value={reportProfile.reviewer} onChange={(_event, state) => setReportProfile((current) => ({ ...current, reviewer: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.approver')}>
+                <Input value={reportProfile.approver} onChange={(_event, state) => setReportProfile((current) => ({ ...current, approver: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.assessmentType')}>
+                <Input value={reportProfile.assessmentType} onChange={(_event, state) => setReportProfile((current) => ({ ...current, assessmentType: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.sourceIps')} hint={t('wizard.s01.onePerLine')}>
+                <Textarea value={reportProfile.sourceIps} resize="vertical" onChange={(_event, state) => setReportProfile((current) => ({ ...current, sourceIps: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.distribution')} hint={t('wizard.s01.onePerLine')}>
+                <Textarea value={reportProfile.distribution} resize="vertical" onChange={(_event, state) => setReportProfile((current) => ({ ...current, distribution: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.exclusions')} hint={t('wizard.s01.onePerLine')}>
+                <Textarea value={reportProfile.exclusions} resize="vertical" onChange={(_event, state) => setReportProfile((current) => ({ ...current, exclusions: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.assumptions')} hint={t('wizard.s01.onePerLine')}>
+                <Textarea value={reportProfile.assumptions} resize="vertical" onChange={(_event, state) => setReportProfile((current) => ({ ...current, assumptions: state.value }))} />
+              </Field>
+              <Field className={styles.fullField} label={t('wizard.s07.conclusion')}>
+                <Textarea value={reportProfile.conclusion} resize="vertical" onChange={(_event, state) => setReportProfile((current) => ({ ...current, conclusion: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.priorities')} hint={t('wizard.s01.onePerLine')}>
+                <Textarea value={reportProfile.priorities} resize="vertical" onChange={(_event, state) => setReportProfile((current) => ({ ...current, priorities: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.majorLimitations')} hint={t('wizard.s01.onePerLine')}>
+                <Textarea value={reportProfile.majorLimitations} resize="vertical" onChange={(_event, state) => setReportProfile((current) => ({ ...current, majorLimitations: state.value }))} />
+              </Field>
+              <Field className={styles.fullField} label={t('wizard.s07.contact')}>
+                <Input value={reportProfile.contact} onChange={(_event, state) => setReportProfile((current) => ({ ...current, contact: state.value }))} />
+              </Field>
+              <Field label={t('wizard.s07.evidenceBodyMode')} hint={t('wizard.s07.evidenceBodyModeHint')}>
+                <Select
+                  value={reportProfile.evidenceBodyMode}
+                  onChange={(event) => setReportProfile((current) => ({
+                    ...current,
+                    evidenceBodyMode: event.target.value as RendererReportProfile['evidenceBodyMode'],
+                  }))}
+                >
+                  <option value="relevant">{t('wizard.s07.evidenceBodyRelevant')}</option>
+                  <option value="omit">{t('wizard.s07.evidenceBodyOmit')}</option>
+                  <option value="full">{t('wizard.s07.evidenceBodyFull')}</option>
+                </Select>
+              </Field>
+              <div className={styles.fullField}>
+                <Switch
+                  checked={reportProfile.highlightEvidence}
+                  label={t('wizard.s07.highlightEvidence')}
+                  onChange={(_event, state) => setReportProfile((current) => ({ ...current, highlightEvidence: state.checked }))}
+                />
+                <Text size={200} className={styles.hint}>{t('wizard.s07.highlightEvidenceHint')}</Text>
+              </div>
+            </div>
+          </div>
           {reportContent === '' ? (
             <Button appearance="primary" disabled={busy} onClick={() => void buildReport()}>
               {t('wizard.s07.generate')}
@@ -1888,6 +2060,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
                 <div className={styles.inlineActions}>
                   <Button onClick={() => void openSelectedPath(reportFiles.wordPath)}>{t('wizard.s07.openWord')}</Button>
                   <Button onClick={() => void openSelectedPath(reportFiles.markdownPath)}>{t('wizard.s07.openMarkdown')}</Button>
+                  <Button onClick={() => void openSelectedPath(reportFiles.structuredJsonPath)}>{t('wizard.s07.openStructuredJson')}</Button>
                 </div>
               )}
               <pre className={styles.report}>{reportContent}</pre>

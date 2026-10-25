@@ -3,7 +3,7 @@
  * `docs/detailed-design/f19-organizer-reporting.md` 4章・7章。
  * renderer 非依存の正規形を作り (F19-UT-004 の土台)、delegated step の限界開示を省略しない (F19-UT-008 の土台)。
  */
-import { hashStable, type Finding, type ReportArtifact, type ReportCoverage, type ReportModel } from '@scopepilot2/contracts';
+import { hashStable, type Finding, type ReportArtifact, type ReportAssessmentScope, type ReportCoverage, type ReportModel } from '@scopepilot2/contracts';
 
 export interface BuildReportInput {
   readonly caseId: string;
@@ -11,6 +11,7 @@ export interface BuildReportInput {
   readonly guidelines: readonly string[];
   readonly findings: readonly Finding[];
   readonly coverage: ReportCoverage;
+  readonly assessmentScope: ReportAssessmentScope;
 }
 
 export function buildReportModel(input: BuildReportInput): ReportModel {
@@ -23,6 +24,7 @@ export function buildReportModel(input: BuildReportInput): ReportModel {
     guidelines: [...input.guidelines],
     findings,
     coverage: input.coverage,
+    assessmentScope: input.assessmentScope,
   };
 }
 
@@ -36,6 +38,7 @@ export function renderMarkdown(model: ReportModel, reportId: string): ReportArti
   lines.push('# 診断報告書');
   lines.push('');
   lines.push(`- 案件: ${model.caseId}`);
+  lines.push(`- 案件名: ${model.assessmentScope.caseName}`);
   lines.push(`- 生成日時: ${model.generatedAt}`);
   lines.push(`- 参照ガイドライン: ${model.guidelines.length === 0 ? '(なし)' : model.guidelines.join(', ')}`);
   lines.push('');
@@ -43,6 +46,19 @@ export function renderMarkdown(model: ReportModel, reportId: string): ReportArti
   lines.push('');
   lines.push(`- 探索した URL: ${model.coverage.exploredUrlCount}`);
   lines.push(`- 診断した URL: ${model.coverage.scannedUrlCount}`);
+  lines.push('');
+  if ((model.coverage.exploredUrls?.length ?? 0) > 0) {
+    lines.push('### 探索URLと診断対象判定');
+    lines.push('');
+    for (const entry of model.coverage.exploredUrls ?? []) {
+      const excluded = model.coverage.excludedUrls?.find((candidate) => candidate.url === entry.url);
+      lines.push(`- ${entry.url} | HTTP ${entry.statusCode === null ? '不明' : String(entry.statusCode)} | ${excluded === undefined ? '診断対象' : `対象外: ${excluded.reason}`}`);
+    }
+    lines.push('');
+  }
+  lines.push(`- 認証条件: ${model.coverage.authenticationRole === null || model.coverage.authenticationRole === undefined ? '未認証' : `認証あり (${model.coverage.authenticationRole})`}`);
+  lines.push(`- スキャンポリシー: ${(model.coverage.scanPolicies ?? []).map((policy) => policy === 'passive' ? '受動' : '能動').join(' / ') || '未実施'}`);
+  lines.push(`- 実施期間: ${model.coverage.startedAt ?? '未記録'} ～ ${model.coverage.endedAt ?? '未記録'}`);
   lines.push('');
   if (model.coverage.delegatedSteps.length > 0) {
     lines.push('### 外部 engine への委譲');
@@ -80,5 +96,6 @@ export function renderMarkdown(model: ReportModel, reportId: string): ReportArti
     format: 'markdown',
     modelHash: reportModelHash(model),
     content: `${lines.join('\n')}\n`,
+    model,
   };
 }

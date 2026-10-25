@@ -10,6 +10,31 @@ export interface ZapAdapterOptions {
   readonly ajaxSpiderEnabled?: boolean;
 }
 
+export interface ZapHttpEvidenceLookup {
+  readonly pluginId?: string;
+  readonly title: string;
+  readonly url: string;
+  readonly method?: string;
+  readonly param?: string;
+}
+
+export interface RecoveredZapHttpEvidence {
+  readonly pluginId?: string;
+  readonly name: string;
+  /** The finding URL used to associate the recovered exchange with the report item. */
+  readonly url: string;
+  /** The URL recorded by ZAP. It can differ when an alert uses a generated nonce. */
+  readonly recoveredFromUrl: string;
+  readonly method: string;
+  readonly param?: string;
+  readonly messageId: string;
+  readonly recoveryStrategy: 'alert-exact' | 'message-exact' | 'alert-endpoint';
+  readonly requestHeader: string;
+  readonly requestBody?: string;
+  readonly responseHeader: string;
+  readonly responseBody?: string;
+}
+
 interface ZapAlert {
   readonly id: string;
   readonly pluginId: string;
@@ -20,6 +45,26 @@ interface ZapAlert {
   readonly param?: string;
   readonly evidence?: string;
   readonly other?: string;
+  readonly description?: string;
+  readonly solution?: string;
+  readonly reference?: string;
+  readonly attack?: string;
+  readonly messageId?: string;
+}
+
+interface ZapMessage {
+  readonly requestHeader?: string;
+  readonly requestBody?: string;
+  readonly responseHeader?: string;
+  readonly responseBody?: string;
+}
+
+interface ZapMessageResponse extends ZapMessage {
+  readonly message?: ZapMessage;
+}
+
+interface ZapHistoryMessage extends ZapMessage {
+  readonly id?: string;
 }
 
 interface ZapRun {
@@ -66,8 +111,57 @@ function riskOf(zapRisk: string): EngineAlert['risk'] {
   }
 }
 
+const MAX_HTTP_COMPONENT_CHARS = 1024 * 1024;
+
+function boundedHttpComponent(value: string | undefined): string | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (value.length <= MAX_HTTP_COMPONENT_CHARS) return value;
+  return `${value.slice(0, MAX_HTTP_COMPONENT_CHARS)}\r\n[ScopePilot2: component truncated after ${String(MAX_HTTP_COMPONENT_CHARS)} characters]`;
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sameHttpMethod(expected: string | undefined, actual: string | undefined): boolean {
+  return expected === undefined || actual === undefined || expected.toUpperCase() === actual.toUpperCase();
+}
+
+function sameEndpoint(left: string, right: string): boolean {
+  try {
+    const a = new URL(left);
+    const b = new URL(right);
+    return a.origin === b.origin && a.pathname === b.pathname;
+  } catch {
+    return false;
+  }
+}
+
+function requestLine(header: string | undefined): { readonly method: string; readonly target: string } | null {
+  const first = header?.split(/\r?\n/u, 1)[0] ?? '';
+  const match = /^(\S+)\s+(\S+)\s+HTTP\/\d(?:\.\d)?$/u.exec(first);
+  return match === null ? null : { method: match[1] ?? '', target: match[2] ?? '' };
+}
+
+function targetMatchesUrl(target: string, expected: string): boolean {
+  try {
+    const actualUrl = new URL(target, expected);
+    const expectedUrl = new URL(expected);
+    return expectedUrl.search === ''
+      ? actualUrl.origin === expectedUrl.origin && actualUrl.pathname === expectedUrl.pathname
+      : actualUrl.toString() === expectedUrl.toString();
+  } catch {
+    return target === expected;
+  }
+}
+
+function messageContainsParameter(message: ZapMessage, param: string | undefined): boolean {
+  if (param === undefined || param === '') return true;
+  const encoded = encodeURIComponent(param);
+  const haystack = `${message.requestHeader ?? ''}\n${message.requestBody ?? ''}`;
+  return haystack.includes(`${param}=`)
+    || haystack.includes(`${encoded}=`)
+    || haystack.includes(`\"${param}\"`);
 }
 
 function cookieApplies(cookie: LoginSessionCookie, target: URL): boolean {
@@ -220,6 +314,23 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
     return await this.versionPromise;
   }
 
+  /**
+   * ZAP HTTP Sessions add-on の active session を解除する。
+   * Playwright が明示注入する最新 cookie を、過去の診断 session で上書きさせないために使う。
+   */
+  async unsetActiveHttpSession(targetUrl: string): Promise<void> {
+    const target = new URL(targetUrl);
+    const expectedSite = `${target.hostname}:${target.port || (target.protocol === 'https:' ? '443' : '80')}`;
+    const { sites } = await this.api<{ readonly sites: readonly string[] }>('httpSessions/view/sites');
+    const site = sites.find((candidate) => candidate.toLocaleLowerCase() === expectedSite.toLocaleLowerCase());
+    // ZAP がまだ観測していない site には active session も存在しない。
+    // unsetActiveSession はこの場合 illegal_parameter を返すため、送信しない。
+    if (site === undefined) return;
+    await this.api('httpSessions/action/unsetActiveSession', {
+      site,
+    });
+  }
+
   private async alertsForTargets(targets: readonly string[]): Promise<readonly ZapAlert[]> {
     const origins = targets.length === 0 ? [''] : [...new Set(targets.map((target) => new URL(target).origin))];
     const alerts: ZapAlert[] = [];
@@ -232,6 +343,126 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
       alerts.push(...body.alerts);
     }
     return alerts;
+  }
+
+  private async recoveredFromAlert(
+    lookup: ZapHttpEvidenceLookup,
+    alert: ZapAlert,
+    recoveryStrategy: RecoveredZapHttpEvidence['recoveryStrategy'],
+  ): Promise<RecoveredZapHttpEvidence | null> {
+    if (alert.messageId === undefined || alert.messageId.trim() === '') return null;
+    const result = await this.api<ZapMessageResponse>('core/view/message', { id: alert.messageId });
+    const message = result.message ?? result;
+    const requestHeader = boundedHttpComponent(message.requestHeader);
+    const responseHeader = boundedHttpComponent(message.responseHeader);
+    if (requestHeader === undefined || responseHeader === undefined) return null;
+    const line = requestLine(requestHeader);
+    // Alert metadata can outlive or be rebound to a different ZAP history
+    // message. Never attach that message to a report finding unless the wire
+    // request itself matches the requested URL and method.
+    if (line === null
+      || !sameHttpMethod(lookup.method, line.method)
+      || !targetMatchesUrl(line.target, lookup.url)) return null;
+    const requestBody = boundedHttpComponent(message.requestBody);
+    const responseBody = boundedHttpComponent(message.responseBody);
+    return {
+      ...(lookup.pluginId === undefined ? {} : { pluginId: lookup.pluginId }),
+      name: lookup.title,
+      url: lookup.url,
+      recoveredFromUrl: alert.url,
+      method: alert.method || lookup.method || 'GET',
+      ...(lookup.param === undefined ? {} : { param: lookup.param }),
+      messageId: alert.messageId,
+      recoveryStrategy,
+      requestHeader,
+      ...(requestBody === undefined ? {} : { requestBody }),
+      responseHeader,
+      ...(responseBody === undefined ? {} : { responseBody }),
+    };
+  }
+
+  private async recoveredFromMessage(lookup: ZapHttpEvidenceLookup): Promise<RecoveredZapHttpEvidence | null> {
+    const result = await this.api<{ readonly messages: readonly ZapHistoryMessage[] }>('core/view/messages', {
+      baseurl: lookup.url,
+      start: '0',
+      count: '10000',
+    });
+    // Non-ZAP observations can use `param` for a data-flow description rather
+    // than an HTTP parameter name (for example "source -> sink").
+    const httpParameter = lookup.pluginId !== undefined && /^\d+$/u.test(lookup.pluginId) ? lookup.param : undefined;
+    const candidates = result.messages.filter((message) => {
+      const line = requestLine(message.requestHeader);
+      return line !== null
+        && sameHttpMethod(lookup.method, line.method)
+        && targetMatchesUrl(line.target, lookup.url)
+        && messageContainsParameter(message, httpParameter)
+        && message.id !== undefined
+        && message.id.trim() !== ''
+        && boundedHttpComponent(message.requestHeader) !== undefined
+        && boundedHttpComponent(message.responseHeader) !== undefined;
+    });
+    const message = candidates.at(-1);
+    if (message === undefined || message.id === undefined) return null;
+    const requestHeader = boundedHttpComponent(message.requestHeader)!;
+    const responseHeader = boundedHttpComponent(message.responseHeader)!;
+    const requestBody = boundedHttpComponent(message.requestBody);
+    const responseBody = boundedHttpComponent(message.responseBody);
+    return {
+      ...(lookup.pluginId === undefined ? {} : { pluginId: lookup.pluginId }),
+      name: lookup.title,
+      url: lookup.url,
+      recoveredFromUrl: lookup.url,
+      method: lookup.method ?? requestLine(requestHeader)?.method ?? 'GET',
+      ...(lookup.param === undefined ? {} : { param: lookup.param }),
+      messageId: message.id,
+      recoveryStrategy: 'message-exact',
+      requestHeader,
+      ...(requestBody === undefined ? {} : { requestBody }),
+      responseHeader,
+      ...(responseBody === undefined ? {} : { responseBody }),
+    };
+  }
+
+  /**
+   * Recovers immutable report evidence for historical findings created before
+   * ScopePilot2 stored ZAP message bodies. This is read-only: it never resends a
+   * request. Exact alert matches are preferred, then exact HTTP history, with an
+   * endpoint-equivalent alert used only for nonce-bearing alert URLs.
+   */
+  async recoverHttpExchanges(
+    lookups: readonly ZapHttpEvidenceLookup[],
+  ): Promise<readonly (RecoveredZapHttpEvidence | null)[]> {
+    const origins = [...new Set(lookups.map((lookup) => new URL(lookup.url).origin))];
+    const alerts = await this.alertsForTargets(origins);
+    const recovered: (RecoveredZapHttpEvidence | null)[] = [];
+    for (const lookup of lookups) {
+      const exact = [...alerts].reverse().find((alert) =>
+        (lookup.pluginId === undefined || alert.pluginId === lookup.pluginId)
+        && alert.url === lookup.url
+        && sameHttpMethod(lookup.method, alert.method)
+        && (lookup.param === undefined || alert.param === undefined || alert.param === lookup.param)
+        && alert.messageId !== undefined
+        && alert.messageId.trim() !== '');
+      if (exact !== undefined) {
+        recovered.push(await this.recoveredFromAlert(lookup, exact, 'alert-exact'));
+        continue;
+      }
+      const history = await this.recoveredFromMessage(lookup);
+      if (history !== null) {
+        recovered.push(history);
+        continue;
+      }
+      const endpoint = [...alerts].reverse().find((alert) =>
+        lookup.pluginId !== undefined
+        && alert.pluginId === lookup.pluginId
+        && sameEndpoint(alert.url, lookup.url)
+        && sameHttpMethod(lookup.method, alert.method)
+        && (lookup.param === undefined || alert.param === undefined || alert.param === lookup.param)
+        && alert.messageId !== undefined
+        && alert.messageId.trim() !== '');
+      recovered.push(endpoint === undefined ? null : await this.recoveredFromAlert(lookup, endpoint, 'alert-endpoint'));
+    }
+    return recovered;
   }
 
   private async configureContext(runId: string, targets: readonly string[]): Promise<{
@@ -459,10 +690,17 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
     }
     const failed = selected.find((scan) => /FAILED|STOPPED/i.test(scan.state));
     const complete = selected.every((scan) => /FINISHED|COMPLETE/i.test(scan.state));
-    const progressValues = await Promise.all(run.scanIds.map(async (id) => {
+    // A confirmed plan can fan out into dozens of per-request active scans.
+    // Querying every scan concurrently can overwhelm ZAP's local API server and
+    // cause undici to surface an AbortError even though the scans themselves
+    // continue and finish successfully. Keep the API pressure bounded by
+    // collecting statuses serially; the endpoint is local and each response is
+    // small, so this has negligible impact on the polling interval.
+    const progressValues: number[] = [];
+    for (const id of run.scanIds) {
       const result = await this.api<{ status: string }>('ascan/view/status', { scanId: id }).catch(() => ({ status: complete ? '100' : '0' }));
-      return Number(result.status);
-    }));
+      progressValues.push(Number(result.status));
+    }
     const progress = progressValues.length === 0 ? 0 : Math.round(progressValues.reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0) / progressValues.length);
     return {
       status: failed !== undefined ? 'failed' : complete ? 'complete' : 'running',
@@ -478,16 +716,50 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
     const current = await this.alertsForTargets(run.targets);
     const fresh = current.filter((alert) => !run.baselineAlertIds.has(alert.id) && !run.emittedAlertIds.has(alert.id));
     for (const alert of fresh) run.emittedAlertIds.add(alert.id);
-    const alerts = fresh.map((alert): EngineAlert => ({
-      engineAlertId: `zap-${alert.id}`,
-      pluginId: alert.pluginId,
-      name: alert.name,
-      risk: riskOf(alert.risk),
-      url: alert.url,
-      method: alert.method,
-      ...(alert.param === undefined || alert.param === '' ? {} : { param: alert.param }),
-      evidenceSummary: alert.evidence ?? alert.other ?? '',
-    }));
+    const alerts: EngineAlert[] = [];
+    // ZAP may return a large alert delta (DVWA commonly produces more than one
+    // hundred findings). Fetching every backing message with Promise.all sends
+    // the same number of simultaneous API calls and can make ZAP abort a
+    // connection. Read them serially so report evidence collection remains
+    // reliable under a large finding set.
+    for (const alert of fresh) {
+      let message: ZapMessage | undefined;
+      let httpExchangeCaptureError: string | undefined;
+      if (alert.messageId === undefined || alert.messageId.trim() === '') {
+        httpExchangeCaptureError = 'ZAP alert did not provide a messageId';
+      } else {
+        try {
+          const result = await this.api<ZapMessageResponse>('core/view/message', { id: alert.messageId });
+          message = result.message ?? result;
+        } catch (cause) {
+          httpExchangeCaptureError = cause instanceof Error ? cause.message : String(cause);
+        }
+      }
+      const requestHeader = boundedHttpComponent(message?.requestHeader);
+      const requestBody = boundedHttpComponent(message?.requestBody);
+      const responseHeader = boundedHttpComponent(message?.responseHeader);
+      const responseBody = boundedHttpComponent(message?.responseBody);
+      alerts.push({
+        engineAlertId: `zap-${alert.id}`,
+        pluginId: alert.pluginId,
+        name: alert.name,
+        risk: riskOf(alert.risk),
+        url: alert.url,
+        method: alert.method,
+        ...(alert.param === undefined || alert.param === '' ? {} : { param: alert.param }),
+        evidenceSummary: alert.evidence ?? alert.other ?? '',
+        ...(alert.description === undefined || alert.description === '' ? {} : { description: alert.description }),
+        ...(alert.solution === undefined || alert.solution === '' ? {} : { solution: alert.solution }),
+        ...(alert.reference === undefined || alert.reference === '' ? {} : { reference: alert.reference }),
+        ...(alert.messageId === undefined ? {} : { messageId: alert.messageId }),
+        ...(alert.attack === undefined || alert.attack === '' ? {} : { attack: alert.attack }),
+        ...(requestHeader === undefined ? {} : { requestHeader }),
+        ...(requestBody === undefined ? {} : { requestBody }),
+        ...(responseHeader === undefined ? {} : { responseHeader }),
+        ...(responseBody === undefined ? {} : { responseBody }),
+        ...(httpExchangeCaptureError === undefined ? {} : { httpExchangeCaptureError }),
+      });
+    }
     return { alerts, nextCursor: cursor + alerts.length };
   }
 

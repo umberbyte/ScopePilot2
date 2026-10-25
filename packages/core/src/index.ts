@@ -20,6 +20,8 @@ export * from './domain/websocket.ts';
 export * from './domain/advanced-transport.ts';
 export * from './domain/dom-investigation.ts';
 export * from './domain/business-logic.ts';
+export * from './domain/auth-bypass.ts';
+export * from './domain/zap-unsupported.ts';
 export * from './domain/known-vulnerabilities.ts';
 export * from './domain/exploration.ts';
 export * from './domain/scan-planning.ts';

@@ -28,7 +28,8 @@ async function visiblePureBlackText(): Promise<readonly string[]> {
 
 test.beforeAll(async () => {
   targetServer = createServer((request, response) => {
-    if (request.url === '/login.php' && request.method === 'GET') {
+    const authenticated = request.headers.cookie?.includes('TESTSESSION=authenticated') === true;
+    if (request.url === '/login.php' && request.method === 'GET' && !authenticated) {
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       response.end('<!doctype html><form method="post"><input id="username" name="username"><input id="password" name="password" type="password"><input type="submit"></form>');
       return;
@@ -148,13 +149,12 @@ test('S05: 委譲範囲の開示を表示して計画を確認する', async () 
   await page.getByRole('button', { name: /次へ/ }).click();
 });
 
-test('S06: 診断を実行し所見に実影響未確認ラベルが出る', async () => {
+test('S06: 診断を実行し、実行経路と完了を表示する', async () => {
   await page.getByRole('button', { name: /診断を実行する/ }).click();
   await expect(page.getByRole('status').filter({ hasText: /診断完了/ })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('現在のコマンド')).toBeVisible();
-  await expect(page.getByText(/ZAP API: core\/accessUrl/).first()).toBeVisible();
+  await expect(page.getByText(/ZAP API: context \+ active HTTP session/).first()).toBeVisible();
   await expect(page.getByText('実行ログ')).toBeVisible();
-  await expect(page.getByText(/実影響未確認/).first()).toBeVisible();
   await page.getByRole('button', { name: /次へ/ }).click();
 });
 

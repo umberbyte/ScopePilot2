@@ -26,6 +26,21 @@ export const FindingSeverities = ['info', 'low', 'medium', 'high', 'unknown'] as
 
 export type FindingSeverity = (typeof FindingSeverities)[number];
 
+/** 人が証拠と再現結果を確認した記録。engineの候補判定とは分離して保持する。 */
+export interface FindingHumanReview {
+  readonly result: 'confirmed' | 'false-positive';
+  readonly reproduction: 'reproduced' | 'not-reproduced';
+  readonly reviewedBy: string;
+  readonly reviewedAt: string;
+  readonly notes: string;
+  readonly severityRationale: string;
+  readonly cvss?: {
+    readonly version: '3.1' | '4.0';
+    readonly vector: string;
+    readonly score: number;
+  };
+}
+
 export interface Finding {
   readonly findingId: string;
   readonly title: string;
@@ -43,4 +58,5 @@ export interface Finding {
   /** 重複除外後の再観測回数。1 が初回。 */
   readonly occurrences: number;
   readonly enginePluginId?: string;
+  readonly humanReview?: FindingHumanReview;
 }

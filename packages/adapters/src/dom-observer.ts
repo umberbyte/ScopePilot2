@@ -161,6 +161,8 @@ export const runPlaywrightDomObservation: DomObservationRunner = async (input) =
     await page.waitForTimeout(input.settleMs);
 
     const observations: { api: string; marker: string }[] = [];
+    // DOM本文そのものはプロセス外へ出さず、ブラウザ内で分類したカテゴリと件数だけを返す。
+    const piiCategories = new Map<string, number>();
     let instrumentedFrames = 0;
     for (const frame of page.frames()) {
       const frameUrl = frame.url();
@@ -172,13 +174,47 @@ export const runPlaywrightDomObservation: DomObservationRunner = async (input) =
       }
       const result = await frame.evaluate((key) => {
         const state = (globalThis as Record<string, unknown>)[key] as { ready?: unknown; events?: unknown } | undefined;
-        return state === undefined ? null : { ready: state.ready === true, events: state.events };
+        if (state === undefined) return null;
+        const text = (document.body?.innerText ?? '').slice(0, 200_000);
+        const categories: Record<string, number> = {};
+        const count = (name: string, pattern: RegExp): void => {
+          const matches = text.match(pattern);
+          if (matches !== null) categories[name] = Math.min(matches.length, 100);
+        };
+        count('email', /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu);
+        count('phone', /(?:\+?81[- ]?|0)\d{1,4}[- ]?\d{1,4}[- ]?\d{3,4}/gu);
+        count('my-number-unmasked', /(?:マイナンバー|個人番号)\s*[:：]?\s*\d{12}\b/gu);
+        count('pin-unmasked', /\b(?:PIN|暗証番号)\s*[:：]?\s*\d{4,8}\b/giu);
+        const digits = text.match(/(?:\d[ -]?){13,19}/gu) ?? [];
+        const luhn = (candidate: string): boolean => {
+          const normalized = candidate.replace(/\D/gu, '');
+          if (normalized.length < 13 || normalized.length > 19) return false;
+          let sum = 0;
+          let alternate = false;
+          for (let index = normalized.length - 1; index >= 0; index -= 1) {
+            let digit = Number(normalized[index]);
+            if (alternate) { digit *= 2; if (digit > 9) digit -= 9; }
+            sum += digit;
+            alternate = !alternate;
+          }
+          return sum % 10 === 0;
+        };
+        const cardCount = digits.filter(luhn).length;
+        if (cardCount > 0) categories['payment-card-unmasked'] = Math.min(cardCount, 100);
+        return { ready: state.ready === true, events: state.events, categories };
       }, '__scopepilotDomObserverV1');
       if (result === null || result.ready !== true) {
         throw new Error(`DOM instrumentation unavailable in frame: ${frameUrl}`);
       }
       instrumentedFrames += 1;
       observations.push(...validEvents(result.events, input.maxEvents - observations.length));
+      if (typeof result.categories === 'object' && result.categories !== null) {
+        for (const [category, value] of Object.entries(result.categories)) {
+          if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+            piiCategories.set(category, Math.min(100, (piiCategories.get(category) ?? 0) + value));
+          }
+        }
+      }
       if (observations.length >= input.maxEvents) {
         break;
       }
@@ -196,8 +232,14 @@ export const runPlaywrightDomObservation: DomObservationRunner = async (input) =
         seen.add(key);
         return true;
       }),
-      // Initial real path deliberately avoids exporting DOM text snapshots.
-      nodes: [],
+      // A coverage sentinel distinguishes a completed scan with no matches from an unavailable scan.
+      nodes: [
+        { text: '[coverage:dom-text-classification]', looksLikePii: false },
+        ...[...piiCategories.entries()].map(([category, count]) => ({
+          text: `[category:${category};count=${String(count)}]`,
+          looksLikePii: true,
+        })),
+      ],
     };
   } finally {
     await context.close();

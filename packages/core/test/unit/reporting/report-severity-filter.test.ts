@@ -18,12 +18,13 @@ describe('report severity filter', () => {
     assert.match(complete.content, /Informational header/u);
     assert.match(complete.content, /Low risk header/u);
     assert.match(complete.content, /High risk issue/u);
+    assert.doesNotMatch(complete.content, /お客様のご指示によりLow以下は省略されています。/u);
 
     const filtered = service.generateReport(operator, { guidelines: ['test'], excludeLowAndInfo: true });
     assert.doesNotMatch(filtered.content, /Informational header/u);
     assert.doesNotMatch(filtered.content, /Low risk header/u);
     assert.match(filtered.content, /High risk issue/u);
-    assert.match(filtered.content, /Low \/ Info/u);
+    assert.match(filtered.content, /お客様のご指示によりLow以下は省略されています。/u);
     assert.equal(service.listFindings().length, 3, 'filtering must not delete audit findings');
   });
 });

@@ -32,6 +32,19 @@ export interface EngineAlert {
   readonly method: string;
   readonly param?: string;
   readonly evidenceSummary: string;
+  /** Engine-provided explanation and corrective guidance retained for report authoring. */
+  readonly description?: string;
+  readonly solution?: string;
+  readonly reference?: string;
+  /** ZAP の alert に関連付いた実際の HTTP message。診断原本として証跡へ保存する。 */
+  readonly messageId?: string;
+  readonly requestHeader?: string;
+  readonly requestBody?: string;
+  readonly responseHeader?: string;
+  readonly responseBody?: string;
+  readonly attack?: string;
+  /** message API が利用できなかった場合も alert 自体は失わず、理由を原本へ残す。 */
+  readonly httpExchangeCaptureError?: string;
 }
 
 export interface EngineProgress {

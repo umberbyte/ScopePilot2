@@ -11,11 +11,13 @@ async function startFakeZap(): Promise<{
   requests: readonly RecordedRequest[];
   seededPaths: string[];
   setScansState(value: readonly { id: string; state: string }[]): void;
+  setAlertVisible(value: boolean): void;
 }> {
   const requests: RecordedRequest[] = [];
   const seededPaths: string[] = [];
   let scans: readonly { id: string; state: string }[] = [{ id: '7', state: 'RUNNING' }];
   let scanStarted = false;
+  let alertVisible = false;
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     requests.push({ path: url.pathname, query: url.searchParams });
@@ -24,6 +26,7 @@ async function startFakeZap(): Promise<{
       response.end(JSON.stringify(body));
     };
     if (url.pathname === '/JSON/core/view/version') return respond({ version: '2.17.0' });
+    if (url.pathname === '/JSON/httpSessions/view/sites') return respond({ sites: ['target.test:80'] });
     if (url.pathname === '/JSON/context/action/newContext') return respond({ contextId: '1' });
     if (url.pathname === '/JSON/users/action/newUser') return respond({ userId: '1' });
     if (url.pathname === '/JSON/core/action/sendRequest') {
@@ -44,10 +47,35 @@ async function startFakeZap(): Promise<{
     if (url.pathname === '/JSON/ascan/view/status') return respond({ status: '42' });
     if (url.pathname === '/JSON/ascan/view/scans') return respond({ scans });
     if (url.pathname === '/JSON/core/view/alerts') {
-      return respond({ alerts: scanStarted || url.searchParams.get('baseurl') === '' ? [{
+      return respond({ alerts: scanStarted || alertVisible || url.searchParams.get('baseurl') === '' ? [{
         id: '101', pluginId: '40012', name: 'Cross Site Scripting (Reflected)', risk: 'Medium',
         url: 'http://target.test/x', method: 'GET', param: 'q', evidence: '<script>alert(1)</script>',
+        attack: '<script>alert(1)</script>', messageId: '501',
+        description: '<p>入力値がHTMLへ未エスケープで反映されます。</p>',
+        solution: '出力文脈に応じてエンコードしてください。',
+        reference: 'https://www.zaproxy.org/docs/alerts/40012/',
       }] : [] });
+    }
+    if (url.pathname === '/JSON/core/view/message') {
+      assert.equal(url.searchParams.get('id'), '501');
+      return respond({ message: {
+        requestHeader: 'GET /x?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E HTTP/1.1\r\nHost: target.test\r\nCookie: session=secret',
+        requestBody: '',
+        responseHeader: 'HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8',
+        responseBody: '<html><body><script>alert(1)</script></body></html>',
+      } });
+    }
+    if (url.pathname === '/JSON/core/view/messages') {
+      if (url.searchParams.get('baseurl') === 'http://target.test/observed') {
+        return respond({ messages: [{
+          id: '601',
+          requestHeader: 'GET http://target.test/observed HTTP/1.1\r\nHost: target.test\r\nCookie: session=secret',
+          requestBody: '',
+          responseHeader: 'HTTP/1.1 200 OK\r\nContent-Type: text/html',
+          responseBody: '<html>observed</html>',
+        }] });
+      }
+      return respond({ messages: [] });
     }
     if (url.pathname === '/JSON/ascan/action/stop') return respond({ result: 'OK' });
     response.writeHead(404);
@@ -62,10 +90,55 @@ async function startFakeZap(): Promise<{
     requests,
     seededPaths,
     setScansState: (value) => { scans = value; },
+    setAlertVisible: (value) => { alertVisible = value; },
   };
 }
 
 describe('ZAP adapter', () => {
+  test('authenticated exploration can unset a stale active HTTP session', async () => {
+    const zap = await startFakeZap();
+    try {
+      const adapter = new ZapEngineAdapter({ baseUrl: zap.base });
+      await adapter.unsetActiveHttpSession('http://target.test/private?a=1');
+      const request = zap.requests.find((entry) => entry.path === '/JSON/httpSessions/action/unsetActiveSession');
+      assert.equal(request?.query.get('site'), 'target.test:80');
+    } finally {
+      zap.server.close();
+    }
+  });
+
+  test('recovers historical HTTP evidence without resending requests', async () => {
+    const zap = await startFakeZap();
+    try {
+      zap.setAlertVisible(true);
+      const adapter = new ZapEngineAdapter({ baseUrl: zap.base });
+      const recovered = await adapter.recoverHttpExchanges([
+        { pluginId: '40012', title: 'XSS', url: 'http://target.test/x', method: 'GET', param: 'q' },
+        { pluginId: 'scopepilot-dom-flow', title: 'DOM flow', url: 'http://target.test/observed', method: 'GET' },
+        { pluginId: '40012', title: 'XSS old nonce', url: 'http://target.test/x?nonce=old', method: 'GET', param: 'q' },
+      ]);
+      assert.equal(recovered[0]?.recoveryStrategy, 'alert-exact');
+      assert.match(recovered[0]?.requestHeader ?? '', /^GET \/x/u);
+      assert.equal(recovered[1]?.recoveryStrategy, 'message-exact');
+      assert.match(recovered[1]?.responseHeader ?? '', /^HTTP\/1\.1 200 OK/u);
+      assert.equal(recovered[2], null, 'a different wire URL must never be attached to a nonce-specific finding');
+      assert.equal(zap.requests.some((entry) => entry.path === '/JSON/core/action/sendRequest'), false);
+    } finally {
+      zap.server.close();
+    }
+  });
+
+  test('HTTP Sessions 未登録の新規 site は解除 API を呼ばず続行する', async () => {
+    const zap = await startFakeZap();
+    try {
+      const adapter = new ZapEngineAdapter({ baseUrl: zap.base });
+      await adapter.unsetActiveHttpSession('http://new-target.test/private');
+      assert.equal(zap.requests.some((entry) => entry.path === '/JSON/httpSessions/action/unsetActiveSession'), false);
+    } finally {
+      zap.server.close();
+    }
+  });
+
   test('creates a context, transfers cookies, seeds insertion points and starts bounded scans', async () => {
     const zap = await startFakeZap();
     try {
@@ -95,6 +168,13 @@ describe('ZAP adapter', () => {
       const first = await adapter.alerts(runId, 0);
       assert.equal(first.alerts.length, 1);
       assert.equal(first.alerts[0]?.risk, 'Medium');
+      assert.equal(first.alerts[0]?.messageId, '501');
+      assert.match(first.alerts[0]?.description ?? '', /未エスケープ/u);
+      assert.match(first.alerts[0]?.solution ?? '', /エンコード/u);
+      assert.match(first.alerts[0]?.reference ?? '', /40012/u);
+      assert.match(first.alerts[0]?.requestHeader ?? '', /^GET \/x/u);
+      assert.match(first.alerts[0]?.responseBody ?? '', /<script>alert\(1\)<\/script>/u);
+      assert.ok(zap.requests.some((entry) => entry.path === '/JSON/core/view/message'));
       assert.equal(first.nextCursor, 1);
       assert.equal((await adapter.alerts(runId, 1)).alerts.length, 0, 'same ZAP alert is emitted only once per run');
       await adapter.stop(runId);

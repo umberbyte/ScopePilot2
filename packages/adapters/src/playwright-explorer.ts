@@ -151,6 +151,11 @@ export interface PlaywrightExplorerOptions {
   readonly cookies?: readonly BrowserCookie[];
   /** Route exploration through ZAP so authenticated browser traffic seeds its site tree. */
   readonly proxyServer?: string;
+  /**
+   * ZAP 等の proxy が保持する旧 active session を、認証 cookie の送信前に解除する。
+   * 解除失敗時は匿名状態で探索を続けず、そのまま失敗させる。
+   */
+  readonly beforeSessionObservation?: (url: string) => Promise<void>;
 }
 
 function isDownloadNavigationError(cause: unknown): boolean {
@@ -178,12 +183,21 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
   readonly engineVersion = 'playwright-chromium';
   private scope: PlaywrightExplorerOptions['scope'];
   private readonly launcher: BrowserLauncher;
+  private readonly beforeSessionObservation: ((url: string) => Promise<void>) | undefined;
+  /**
+   * ZAP の active HTTP session 解除は同じ login session / origin につき一度でよい。
+   * URL ごとに実行すると crawl 中に同じ ZAP API を数百回呼び、ZAP が混雑した際に
+   * AbortError (timeout) で正常な探索結果を失う。WeakMap にして cookie 値自体は保持・
+   * 記録せず、新しい login が新しい cookie 配列を渡した時は改めて解除する。
+   */
+  private readonly preparedSessionOrigins = new WeakMap<readonly BrowserCookie[], Set<string>>();
   private contextPromise: Promise<StubBrowserContext> | null = null;
   private resolvedVersion = 'playwright (未起動)';
 
   constructor(options: PlaywrightExplorerOptions) {
     this.scope = options.scope;
     this.launcher = options.launcher ?? createDefaultLauncher(options.cookies, options.proxyServer);
+    this.beforeSessionObservation = options.beforeSessionObservation;
   }
 
   /** 案件の作成・切替時に、送信前強制へ使う scope を更新する。 */
@@ -228,6 +242,21 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
     // scope 強制は経路の入口でも行う (Enforced: ここは送信前)。
     if (!ScopePolicy.decide(this.scope, url).allowed) {
       return null;
+    }
+    if (sessionCookies !== undefined) {
+      // ZAP の HTTP Sessions add-on は active session の cookie を上書き注入する。
+      // login executor から受け取った最新 cookie が優先されるよう、送信前に解除する。
+      const origin = new URL(url).origin;
+      let preparedOrigins = this.preparedSessionOrigins.get(sessionCookies);
+      if (preparedOrigins === undefined) {
+        preparedOrigins = new Set<string>();
+        this.preparedSessionOrigins.set(sessionCookies, preparedOrigins);
+      }
+      if (!preparedOrigins.has(origin)) {
+        await this.beforeSessionObservation?.(origin);
+        // 失敗時は記録しない。次回の観測で安全準備を再試行できるようにする。
+        preparedOrigins.add(origin);
+      }
     }
     const context = await this.ensureContext();
     const page = await context.newPage(sessionCookies);

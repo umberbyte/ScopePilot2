@@ -63,7 +63,7 @@ export class NucleiRunner {
     this.templateManifestPath = options.templateManifestPath;
   }
 
-  private async stageReviewedTemplates(workdir: string): Promise<{ readonly directory: string; readonly count: number; readonly bundleHash: string }> {
+  private async stageReviewedTemplates(workdir: string, templateIds?: readonly string[]): Promise<{ readonly directory: string; readonly count: number; readonly bundleHash: string }> {
     if (this.templateManifestPath === undefined || this.templateManifestPath.trim() === '') {
       throw new Error('nuclei reviewed template manifest is not configured');
     }
@@ -78,9 +78,18 @@ export class NucleiRunner {
     const manifestDirectory = dirname(manifestPath);
     const stagedDirectory = join(workdir, 'reviewed-http-templates');
     await mkdir(stagedDirectory, { recursive: true });
+    const spotIds = templateIds === undefined ? undefined : new Set(templateIds);
+    if (spotIds !== undefined) {
+      const known = new Set(parsed.templates.map((entry) => (typeof entry?.id === 'string' ? entry.id : '')));
+      const unknown = [...spotIds].filter((id) => !known.has(id));
+      if (unknown.length > 0) {
+        throw new Error(`nuclei spot template ids not in the reviewed manifest: ${unknown.join(', ')}`);
+      }
+    }
     const seenIds = new Set<string>();
     const pinnedEntries: { readonly id: string; readonly sha256: string }[] = [];
-    for (const [index, entry] of parsed.templates.entries()) {
+    const entries = parsed.templates.filter((entry) => spotIds === undefined || spotIds.has(typeof entry?.id === 'string' ? entry.id : ''));
+    for (const [index, entry] of entries.entries()) {
       if (typeof entry !== 'object' || entry === null || typeof entry.id !== 'string' || entry.id.trim() === ''
         || typeof entry.path !== 'string' || entry.path.trim() === '' || typeof entry.sha256 !== 'string'
         || entry.protocol !== 'http' || isAbsolute(entry.path)) {
@@ -242,6 +251,7 @@ export class NucleiRunner {
     };
     readonly signal?: AbortSignal;
     readonly onLog?: (line: string) => void;
+    readonly templateIds?: readonly string[];
   }): Promise<NucleiRunResult> {
     if (input.targets.length === 0) {
       throw new Error('nuclei run requires at least one target');
@@ -250,7 +260,7 @@ export class NucleiRunner {
     try {
       const targetFile = join(workdir, 'targets.txt');
       await writeFile(targetFile, `${input.targets.join('\n')}\n`, 'utf8');
-      const templates = await this.stageReviewedTemplates(workdir);
+      const templates = await this.stageReviewedTemplates(workdir, input.templateIds);
       const totalTimeoutMs = input.limits === undefined
         ? (this.timeoutMs ?? 15 * 60_000)
         : this.timeoutMs === undefined
@@ -264,6 +274,7 @@ export class NucleiRunner {
       const resultFile = join(workdir, 'http-findings.jsonl');
       const args = [
         '-no-color', '-disable-update-check', '-no-interactsh', '-no-stdin',
+        '-include-rr',
         '-type', 'http',
         '-t', templates.directory,
         '-exclude-tags', 'dos,fuzz,intrusive,bruteforce,headless,code,network,file,dns,oast',
@@ -278,6 +289,9 @@ export class NucleiRunner {
         args.push('-max-time', `${String(Math.max(1, Math.ceil(remainingTimeoutMs / 60_000)))}m`);
       }
       input.onLog?.(`scopepilot: starting nuclei reviewed HTTP profile (${String(templates.count)} templates, ${String(input.targets.length)} targets)`);
+      if (input.templateIds !== undefined) {
+        input.onLog?.(`scopepilot: spot execution limited to reviewed templates: ${input.templateIds.join(', ')}`);
+      }
       await this.exec(args, remainingTimeoutMs, input.signal, (line) => input.onLog?.(`[http] ${line}`), input.limits?.maxRequests);
       const output = await readFile(resultFile, 'utf8').catch((cause: unknown) => {
         if (cause instanceof Error && 'code' in cause && cause.code === 'ENOENT') return '';

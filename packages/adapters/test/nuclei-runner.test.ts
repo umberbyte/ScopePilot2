@@ -19,7 +19,7 @@ if (args.includes('-version')) {
   process.exit(0);
 }
 if (args.includes('-silent')) throw new Error('silent must not be passed');
-for (const required of ['-type', '-t', '-exclude-tags', '-severity', '-stats', '-stats-interval', '-jsonl-export', '-no-color']) {
+for (const required of ['-type', '-t', '-exclude-tags', '-severity', '-stats', '-stats-interval', '-jsonl-export', '-no-color', '-include-rr']) {
   if (!args.includes(required)) throw new Error('missing option: ' + required);
 }
 const typeIndex = args.indexOf('-type');
@@ -128,6 +128,75 @@ describe('Nuclei runner (stub binary 契約検証)', () => {
     } finally {
       await writeFile(stubPath, '', 'utf8').catch(() => undefined);
       await manifest.cleanup();
+    }
+  });
+
+  test('templateIds 指定のスポット実行は審査済み template だけを stage する', async () => {
+    const workdir = process.env['TEMP'] ?? '.';
+    // stage された template file 数を JSONL で返す counting stub。
+    const stubPath = join(workdir, `scopepilot2-nuclei-spot-${Date.now()}.mjs`);
+    await writeFile(stubPath, [
+      "import { readdirSync, readFileSync, writeFileSync } from 'node:fs';",
+      'const args = process.argv.slice(2);',
+      "if (args.includes('-version')) { process.stderr.write('Current Version: v3.4.0\\n'); process.exit(0); }",
+      "const dirIndex = args.indexOf('-t');",
+      'const directory = args[dirIndex + 1];',
+      "const staged = readdirSync(directory).filter((name) => name.endsWith('.yaml'));",
+      "const targetIndex = args.indexOf('-l');",
+      "const targets = readFileSync(args[targetIndex + 1], 'utf8').split('\\n').filter((line) => line !== '');",
+      "const exportIndex = args.indexOf('-jsonl-export');",
+      "writeFileSync(args[exportIndex + 1], staged.map((name) => JSON.stringify({ templateID: name, matchedAt: targets[0] })).join('\\n') + '\\n', 'utf8');",
+    ].join('\n'), 'utf8');
+    // 2 template の審査済み manifest。
+    const directory = await mkdtemp(join(tmpdir(), 'scopepilot2-reviewed-spot-'));
+    const templateA = [
+      'id: old-tls-detected',
+      'info:',
+      '  name: old tls',
+      '  severity: high',
+      'http:',
+      '  - method: GET',
+      '    path:',
+      '      - "{{BaseURL}}/"',
+      '',
+    ].join('\n');
+    const templateB = [
+      'id: backup-file-exposed',
+      'info:',
+      '  name: backup',
+      '  severity: medium',
+      'http:',
+      '  - method: GET',
+      '    path:',
+      '      - "{{BaseURL}}/backup.zip"',
+      '',
+    ].join('\n');
+    await writeFile(join(directory, 'tls.yaml'), templateA, 'utf8');
+    await writeFile(join(directory, 'backup.yaml'), templateB, 'utf8');
+    const sha = (content: string) => createHash('sha256').update(content, 'utf8').digest('hex');
+    const manifestPath = join(directory, 'manifest.json');
+    await writeFile(manifestPath, JSON.stringify({
+      schemaVersion: 'scopepilot2.nuclei-template-bundle.v1',
+      templates: [
+        { id: 'old-tls-detected', path: 'tls.yaml', sha256: sha(templateA), protocol: 'http' },
+        { id: 'backup-file-exposed', path: 'backup.yaml', sha256: sha(templateB), protocol: 'http' },
+      ],
+    }), 'utf8');
+    try {
+      const runner = new NucleiRunner({ command: process.execPath, argsPrefix: [stubPath], timeoutMs: 30_000, templateManifestPath: manifestPath });
+      const logs: string[] = [];
+      const spot = await runner.run({ targets: ['http://target.test/'], templateIds: ['old-tls-detected'], onLog: (line) => logs.push(line) });
+      assert.equal(spot.lines.length, 1);
+      assert.ok((JSON.parse(spot.lines[0] ?? '') as { templateID: string }).templateID.includes('old-tls-detected'));
+      assert.ok(logs.some((line) => line.includes('spot execution limited to reviewed templates: old-tls-detected')));
+
+      const full = await runner.run({ targets: ['http://target.test/'] });
+      assert.equal(full.lines.length, 2);
+
+      await assert.rejects(runner.run({ targets: ['http://target.test/'], templateIds: ['not-reviewed'] }), /not in the reviewed manifest/u);
+    } finally {
+      await writeFile(stubPath, '', 'utf8').catch(() => undefined);
+      await rm(directory, { recursive: true, force: true });
     }
   });
 

@@ -50,6 +50,8 @@ const EXPECTED_EVENT_TYPES = [
   'FindingStatusChanged',
   'FuzzRunCompleted',
   'BusinessLogicCheckCompleted',
+  'AuthBypassCheckCompleted',
+  'ZapUnsupportedCheckCompleted',
   'LoginCompleted',
   'DocumentHintsRegistered',
   'DocumentAuthHintsRegistered',

@@ -789,7 +789,26 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         if (status !== 'confirmed' && status !== 'rejected') {
           return respondError(response, 400, 'ValidationFailed', "field status must be 'confirmed' or 'rejected'", false);
         }
-        const finding = service.updateFindingStatus(operator, { findingId, next: status });
+        const reproduction = stringField(body, 'reproduction');
+        if (reproduction !== 'reproduced' && reproduction !== 'not-reproduced') {
+          return respondError(response, 400, 'ValidationFailed', "field reproduction must be 'reproduced' or 'not-reproduced'", false);
+        }
+        const cvssVersion = stringField(body, 'cvssVersion');
+        const cvssVector = stringField(body, 'cvssVector');
+        const rawCvssScore = body.cvssScore;
+        const cvssScore = typeof rawCvssScore === 'number' ? rawCvssScore : Number.NaN;
+        const hasCvss = cvssVersion !== '' || cvssVector !== '' || Number.isFinite(cvssScore);
+        if (hasCvss && ((cvssVersion !== '3.1' && cvssVersion !== '4.0') || cvssVector === '' || !Number.isFinite(cvssScore))) {
+          return respondError(response, 400, 'ValidationFailed', 'CVSS version, vector and numeric score must be supplied together', false);
+        }
+        const finding = service.updateFindingStatus(operator, {
+          findingId,
+          next: status,
+          reproduction,
+          notes: stringField(body, 'notes'),
+          severityRationale: stringField(body, 'severityRationale'),
+          ...(hasCvss ? { cvss: { version: cvssVersion as '3.1' | '4.0', vector: cvssVector, score: cvssScore } } : {}),
+        });
         return respondJson(response, 200, { finding });
       } catch (cause) {
         return respondDomainError(response, cause);
@@ -1123,6 +1142,88 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           roles: stringArrayField(body, 'roles'),
           targetUrl: stringField(body, 'targetUrl'),
           expectation: { expression: stringField(expectationRecord, 'expression'), args: argsValue },
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/auth-bypass/checks') {
+      return respondJson(response, 200, { checks: service.listAuthBypassChecks() });
+    }
+    if (route === 'POST /api/auth-bypass/checks') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const secretValuesValue = body.secretValues;
+        if (secretValuesValue !== undefined && (typeof secretValuesValue !== 'object' || secretValuesValue === null || Array.isArray(secretValuesValue))) {
+          return respondError(response, 400, 'ValidationFailed', 'field secretValues must be an object of strings', false);
+        }
+        const secretValues: Record<string, string> = {};
+        if (secretValuesValue !== undefined) {
+          for (const [name, value] of Object.entries(secretValuesValue as Record<string, unknown>)) {
+            if (typeof value !== 'string') {
+              throw new DomainError('ValidationFailed', `secretValues['${name}'] must be a string`);
+            }
+            secretValues[name] = value;
+          }
+        }
+        const result = await service.runAuthBypassCheck(operator, {
+          role: stringField(body, 'role'),
+          ...(Array.isArray(body.targetUrls) ? { targetUrls: stringArrayField(body, 'targetUrls') } : {}),
+          ...(Array.isArray(body.authCookieNames) ? { authCookieNames: stringArrayField(body, 'authCookieNames') } : {}),
+          ...(body.includeLoginVariants === undefined ? {} : { includeLoginVariants: body.includeLoginVariants === true }),
+          ...(Object.keys(secretValues).length === 0 ? {} : { secretValues }),
+          ...(typeof body.loginBaseUrl === 'string' ? { loginBaseUrl: stringField(body, 'loginBaseUrl') } : {}),
+        });
+        return respondJson(response, 200, result);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/zap-unsupported/checks') {
+      return respondJson(response, 200, { checks: service.listZapUnsupportedChecks() });
+    }
+    if (route === 'POST /api/zap-unsupported/checks') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) {
+        return;
+      }
+      try {
+        const paramsValue = body.params;
+        if (paramsValue !== undefined && (typeof paramsValue !== 'object' || paramsValue === null || Array.isArray(paramsValue))) {
+          return respondError(response, 400, 'ValidationFailed', 'field params must be an object of strings', false);
+        }
+        const params: Record<string, string> = {};
+        if (paramsValue !== undefined) {
+          for (const [name, value] of Object.entries(paramsValue as Record<string, unknown>)) {
+            if (typeof value !== 'string') {
+              throw new DomainError('ValidationFailed', `params['${name}'] must be a string`);
+            }
+            params[name] = value;
+          }
+        }
+        const secretValuesValue = body.secretValues;
+        if (secretValuesValue !== undefined && (typeof secretValuesValue !== 'object' || secretValuesValue === null || Array.isArray(secretValuesValue))) {
+          return respondError(response, 400, 'ValidationFailed', 'field secretValues must be an object of strings', false);
+        }
+        const secretValues: Record<string, string> = {};
+        if (secretValuesValue !== undefined) {
+          for (const [name, value] of Object.entries(secretValuesValue as Record<string, unknown>)) {
+            if (typeof value !== 'string') {
+              throw new DomainError('ValidationFailed', `secretValues['${name}'] must be a string`);
+            }
+            secretValues[name] = value;
+          }
+        }
+        const result = await service.runZapUnsupportedCheck(operator, {
+          themeNo: stringField(body, 'themeNo'),
+          ...(typeof body.role === 'string' && body.role !== '' ? { role: stringField(body, 'role') } : {}),
+          ...(Array.isArray(body.targetUrls) ? { targetUrls: stringArrayField(body, 'targetUrls') } : {}),
+          ...(Object.keys(params).length === 0 ? {} : { params }),
+          ...(Object.keys(secretValues).length === 0 ? {} : { secretValues }),
         });
         return respondJson(response, 200, result);
       } catch (cause) {

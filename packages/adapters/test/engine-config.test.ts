@@ -23,7 +23,20 @@ describe('production engine composition', () => {
   });
 
   test('明示した実 ZAP の版を測定し、実 transport 群を構成する', async () => {
-    const server: Server = createServer((_request, response) => {
+    const server: Server = createServer((request, response) => {
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname === '/JSON/core/view/alerts') {
+        setTimeout(() => {
+          response.writeHead(200, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ alerts: [] }));
+        }, 1_700);
+        return;
+      }
+      if (url.pathname === '/JSON/core/view/messages') {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ messages: [] }));
+        return;
+      }
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ version: '2.17.0' }));
     });
@@ -37,6 +50,9 @@ describe('production engine composition', () => {
       assert.ok(engines.scanEngine instanceof ZapEngineAdapter);
       assert.equal(engines.scanEngine.engineVersion, 'zap 2.17.0');
       assert.equal(engines.capabilities.find((item) => item.engineKind === 'zap')?.source, 'measured');
+      assert.deepEqual(await engines.recoverHttpExchanges?.([{
+        url: 'http://a.test/x', method: 'GET', pluginId: 'test', title: 'test finding',
+      }]), [null], 'runtime ZAP API calls must not retain the 1.5 second startup probe timeout');
       engines.updateExplorationScope({ allowedOrigins: ['http://b.test'], deniedOrigins: [] });
       await engines.close();
     } finally {

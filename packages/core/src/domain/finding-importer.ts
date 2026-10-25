@@ -5,7 +5,7 @@
  * Nuclei match も同じ台帳へ取り込む (f18 §4 NucleiResultImporter。dedupe key は template/target)。
  * engine 由来の所見は常に実影響未確認 (unverified) として扱う。
  */
-import { domainError, type EngineAlert, type Finding, type FindingSeverity } from '@scopepilot2/contracts';
+import { domainError, type EngineAlert, type Finding, type FindingHumanReview, type FindingSeverity } from '@scopepilot2/contracts';
 import { confirmFinding } from './reporting.ts';
 import type { NucleiMatch } from './known-vulnerabilities.ts';
 import { normalizeNucleiSeverity } from './known-vulnerabilities.ts';
@@ -77,7 +77,11 @@ export class FindingImporter {
    * 確定は証拠参照が 1 つ以上あること (F19-UT-001 と同じ規則)。人間が未着手の candidate
    * へは戻せない (確認者が触った事実を消さない)。
    */
-  updateStatus(findingId: string, next: 'confirmed' | 'rejected', context: { readonly now: string; readonly changedBy: string }): Finding {
+  updateStatus(findingId: string, next: 'confirmed' | 'rejected', context: {
+    readonly now: string;
+    readonly changedBy: string;
+    readonly review?: Omit<FindingHumanReview, 'result' | 'reviewedBy' | 'reviewedAt'>;
+  }): Finding {
     let existing: Finding | undefined;
     let key: string | undefined;
     for (const [candidateKey, candidate] of this.findingsByDedupeKey) {
@@ -100,7 +104,18 @@ export class FindingImporter {
       // 証拠参照なしの確定は拒否 (reporting.confirmFinding が throw する)。
       confirmFinding(existing, existing.evidenceRefs.map((evidenceId) => ({ evidenceId })));
     }
-    const updated: Finding = { ...existing, status: next, lastSeenAt: context.now };
+    const humanReview: FindingHumanReview | undefined = context.review === undefined ? undefined : {
+      ...context.review,
+      result: next === 'confirmed' ? 'confirmed' : 'false-positive',
+      reviewedBy: context.changedBy,
+      reviewedAt: context.now,
+    };
+    const updated: Finding = {
+      ...existing,
+      status: next,
+      lastSeenAt: context.now,
+      ...(humanReview === undefined ? {} : { humanReview }),
+    };
     this.findingsByDedupeKey.set(key, updated);
     return updated;
   }

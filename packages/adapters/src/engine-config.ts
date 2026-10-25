@@ -16,7 +16,11 @@ import { NodeWebSocketTransport } from './websocket-transport.ts';
 import { NodeHttp2Transport } from './http2-transport.ts';
 import { PlaywrightDomObserver } from './dom-observer.ts';
 import { PlaywrightInteractiveBrowser } from './interactive-browser.ts';
-import { ZapEngineAdapter } from './zap-engine.ts';
+import {
+  ZapEngineAdapter,
+  type RecoveredZapHttpEvidence,
+  type ZapHttpEvidenceLookup,
+} from './zap-engine.ts';
 import { PlaywrightExplorerAdapter } from './playwright-explorer.ts';
 import { NucleiRunner } from './nuclei-runner.ts';
 
@@ -69,10 +73,15 @@ export function createScanEngine(selection: EngineSelection): ActiveScanEnginePo
   return new ZapEngineAdapter({ baseUrl: selection.zapBaseUrl });
 }
 
-export function createExplorerEngine(selection: EngineSelection, proxyServer?: string): PlaywrightExplorerAdapter {
+export function createExplorerEngine(
+  selection: EngineSelection,
+  proxyServer?: string,
+  beforeSessionObservation?: (url: string) => Promise<void>,
+): PlaywrightExplorerAdapter {
   return new PlaywrightExplorerAdapter({
     scope: { allowedOrigins: selection.explorerAllowedOrigins, deniedOrigins: [] },
     ...(proxyServer === undefined ? {} : { proxyServer }),
+    ...(beforeSessionObservation === undefined ? {} : { beforeSessionObservation }),
   });
 }
 
@@ -148,10 +157,15 @@ function zapCandidates(selection: EngineSelection): readonly string[] {
 
 async function waitForZap(baseUrl: string, attempts: number): Promise<ZapEngineAdapter | null> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const adapter = new ZapEngineAdapter({ baseUrl, timeoutMs: 1_500 });
+    // The short timeout is only for bounded startup probing. Reusing this
+    // adapter for a real scan makes larger alert/message responses fail after
+    // 1.5 seconds with `AbortError: This operation was aborted`.
+    const probe = new ZapEngineAdapter({ baseUrl, timeoutMs: 1_500 });
     try {
-      await adapter.resolvedVersion();
-      return adapter;
+      await probe.resolvedVersion();
+      const runtime = new ZapEngineAdapter({ baseUrl });
+      await runtime.resolvedVersion();
+      return runtime;
     } catch {
       if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 500));
     }
@@ -231,6 +245,9 @@ export interface ComposedEngines {
   readonly interactiveBrowser: import('@scopepilot2/core').InteractiveBrowserPort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   readonly runtimeBundleHash: string;
+  readonly recoverHttpExchanges?: (
+    lookups: readonly ZapHttpEvidenceLookup[],
+  ) => Promise<readonly (RecoveredZapHttpEvidence | null)[]>;
   updateExplorationScope(scope: { readonly allowedOrigins: readonly string[]; readonly deniedOrigins: readonly string[] }): void;
   close(): Promise<void>;
 }
@@ -241,7 +258,12 @@ export async function composeEngines(
 ): Promise<ComposedEngines> {
   const selection = resolveEngineSelection(env, allowedOrigins);
   const zap = await resolveZap(selection);
-  const explorer = createExplorerEngine(selection, zap.available ? selection.zapBaseUrl : undefined);
+  const zapAdapter = zap.available && zap.engine instanceof ZapEngineAdapter ? zap.engine : undefined;
+  const explorer = createExplorerEngine(
+    selection,
+    zap.available ? selection.zapBaseUrl : undefined,
+    zapAdapter === undefined ? undefined : async (url) => await zapAdapter.unsetActiveHttpSession(url),
+  );
   const nucleiRunner = await resolveNuclei(selection);
   const loginExecutor = new PlaywrightLoginExecutor();
   const repeaterTransport = new NodeRepeaterTransport();
@@ -271,6 +293,9 @@ export async function composeEngines(
       ...(nucleiRunner === undefined ? {} : { nucleiVersion: nucleiRunner.engineVersion }),
     }),
     runtimeBundleHash: `production-engines:${explorer.engineVersion}:${zap.engine.engineVersion}:${nucleiRunner?.engineVersion ?? 'nuclei-unavailable'}:${nucleiRunner?.templateBundleHash ?? 'templates-unavailable'}`,
+    ...(zapAdapter === undefined ? {} : {
+      recoverHttpExchanges: async (lookups: readonly ZapHttpEvidenceLookup[]) => await zapAdapter.recoverHttpExchanges(lookups),
+    }),
     updateExplorationScope: (scope) => explorer.updateScope(scope),
     close: async () => {
       await explorer.close();
