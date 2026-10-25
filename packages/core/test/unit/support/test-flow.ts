@@ -127,6 +127,7 @@ function testCapabilities(zapVersion = 'fake-zap-1', nucleiVersion?: string): re
     rateLimit: 'Delegated',
   } as const;
   return [
+    { engineKind: 'node-http', engineVersion: 'scopepilot-workflow-transport-v1', source: 'fixture', guaranteeLevels: enforced, maxOvershootRatio: 0, measuredAt: TEST_NOW },
     { engineKind: 'playwright', engineVersion: 'fake-explorer-1', source: 'fixture', guaranteeLevels: enforced, maxOvershootRatio: 0, measuredAt: TEST_NOW },
     { engineKind: 'zap', engineVersion: zapVersion, source: 'fixture', guaranteeLevels: delegated, maxOvershootRatio: 0.05, measuredAt: TEST_NOW },
     ...(nucleiVersion === undefined ? [] : [{ engineKind: 'nuclei' as const, engineVersion: nucleiVersion, source: 'fixture' as const, guaranteeLevels: delegated, maxOvershootRatio: 0.05, measuredAt: TEST_NOW }]),
@@ -161,6 +162,7 @@ export interface BootstrapOptions {
   readonly domObserver?: import('../../../src/ports/engines.ts').DomObservationPort;
   readonly interactiveBrowser?: import('../../../src/ports/engines.ts').InteractiveBrowserPort;
   readonly nucleiRunner?: import('../../../src/ports/engines.ts').NucleiScanPort;
+  readonly workflowScanTransportFactory?: import('../../../src/application/baseline-flow.ts').BaselineFlowDeps['workflowScanTransportFactory'];
 }
 
 export interface TestFlow {
@@ -172,7 +174,7 @@ export interface TestFlow {
 
 /** 案件作成前の状態から使える service を組み立てる。 */
 export function createTestService(
-  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'loginProxyServer' | 'explorer' | 'repeaterTransport' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver' | 'interactiveBrowser' | 'nucleiRunner'> & {
+  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'loginProxyServer' | 'explorer' | 'repeaterTransport' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver' | 'interactiveBrowser' | 'nucleiRunner' | 'workflowScanTransportFactory'> & {
     runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
     caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
   } = {},
@@ -198,6 +200,7 @@ export function createTestService(
     ...(options.domObserver === undefined ? {} : { domObserver: options.domObserver }),
     ...(options.interactiveBrowser === undefined ? {} : { interactiveBrowser: options.interactiveBrowser }),
     ...(options.nucleiRunner === undefined ? {} : { nucleiRunner: options.nucleiRunner }),
+    ...(options.workflowScanTransportFactory === undefined ? {} : { workflowScanTransportFactory: options.workflowScanTransportFactory }),
     ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
     ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
   });

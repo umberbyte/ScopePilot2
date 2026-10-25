@@ -5431,6 +5431,7 @@
         "enum": [
           "explore",
           "active-scan",
+          "workflow-scan",
           "nuclei-scan",
           "report"
         ]
@@ -5770,6 +5771,16 @@
               "format": "uri"
             },
             "minItems": 1
+          },
+          "enableNuclei": {
+            "type": "boolean",
+            "default": false,
+            "description": "Add a reviewed Nuclei HTTP template step to the confirmed plan."
+          },
+          "enableWorkflowScan": {
+            "type": "boolean",
+            "default": false,
+            "description": "Add the 21-check DVWA workflow scan to the confirmed plan."
           },
           "limits": {
             "type": "object",

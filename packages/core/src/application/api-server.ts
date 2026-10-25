@@ -166,11 +166,17 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         if (body.enableNuclei !== undefined && typeof body.enableNuclei !== 'boolean') {
           throw new DomainError('ValidationFailed', 'enableNuclei must be boolean');
         }
+        if (body.enableWorkflowScan !== undefined && typeof body.enableWorkflowScan !== 'boolean') {
+          throw new DomainError('ValidationFailed', 'enableWorkflowScan must be boolean');
+        }
         const result = service.buildActiveScanPlan(
           operator,
           stringArrayField(body, 'targets'),
           optionalLimitsField(body),
-          { includeNuclei: body.enableNuclei === true },
+          {
+            includeNuclei: body.enableNuclei === true,
+            includeWorkflowScan: body.enableWorkflowScan === true,
+          },
         );
         service.authorizePlan(result.plan);
         return respondJson(response, 200, { plan: result.plan, planHash: result.planHash });
@@ -314,6 +320,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
             requestCorpusEvidenceRef: execution.result.requestCorpusEvidenceRef,
             findings: execution.result.findings,
             diagnosticRoutes: execution.result.diagnosticRoutes,
+            ...(execution.result.workflow === undefined ? {} : { workflow: execution.result.workflow }),
             ...(execution.result.nuclei === undefined ? {} : { nuclei: execution.result.nuclei }),
           },
         }),
@@ -355,6 +362,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           requestCorpusEvidenceRef: result.requestCorpusEvidenceRef,
           findings: result.findings,
           diagnosticRoutes: result.diagnosticRoutes,
+          ...(result.workflow === undefined ? {} : { workflow: result.workflow }),
           ...(result.nuclei === undefined ? {} : { nuclei: result.nuclei }),
         });
       } catch (cause) {

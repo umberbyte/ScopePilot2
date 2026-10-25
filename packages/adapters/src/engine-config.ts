@@ -23,6 +23,7 @@ import {
 } from './zap-engine.ts';
 import { PlaywrightExplorerAdapter } from './playwright-explorer.ts';
 import { NucleiRunner } from './nuclei-runner.ts';
+import { NodeWorkflowScanTransport, type NodeWorkflowScanTransportOptions } from './workflow-scan-transport.ts';
 
 const DEFAULT_ZAP_BASE_URL = 'http://127.0.0.1:8080';
 
@@ -107,6 +108,11 @@ function capabilitySnapshots(input: {
     preSendScopeEnforcement: 'Unsupported', stopControl: 'Unsupported', budgetLease: 'Unsupported', rateLimit: 'Unsupported',
   } as const;
   return [
+    {
+      engineKind: 'node-http', engineVersion: 'scopepilot-workflow-transport-v1', source: 'measured',
+      guaranteeLevels: { preSendScopeEnforcement: 'Enforced', stopControl: 'Enforced', budgetLease: 'Enforced', rateLimit: 'Enforced' },
+      maxOvershootRatio: 0, measuredAt: input.measuredAt,
+    },
     {
       engineKind: 'playwright', engineVersion: input.explorerVersion, source: 'measured',
       guaranteeLevels: { preSendScopeEnforcement: 'Enforced', stopControl: 'Enforced', budgetLease: 'Enforced', rateLimit: 'Enforced' },
@@ -235,6 +241,7 @@ export interface ComposedEngines {
   readonly scanEngine: ActiveScanEnginePort;
   readonly nucleiRunner?: NucleiScanPort;
   readonly loginExecutor: LoginExecutorPort;
+  readonly workflowScanTransportFactory: (options: NodeWorkflowScanTransportOptions) => import('@scopepilot2/core').WorkflowScanTransport;
   readonly repeaterTransport: import('@scopepilot2/core').RepeaterTransportPort;
   readonly fuzzTransport: import('@scopepilot2/core').FuzzTransportPort;
   readonly sequencerTransport: import('@scopepilot2/core').SequencerTransportPort;
@@ -281,6 +288,7 @@ export async function composeEngines(
   };
   return {
     mode: 'real', explorer, scanEngine: zap.engine, ...(nucleiRunner === undefined ? {} : { nucleiRunner }), loginExecutor,
+    workflowScanTransportFactory: (options) => new NodeWorkflowScanTransport(options),
     // Login runs in an isolated browser without the ZAP proxy.  ZAP may retain an
     // active HTTP session from a previous scan and inject that session into a new
     // browser, causing the login page (and its fields) to disappear.  The scan

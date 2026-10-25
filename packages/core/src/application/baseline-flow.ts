@@ -159,6 +159,14 @@ import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollD
 import { buildWsSendPlan, importFrames, sendWithPolicy, validateWsSubprotocols, wsEvidence, type WsFrame } from '../domain/websocket.ts';
 import { checkAuthorityScope, negotiateTransport, transportCapability, transportEvidence, validateHeaderValues, validatePseudoHeaders } from '../domain/advanced-transport.ts';
 import { buildDomCandidate, domEvidenceProjection } from '../domain/dom-investigation.ts';
+import {
+  runWorkflowScan,
+  WORKFLOW_SCAN_DEFAULT_MAX_REQUESTS,
+  WORKFLOW_SCAN_PAYLOAD_SET,
+  type WorkflowScanHttpResponse,
+  type WorkflowScanRequestSpec,
+  type WorkflowScanTransport,
+} from '../domain/workflow-scan.ts';
 import { checkCompatibility, respondToSecretRead, verifyExtensionManifest, type ExtensionManifest } from '../domain/product-api.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
@@ -173,6 +181,13 @@ export interface BaselineFlowDeps {
   readonly evidence: EvidenceStorePort;
   readonly explorer: ExplorationPort;
   readonly scanEngine: ActiveScanEnginePort;
+  /** Creates an origin-bound, secret-redacting HTTP transport for the DVWA workflow suite. */
+  readonly workflowScanTransportFactory?: (options: {
+    readonly baseUrl: string;
+    readonly maxRequests: number;
+    readonly redactionValues: readonly string[];
+    readonly signal?: AbortSignal;
+  }) => WorkflowScanTransport;
   /** 設定済みの実Nuclei CLI。未設定時はscan planにNuclei stepを含めない。 */
   readonly nucleiRunner?: NucleiScanPort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
@@ -330,6 +345,19 @@ export interface ActiveScanRunResult {
   readonly engineVersion: string;
   readonly requestCorpusEvidenceRef: string;
   readonly diagnosticRoutes: readonly DiagnosticRouteResult[];
+  readonly workflow?: {
+    readonly status: 'completed' | 'failed';
+    readonly payloadSet: string;
+    readonly baseUrls: readonly string[];
+    readonly requestCount: number;
+    readonly checkKindCount: number;
+    readonly checkCount: number;
+    readonly skipCount: number;
+    readonly importedCount: number;
+    readonly duplicateCount: number;
+    readonly evidenceRefs: readonly string[];
+    readonly error?: string;
+  };
   readonly nuclei?: {
     readonly status: 'completed' | 'failed';
     readonly engineVersion: string;
@@ -479,6 +507,8 @@ export class BaselineFlowService {
     readonly verificationUrl?: string;
     readonly verificationMarkers?: readonly string[];
   }>();
+  /** Simple-mode workflow credentials. Values remain in memory and are never projected to APIs or evidence. */
+  private readonly roleWorkflowCredentials = new Map<string, { readonly username: string; readonly password: string }>();
   private exploredUrlCount = 0;
   private scannedUrlCount = 0;
   private latestCandidates: readonly ScanCandidate[] = [];
@@ -490,7 +520,7 @@ export class BaselineFlowService {
   private latestDiagnosticRoutes: readonly DiagnosticRouteResult[] = [];
   private delegatedSteps: {
     readonly stepId: string;
-    readonly engineKind: 'zap' | 'nuclei';
+    readonly engineKind: 'zap' | 'nuclei' | 'node-http';
     readonly engineVersion: string;
   }[] = [];
 
@@ -1866,6 +1896,17 @@ export class BaselineFlowService {
         verificationUrl: result.finalUrl,
         verificationMarkers: flow.steps.flatMap((step) => step.kind === 'assert' && step.target !== undefined ? [step.target] : []),
       });
+      const usernameReference = flow.secretReferences.find((reference) => reference === 'username' || reference.endsWith(':username'));
+      const passwordReference = flow.secretReferences.find((reference) => reference === 'password' || reference.endsWith(':password'));
+      const username = usernameReference === undefined ? undefined : input.secretValues[usernameReference];
+      const password = passwordReference === undefined ? undefined : input.secretValues[passwordReference];
+      if (username !== undefined && password !== undefined) {
+        this.roleWorkflowCredentials.set(input.role, { username, password });
+      } else {
+        this.roleWorkflowCredentials.delete(input.role);
+      }
+    } else {
+      this.roleWorkflowCredentials.delete(input.role);
     }
     const cookieNames = result.cookies.map((cookie) => cookie.name);
     const jar = this.roleRegistry.assignJar(input.role, cookieNames);
@@ -3107,7 +3148,7 @@ export class BaselineFlowService {
     operator: OperatorProfile,
     targets: readonly string[],
     limitsRequest?: { readonly maxRequests: number; readonly maxPages: number; readonly maxDurationMinutes: number },
-    options: { readonly includeNuclei?: boolean } = {},
+    options: { readonly includeNuclei?: boolean; readonly includeWorkflowScan?: boolean } = {},
   ): { plan: ExecutionPlan; planHash: string } {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
@@ -3121,9 +3162,25 @@ export class BaselineFlowService {
     const limits = this.planLimits({ ...DEFAULT_ACTIVE_SCAN_LIMITS, ...limitsRequest }, caseRecord.scope.limits);
     const inputEvidenceHash = hashStable('scopepilot2.plan.input', targets.map((url) => ScopePolicy.canonicalUrl(url)).sort());
     const includeNuclei = options.includeNuclei === true;
+    const includeWorkflowScan = options.includeWorkflowScan === true;
     if (includeNuclei && this.deps.nucleiRunner === undefined) {
       throw domainError('CapabilityUnavailable', 'Nuclei requires both a configured binary and a reviewed HTTP template manifest');
     }
+    if (includeWorkflowScan && this.deps.workflowScanTransportFactory === undefined) {
+      throw domainError('CapabilityUnavailable', 'workflow scan transport is not configured');
+    }
+    const enabledStepCount = 1 + (includeNuclei ? 1 : 0) + (includeWorkflowScan ? 1 : 0);
+    if (limits.maxRequests < enabledStepCount) {
+      throw domainError('ValidationFailed', `plan needs at least ${String(enabledStepCount)} requests for the selected diagnostic steps`);
+    }
+    const workflowMaxRequests = includeWorkflowScan
+      ? Math.min(WORKFLOW_SCAN_DEFAULT_MAX_REQUESTS, Math.floor(limits.maxRequests / enabledStepCount))
+      : 0;
+    const remainingRequests = limits.maxRequests - workflowMaxRequests;
+    const nucleiMaxRequests = includeNuclei ? Math.floor(remainingRequests / 2) : 0;
+    const zapMaxRequests = remainingRequests - nucleiMaxRequests;
+    const withRequestLimit = (maxRequests: number): PlanLimits => ({ ...limits, maxRequests });
+    const workflowTargets = [...new Set(targets.map((url) => new URL(ScopePolicy.canonicalUrl(url)).origin))];
     const plan = buildPlan({
       planId: this.deps.ids.next('plan'),
       caseId: caseRecord.caseId,
@@ -3138,8 +3195,17 @@ export class BaselineFlowService {
           engineKind: 'zap',
           guarantee: 'Delegated',
           engineVersion: this.deps.scanEngine.engineVersion,
-          limits,
+          limits: withRequestLimit(zapMaxRequests),
         },
+        ...(!includeWorkflowScan ? [] : [{
+          kind: 'workflow-scan' as const,
+          operationClass: 'ActiveScan' as const,
+          targets: workflowTargets,
+          engineKind: 'node-http' as const,
+          guarantee: 'Enforced' as const,
+          engineVersion: WORKFLOW_SCAN_PAYLOAD_SET,
+          limits: withRequestLimit(workflowMaxRequests),
+        }]),
         ...(!includeNuclei || this.deps.nucleiRunner === undefined ? [] : [{
           kind: 'nuclei-scan' as const,
           operationClass: 'NucleiScan' as const,
@@ -3147,7 +3213,7 @@ export class BaselineFlowService {
           engineKind: 'nuclei' as const,
           guarantee: 'Delegated' as const,
           engineVersion: this.deps.nucleiRunner.engineVersion,
-          limits,
+          limits: withRequestLimit(nucleiMaxRequests),
         }]),
       ],
       limits,
@@ -3443,6 +3509,17 @@ export class BaselineFlowService {
         authenticationProbe = { url: session.verificationUrl, markers: session.verificationMarkers ?? [] };
       }
     }
+    const workflowStep = plan.steps.find((candidate) => candidate.kind === 'workflow-scan');
+    const workflowCredentials = role === undefined ? undefined : this.roleWorkflowCredentials.get(role);
+    if (workflowStep !== undefined && role === undefined) {
+      throw domainError('NeedsInput', 'the confirmed workflow scan requires an authenticated role');
+    }
+    if (workflowStep !== undefined && workflowCredentials === undefined) {
+      throw domainError('NeedsInput', `workflow credentials for role '${role ?? ''}' are no longer available; run login again`);
+    }
+    if (workflowStep !== undefined && this.deps.workflowScanTransportFactory === undefined) {
+      throw domainError('CapabilityUnavailable', 'workflow scan transport is not configured');
+    }
 
     const runId = this.deps.ids.next('run');
     const planHash = planHashOf(plan);
@@ -3678,6 +3755,151 @@ export class BaselineFlowService {
       }
     }
 
+    let workflowSummary: ActiveScanRunResult['workflow'];
+    if (workflowStep !== undefined && workflowCredentials !== undefined && this.deps.workflowScanTransportFactory !== undefined) {
+      const baseUrls = [...new Set(workflowStep.targetSnapshot.map((target) => new URL(target).origin))];
+      const budget = { limit: workflowStep.limits.maxRequests, used: 0 };
+      const evidenceRefs: string[] = [];
+      const allChecks: import('../domain/workflow-scan.ts').WorkflowScanCheckResult[] = [];
+      let skipCount = 0;
+      let importedCount = 0;
+      let duplicateCount = 0;
+      const transports: WorkflowScanTransport[] = [];
+      try {
+        for (const baseUrl of baseUrls) {
+          throwIfCancelled();
+          const createTransport = (): WorkflowScanTransport => {
+            const transport = new SharedBudgetWorkflowTransport(
+              this.deps.workflowScanTransportFactory!({
+                baseUrl,
+                maxRequests: workflowStep.limits.maxRequests,
+                redactionValues: [workflowCredentials.username, workflowCredentials.password],
+                ...(control.signal === undefined ? {} : { signal: control.signal }),
+              }),
+              budget,
+            );
+            transports.push(transport);
+            return transport;
+          };
+          const primary = createTransport();
+          emit({
+            phase: 'starting',
+            engine: 'scopepilot',
+            message: `Workflow scan (21 checks) starting for ${baseUrl}`,
+            command: `ScopePilot workflow scan: ${WORKFLOW_SCAN_PAYLOAD_SET}; maxRequests=${String(workflowStep.limits.maxRequests)}`,
+            progress: 0,
+          });
+          const result = await runWorkflowScan(
+            {
+              baseUrl,
+              username: workflowCredentials.username,
+              password: workflowCredentials.password,
+              maxRequests: workflowStep.limits.maxRequests,
+              ...(control.signal === undefined ? {} : { signal: control.signal }),
+            },
+            primary,
+            {
+              progress: (message) => emit({ phase: 'running', engine: 'scopepilot', message }),
+              createProbeTransport: createTransport,
+            },
+          );
+          if (!result.authenticated) {
+            throw new Error(`workflow scan login failed for ${baseUrl}`);
+          }
+          const probeRequestLog = transports
+            .filter((transport) => transport !== primary)
+            .flatMap((transport) => transport.takeRequestLog());
+          const evidence = await this.deps.evidence.saveText(
+            `workflow-scan:${runId}:${hashStable('scopepilot2.workflow.origin', baseUrl).slice(0, 12)}`,
+            canonicalJson({
+              runId,
+              result,
+              alerts: workflowHttpEvidenceRecords(result.checks, result.requestLog, baseUrl),
+              probeRequestLog,
+              totalRequestCount: budget.used,
+            }),
+          );
+          evidenceRefs.push(evidence.evidenceId);
+          allChecks.push(...result.checks);
+          skipCount += result.skips.length;
+          const imported = this.importer.importObservationCandidates(
+            result.checks.map((check) => ({
+              key: `workflow-scan:${check.checkId}:${check.securityLevel || 'global'}`,
+              title: check.title,
+              url: new URL(check.url, `${baseUrl}/`).toString(),
+              method: check.method,
+              param: check.param,
+              severity: check.severity,
+            })),
+            {
+              now: this.deps.clock.now().toISOString(),
+              engineVersion: result.payloadSet,
+              makeFindingId: () => this.deps.ids.next('finding'),
+              evidenceRef: evidence.evidenceId,
+            },
+          );
+          importedCount += imported.created.length;
+          duplicateCount += imported.duplicateCount;
+          this.persistFindings([...imported.created, ...imported.reobserved]);
+          diagnosticRoutes = completeWorkflowRoutes(diagnosticRoutes, baseUrl, result.checks.length);
+          this.record({
+            type: 'FindingsImported',
+            at: this.deps.clock.now().toISOString(),
+            source: 'observation',
+            engineVersion: result.payloadSet,
+            importedCount: imported.created.length,
+            duplicateCount: imported.duplicateCount,
+          });
+        }
+        workflowSummary = {
+          status: 'completed',
+          payloadSet: WORKFLOW_SCAN_PAYLOAD_SET,
+          baseUrls,
+          requestCount: budget.used,
+          checkKindCount: new Set(allChecks.map((check) => check.checkId)).size,
+          checkCount: allChecks.length,
+          skipCount,
+          importedCount,
+          duplicateCount,
+          evidenceRefs,
+        };
+        emit({
+          phase: 'completed',
+          engine: 'scopepilot',
+          message: `Workflow scan completed: ${String(workflowSummary.checkKindCount)}/21 check types, ${String(workflowSummary.checkCount)} findings`,
+          progress: 100,
+        });
+      } catch (cause) {
+        if (control.signal?.aborted === true || (cause instanceof DomainError && cause.code === 'Cancelled')) {
+          throw domainError('Cancelled', 'workflow scan stopped by user');
+        }
+        const error = cause instanceof Error ? cause.message : String(cause);
+        const partialLogs = transports.flatMap((transport) => transport.takeRequestLog());
+        if (partialLogs.length > 0) {
+          const partial = await this.deps.evidence.saveText(
+            `workflow-scan-partial:${runId}`,
+            canonicalJson({ runId, payloadSet: WORKFLOW_SCAN_PAYLOAD_SET, baseUrls, requestCount: budget.used, requestLog: partialLogs, error }),
+          );
+          evidenceRefs.push(partial.evidenceId);
+        }
+        workflowSummary = {
+          status: 'failed',
+          payloadSet: WORKFLOW_SCAN_PAYLOAD_SET,
+          baseUrls,
+          requestCount: budget.used,
+          checkKindCount: new Set(allChecks.map((check) => check.checkId)).size,
+          checkCount: allChecks.length,
+          skipCount,
+          importedCount,
+          duplicateCount,
+          evidenceRefs,
+          error,
+        };
+        diagnosticRoutes = failWorkflowRoutes(diagnosticRoutes, baseUrls, error);
+        emit({ phase: 'completed', engine: 'scopepilot', message: `Workflow scan failed independently: ${error}`, progress: 100 });
+      }
+    }
+
     await this.deps.evidence.saveText(
       `diagnostic-routes:${runId}`,
       canonicalJson({ runId, routes: diagnosticRoutes }),
@@ -3773,6 +3995,11 @@ export class BaselineFlowService {
     this.assessmentEndedAt = this.deps.clock.now().toISOString();
     this.delegatedSteps = [
       { stepId: step.stepId, engineKind: 'zap', engineVersion: this.deps.scanEngine.engineVersion },
+      ...(workflowStep === undefined ? [] : [{
+        stepId: workflowStep.stepId,
+        engineKind: 'node-http' as const,
+        engineVersion: WORKFLOW_SCAN_PAYLOAD_SET,
+      }]),
       ...(nucleiStep === undefined || this.deps.nucleiRunner === undefined ? [] : [{
         stepId: nucleiStep.stepId,
         engineKind: 'nuclei' as const,
@@ -3807,6 +4034,7 @@ export class BaselineFlowService {
       engineVersion: this.deps.scanEngine.engineVersion,
       requestCorpusEvidenceRef: requestCorpusEvidence.evidenceId,
       diagnosticRoutes,
+      ...(workflowSummary === undefined ? {} : { workflow: workflowSummary }),
       ...(nucleiSummary === undefined ? {} : { nuclei: nucleiSummary }),
     };
   }
@@ -4189,4 +4417,113 @@ function updateDiagnosticRoute(
   return routes.map((route) => route.track === track && route.targetUrl === targetUrl
     ? { ...route, ...update }
     : route);
+}
+
+const WORKFLOW_DIAGNOSTIC_TRACKS = new Set<DiagnosticTrack>([
+  'workflow-state',
+  'session-analysis',
+  'authorization-differential',
+  'upload-workflow',
+  'api-schema',
+  'cryptography-review',
+]);
+
+function completeWorkflowRoutes(
+  routes: readonly DiagnosticRouteResult[],
+  baseUrl: string,
+  findingCount: number,
+): readonly DiagnosticRouteResult[] {
+  const origin = new URL(baseUrl).origin;
+  return routes.map((route) => WORKFLOW_DIAGNOSTIC_TRACKS.has(route.track) && new URL(route.targetUrl).origin === origin
+    ? {
+        ...route,
+        status: 'executed' as const,
+        detail: `ScopePilot workflow scan v1 completed all 21 checks for ${origin}`,
+        findingCount,
+      }
+    : route);
+}
+
+function failWorkflowRoutes(
+  routes: readonly DiagnosticRouteResult[],
+  baseUrls: readonly string[],
+  error: string,
+): readonly DiagnosticRouteResult[] {
+  const origins = new Set(baseUrls.map((baseUrl) => new URL(baseUrl).origin));
+  return routes.map((route) => WORKFLOW_DIAGNOSTIC_TRACKS.has(route.track) && origins.has(new URL(route.targetUrl).origin)
+    ? { ...route, status: 'unavailable' as const, detail: `Workflow scan failed: ${error}` }
+    : route);
+}
+
+class SharedBudgetWorkflowTransport implements WorkflowScanTransport {
+  private readonly delegate: WorkflowScanTransport;
+  private readonly budget: { readonly limit: number; used: number };
+
+  constructor(
+    delegate: WorkflowScanTransport,
+    budget: { readonly limit: number; used: number },
+  ) {
+    this.delegate = delegate;
+    this.budget = budget;
+  }
+
+  get baseUrl(): string {
+    return this.delegate.baseUrl;
+  }
+
+  get requestCount(): number {
+    return this.budget.used;
+  }
+
+  async request(spec: WorkflowScanRequestSpec): Promise<WorkflowScanHttpResponse> {
+    if (this.budget.used >= this.budget.limit) {
+      throw domainError('OutOfScope', `workflow scan request limit reached (${String(this.budget.limit)})`);
+    }
+    this.budget.used += 1;
+    return this.delegate.request(spec);
+  }
+
+  takeRequestLog(): import('../domain/workflow-scan.ts').WorkflowScanRequestLogEntry[] {
+    return this.delegate.takeRequestLog();
+  }
+}
+
+function workflowHttpEvidenceRecords(
+  checks: readonly import('../domain/workflow-scan.ts').WorkflowScanCheckResult[],
+  requestLog: readonly import('../domain/workflow-scan.ts').WorkflowScanRequestLogEntry[],
+  baseUrl: string,
+): readonly Readonly<Record<string, unknown>>[] {
+  const host = new URL(baseUrl).host;
+  return checks.map((check) => {
+    const checkUrl = new URL(check.url, `${baseUrl}/`);
+    const pathMatches = requestLog.filter((entry) => {
+      try {
+        return new URL(entry.url, `${baseUrl}/`).pathname === checkUrl.pathname;
+      } catch {
+        return false;
+      }
+    });
+    const exchange = pathMatches.findLast((entry) => entry.method.toUpperCase() === check.method.toUpperCase())
+      ?? pathMatches.at(-1);
+    if (exchange === undefined) {
+      throw new Error(`workflow HTTP evidence is missing for ${check.checkId} ${checkUrl.pathname}`);
+    }
+    const requestTarget = exchange.url;
+    const requestBody = exchange.requestPreview;
+    const responseBody = exchange.responsePreview;
+    const location = exchange.location;
+    return {
+      pluginId: `workflow-scan:${check.checkId}:${check.securityLevel || 'global'}`,
+      url: checkUrl.toString(),
+      method: check.method,
+      param: check.param,
+      request: `${check.method.toUpperCase()} ${requestTarget} HTTP/1.1\r\nHost: ${host}\r\nUser-Agent: ScopePilot2-WorkflowScan/1.0\r\n${requestBody === '' ? '' : `Content-Type: application/x-www-form-urlencoded\r\n\r\n${requestBody}`}`,
+      response: `HTTP/1.1 ${String(exchange.status)} Observed\r\n${location === '' ? '' : `Location: ${location}\r\n`}\r\n${responseBody}`,
+      attack: check.param,
+      evidenceSummary: check.evidence,
+      description: check.description,
+      remediation: check.remediation,
+      cwe: check.cwe,
+    };
+  });
 }

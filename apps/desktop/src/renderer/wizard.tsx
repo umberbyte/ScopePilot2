@@ -338,7 +338,7 @@ interface ScanCandidateView {
 
 interface ScanPlanStepView {
   readonly stepId: string;
-  readonly kind: 'active-scan' | 'nuclei-scan' | 'explore' | 'report';
+  readonly kind: 'active-scan' | 'workflow-scan' | 'nuclei-scan' | 'explore' | 'report';
   readonly engineKind: 'zap' | 'nuclei' | 'playwright' | 'node-http' | 'oast';
   readonly engineVersion?: string;
   readonly guarantee: 'Enforced' | 'Delegated' | 'Unsupported';
@@ -366,6 +366,19 @@ interface ScanRunResultView {
     readonly detail: string;
     readonly findingCount?: number;
   }[];
+  readonly workflow?: {
+    readonly status: 'completed' | 'failed';
+    readonly payloadSet: string;
+    readonly baseUrls: readonly string[];
+    readonly requestCount: number;
+    readonly checkKindCount: number;
+    readonly checkCount: number;
+    readonly skipCount: number;
+    readonly importedCount: number;
+    readonly duplicateCount: number;
+    readonly evidenceRefs: readonly string[];
+    readonly error?: string;
+  };
   readonly nuclei?: { status: 'completed' | 'failed'; engineVersion: string; templateBundleHash?: string; importedCount: number; duplicateCount: number; quarantinedCount: number; excludedOutOfScope: number; error?: string };
 }
 
@@ -428,6 +441,7 @@ function candidateReason(candidate: ScanCandidateView): string {
 function planInspectionLabel(step: ScanPlanStepView): string {
   if (step.engineKind === 'zap') return t('wizard.s05.zapInspection');
   if (step.engineKind === 'nuclei') return t('wizard.s05.nucleiInspection');
+  if (step.kind === 'workflow-scan') return t('wizard.s05.workflowInspection');
   return step.kind;
 }
 
@@ -539,6 +553,13 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
     const deferred = new Set(['workflow-state', 'session-analysis', 'authorization-differential', 'upload-workflow', 'api-schema', 'cryptography-review']);
     return adoptedCandidates.filter((candidate) => candidate.diagnosticTracks?.some((track) => deferred.has(track)) === true);
   }, [adoptedCandidates]);
+  const workflowScanEligible = useMemo(() => authenticatedRole !== '' && adoptedCandidates.some((candidate) => {
+    try {
+      return new URL(candidate.url).pathname.toLowerCase().includes('/vulnerabilities/');
+    } catch {
+      return false;
+    }
+  }), [adoptedCandidates, authenticatedRole]);
 
   const defaultModel = useCallback((provider: AiProviderCatalog): string =>
     provider.models.find((model) => model.isDefault)?.id ?? provider.models[0]?.id ?? '', []);
@@ -1080,7 +1101,11 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
     setBusy(true);
     setError('');
     try {
-      const plan = await callApi<ScanPlanView>(apiBase, 'POST', '/api/plan/scan', { targets: data.selectedTargets, enableNuclei: nucleiEnabled });
+      const plan = await callApi<ScanPlanView>(apiBase, 'POST', '/api/plan/scan', {
+        targets: data.selectedTargets,
+        enableNuclei: nucleiEnabled,
+        enableWorkflowScan: workflowScanEligible,
+      });
       const confirmation = await callApi<{ confirmationId: string }>(apiBase, 'POST', '/api/plan/confirm', { plan: plan.plan });
       setScanPlan(plan);
       setScanConfirmation(confirmation);
@@ -1091,7 +1116,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
     } finally {
       setBusy(false);
     }
-  }, [apiBase, data.selectedTargets, nucleiEnabled]);
+  }, [apiBase, data.selectedTargets, nucleiEnabled, workflowScanEligible]);
 
   const planInteractiveDiagnostics = useCallback(async () => {
     const bridge = window.scopepilotDesktop;
@@ -1204,7 +1229,16 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
         : run.nuclei.status === 'failed'
           ? t('wizard.s06.nucleiFailed', { error: run.nuclei.error ?? 'unknown error' })
           : t('wizard.s06.nucleiDone', { engineVersion: run.nuclei.engineVersion, findings: run.nuclei.importedCount });
-      setRunSummary(`${t('wizard.s06.done', { engineVersion: run.engineVersion, overshoot: run.overshootReservation, findings: run.findings.length })} ${nucleiStatus}`);
+      const workflowStatus = run.workflow === undefined
+        ? t('wizard.s06.workflowNotSelected')
+        : run.workflow.status === 'failed'
+          ? t('wizard.s06.workflowFailed', { error: run.workflow.error ?? 'unknown error' })
+          : t('wizard.s06.workflowDone', {
+              kinds: run.workflow.checkKindCount,
+              findings: run.workflow.checkCount,
+              requests: run.workflow.requestCount,
+            });
+      setRunSummary(`${t('wizard.s06.done', { engineVersion: run.engineVersion, overshoot: run.overshootReservation, findings: run.findings.length })} ${workflowStatus} ${nucleiStatus}`);
       setData((current) => ({ ...current, runFinished: true }));
       if (interactivePlan !== null && interactivePlanConfirmed) {
         await executeInteractiveDiagnostics();
@@ -1720,6 +1754,12 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
             <Text size={200} className={styles.hint}>{t('wizard.s05.nucleiToggleHint')}</Text>
           </div>
           <div className={styles.pathCard}>
+            <Text weight="semibold">{t('wizard.s05.workflowTitle')}</Text>
+            <Text size={200} className={styles.hint}>
+              {t(workflowScanEligible ? 'wizard.s05.workflowEnabled' : 'wizard.s05.workflowUnavailable')}
+            </Text>
+          </div>
+          <div className={styles.pathCard}>
             <Switch
               checked={excludeLowAndInfo}
               label={t('wizard.s05.excludeLowInfo')}
@@ -1866,6 +1906,12 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
               onChange={(_event, state) => setNucleiEnabled(state.checked)}
             />
             <Text size={200} className={styles.hint}>{t('wizard.s05.nucleiToggleHint')}</Text>
+          </div>
+          <div className={styles.pathCard}>
+            <Text weight="semibold">{t('wizard.s05.workflowTitle')}</Text>
+            <Text size={200} className={styles.hint}>
+              {t(workflowScanEligible ? 'wizard.s05.workflowEnabled' : 'wizard.s05.workflowUnavailable')}
+            </Text>
           </div>
           <div className={styles.pathCard}>
             <Switch

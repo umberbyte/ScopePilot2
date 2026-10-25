@@ -18,7 +18,7 @@ export interface PlanLimits {
   readonly requestsPerSecond: number;
 }
 
-export const PlanStepKinds = ['explore', 'active-scan', 'nuclei-scan', 'report'] as const;
+export const PlanStepKinds = ['explore', 'active-scan', 'workflow-scan', 'nuclei-scan', 'report'] as const;
 
 export type PlanStepKind = (typeof PlanStepKinds)[number];
 

@@ -480,6 +480,7 @@ async function bootstrap(): Promise<void> {
     ...(engines.nucleiRunner === undefined ? {} : { nucleiRunner: engines.nucleiRunner }),
     capabilities: engines.capabilities,
     loginExecutor: engines.loginExecutor,
+    workflowScanTransportFactory: engines.workflowScanTransportFactory,
     repeaterTransport: engines.repeaterTransport,
     fuzzTransport: engines.fuzzTransport,
     sequencerTransport: engines.sequencerTransport,

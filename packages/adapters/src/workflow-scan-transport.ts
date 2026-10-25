@@ -131,7 +131,11 @@ export class NodeWorkflowScanTransport implements WorkflowScanTransport {
     for (const secret of this.redactionValues) {
       text = text.split(secret).join('*****');
     }
-    return text;
+    return text
+      .replace(/((?:^|[?&])(?:password|password_new|password_conf|user_token|g-recaptcha-response)=)[^&\s]*/gi, '$1*****')
+      .replace(/("(?:password|password_new|password_conf|user_token|token)"\s*:\s*")[^"]*/gi, '$1*****')
+      .replace(/(<input\b[^>]*\bname=["']user_token["'][^>]*\bvalue=["'])[^"']*/gi, '$1*****')
+      .replace(/(<input\b[^>]*\bvalue=["'])[^"']*(["'][^>]*\bname=["']user_token["'])/gi, '$1*****$2');
   }
 }
 
