@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scopepilot.local/schemas/payload-catalog.schema.json",
+  "title": "ScopePilot payload catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "catalog", "payloads"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "source", "publishedAt", "generated", "description"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "source": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "publishedAt": { "type": "string", "format": "date" },
+        "generated": { "const": false },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      }
+    },
+    "payloads": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/payload" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+      "maxLength": 128
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["risk", "maxAttempts", "requiresConfirmation", "requiresTestAccount", "requiresRollback", "leavesResidue"],
+      "properties": {
+        "risk": { "enum": ["read-only", "bounded-delay", "state-changing", "artifact-producing"] },
+        "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "requiresConfirmation": { "type": "boolean" },
+        "requiresTestAccount": { "type": "boolean" },
+        "requiresRollback": { "type": "boolean" },
+        "leavesResidue": { "type": "boolean" },
+        "maxDelayMs": { "type": "integer", "minimum": 1, "maximum": 5000 },
+        "cleanupStrategy": { "type": "string", "minLength": 1, "maxLength": 512 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "risk": { "const": "bounded-delay" } }, "required": ["risk"] },
+          "then": { "required": ["maxDelayMs"] }
+        },
+        {
+          "if": { "properties": { "risk": { "enum": ["state-changing", "artifact-producing"] } }, "required": ["risk"] },
+          "then": { "properties": { "requiresConfirmation": { "const": true } } }
+        },
+        {
+          "if": { "properties": { "risk": { "const": "state-changing" } }, "required": ["risk"] },
+          "then": { "properties": { "requiresRollback": { "const": true } } }
+        },
+        {
+          "if": { "properties": { "leavesResidue": { "const": true } }, "required": ["leavesResidue"] },
+          "then": { "required": ["cleanupStrategy"] }
+        }
+      ]
+    },
+    "mutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operator", "target"],
+      "properties": {
+        "operator": { "enum": ["omit-field", "replace-field", "reuse-value", "cross-session-value", "replay-step", "skip-step", "reorder-step", "xor-byte"] },
+        "target": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "valueTemplate": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "byteOffset": { "type": "integer", "minimum": -4096, "maximum": 4096 },
+        "xorValue": { "type": "integer", "minimum": 1, "maximum": 255 }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "capability", "contexts", "platforms", "variables", "oracle", "tags", "safety"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "capability": { "enum": ["authentication-throttling", "sql-injection", "command-injection", "csrf-control", "workflow-state", "csp-runtime", "padding-oracle", "file-upload", "browser-canary"] },
+        "contexts": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["query", "form", "json", "header", "multipart", "html", "browser", "binary", "session", "workflow"] }
+        },
+        "platforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["any", "posix", "windows", "php", "browser", "sql"] }
+        },
+        "template": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "variables": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 32,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "pairId": { "$ref": "#/$defs/id" },
+        "oracle": { "enum": ["marker-in-response", "response-differential", "timing-differential", "rate-limit-profile", "browser-side-effect", "state-change-verification", "response-cluster", "downstream-differential", "artifact-retrieval"] },
+        "tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 32,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "safety": { "$ref": "#/$defs/safety" },
+        "mutation": { "$ref": "#/$defs/mutation" }
+      },
+      "anyOf": [{ "required": ["template"] }, { "required": ["mutation"] }]
+    }
+  }
+}

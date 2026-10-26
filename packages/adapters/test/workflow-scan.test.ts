@@ -129,7 +129,7 @@ describe('WorkflowScan (DVWA 18分類の網羅検出)', () => {
     }
 
     // ペイロード集合の版が記録されている (AGENTS.md ベンチマーク節の要件)。
-    assert.ok(result.payloadSet.includes('workflow-scan-payloads/v1'));
+    assert.match(result.payloadSet, /^scopepilot-workflow-payloads\/v2\.0\.0 sha256:[a-f0-9]{64}$/);
 
     // 認証情報は要求証跡へ露出しない。
     const logText = JSON.stringify(result.requestLog);

@@ -14,9 +14,16 @@
  */
 import { createHash } from 'node:crypto';
 import { domainError } from '@scopepilot2/contracts';
+import {
+  WORKFLOW_PAYLOAD_CATALOG,
+  WORKFLOW_PAYLOAD_CATALOG_REFERENCE,
+  payloadById,
+  renderPayload,
+  selectPayloads,
+} from '@scopepilot2/payloads';
 
 /** ペイロード集合の供給元と版。診断結果と証跡へ必ず記録する。 */
-export const WORKFLOW_SCAN_PAYLOAD_SET = 'workflow-scan-payloads/v1 (dvwa-gap-analysis 2026-10-25)';
+export const WORKFLOW_SCAN_PAYLOAD_SET = WORKFLOW_PAYLOAD_CATALOG_REFERENCE;
 
 /** 1実行あたりの要求数上限。既定は ZAP 能動診断の要求上限と同水準。 */
 export const WORKFLOW_SCAN_DEFAULT_MAX_REQUESTS = 2000;
@@ -492,9 +499,11 @@ export async function runBruteForceCheck(ctx: CheckContext): Promise<void> {
   }
   let rejected = 0;
   let blocked = false;
-  for (let attempt = 1; attempt <= 12; attempt += 1) {
+  const invalidPassword = payloadById(WORKFLOW_PAYLOAD_CATALOG, 'auth.invalid-password');
+  for (let attempt = 1; attempt <= invalidPassword.safety.maxAttempts; attempt += 1) {
     // 対象フォームのmethodはGETとPOSTの両方があり得るため、クエリ形式で試行する。
-    const response = await get(ctx, `vulnerabilities/brute/?username=scopepilot&password=wrong-${ctx.marker}-${attempt}&Login=Login`);
+    const password = renderPayload(invalidPassword, { marker: ctx.marker, attempt });
+    const response = await get(ctx, `vulnerabilities/brute/?username=scopepilot&password=${encodeURIComponent(password)}&Login=Login`);
     const body = response.body;
     // メニュー欄などに「CAPTCHA」という語が出るだけで制限とは判断しない。
     if (response.status === 429 || body.toLowerCase().includes('locked') || body.toLowerCase().includes('too many')) {
@@ -1524,15 +1533,17 @@ export async function runApiCommandInjectionCheck(ctx: CheckContext): Promise<vo
     method: 'POST',
     param: 'target',
   });
-  const payloads = [
-    `127.0.0.1 && echo SP${marker}`,
-    `127.0.0.1; echo SP${marker}`,
-    `127.0.0.1 | echo SP${marker}`,
-    `127.0.0.1%0Aecho SP${marker}`,
-  ];
+  const payloads = selectPayloads(WORKFLOW_PAYLOAD_CATALOG, {
+    capability: 'command-injection',
+    context: 'json',
+    platform: 'posix',
+    oracle: 'marker-in-response',
+    maximumRisk: 'read-only',
+    tags: ['marker'],
+  }).map((payload) => renderPayload(payload, { marker: `SP${marker}` }));
   // 戦略1: コマンド実行結果（echo の出力）が応答に現れる実装。
   for (const payload of payloads) {
-    const response = await postJson(ctx, 'vulnerabilities/api/v2/health/connectivity', `{"target": "${payload}"}`);
+    const response = await postJson(ctx, 'vulnerabilities/api/v2/health/connectivity', JSON.stringify({ target: payload }));
     if (response.body.includes(`SP${marker}`)) {
       detect(check, {
         description:
@@ -1554,8 +1565,8 @@ export async function runApiCommandInjectionCheck(ctx: CheckContext): Promise<vo
     return `HTTP ${String(response.status)}: ${truncate(response.body, 60).replace(/\s+/g, ' ')}`;
   };
   const baseline = await probe('scopepilot-probe.invalid');
-  const withTrue = await probe('127.0.0.1; true');
-  const withFalse = await probe('127.0.0.1; false');
+  const withTrue = await probe(renderPayload(payloadById(WORKFLOW_PAYLOAD_CATALOG, 'command.posix.and.true'), {}));
+  const withFalse = await probe(renderPayload(payloadById(WORKFLOW_PAYLOAD_CATALOG, 'command.posix.and.false'), {}));
   if (withTrue !== undefined && withFalse !== undefined && withTrue !== withFalse && withTrue !== baseline) {
     detect(check, {
       description:
@@ -1593,20 +1604,22 @@ export async function runSqliVerificationCheck(ctx: CheckContext): Promise<void>
     }
     // 引用符を要するペイロード（low）と数値のみのペイロード（medium のエスケープ対策）を、
     // GETとPOSTの両方で試す（難易度によってフォームのmethodが変わる）。
-    const truthPayloads = ["1%27%20AND%20%271%27=%271", '1%20AND%201=1'];
-    const falsePayloads = ["1%27%20AND%20%271%27=%272", '1%20AND%201=2'];
+    const booleanPairs = [
+      ['sqli.boolean.quoted.true', 'sqli.boolean.quoted.false'],
+      ['sqli.boolean.numeric.true', 'sqli.boolean.numeric.false'],
+    ] as const;
     let trueHasRow = false;
     let falseHasRow = true;
-    for (let index = 0; index < truthPayloads.length; index += 1) {
-      const truthPayload = truthPayloads[index]!;
-      const falsePayload = falsePayloads[index]!;
+    for (const [truthId, falseId] of booleanPairs) {
+      const truthPayload = renderPayload(payloadById(WORKFLOW_PAYLOAD_CATALOG, truthId), {});
+      const falsePayload = renderPayload(payloadById(WORKFLOW_PAYLOAD_CATALOG, falseId), {});
       for (const usePost of [false, true]) {
         const truth = usePost
-          ? await postForm(ctx, target.path, { id: decodeURIComponent(truthPayload), Submit: 'Submit' })
-          : await get(ctx, `${target.path}?id=${truthPayload}&Submit=Submit`);
+          ? await postForm(ctx, target.path, { id: truthPayload, Submit: 'Submit' })
+          : await get(ctx, `${target.path}?id=${encodeURIComponent(truthPayload)}&Submit=Submit`);
         const lie = usePost
-          ? await postForm(ctx, target.path, { id: decodeURIComponent(falsePayload), Submit: 'Submit' })
-          : await get(ctx, `${target.path}?id=${falsePayload}&Submit=Submit`);
+          ? await postForm(ctx, target.path, { id: falsePayload, Submit: 'Submit' })
+          : await get(ctx, `${target.path}?id=${encodeURIComponent(falsePayload)}&Submit=Submit`);
         const truthRow = hasResultRow(truth.body);
         const lieRow = hasResultRow(lie.body);
         if (truthRow && !lieRow) {

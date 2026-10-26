@@ -560,6 +560,10 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
       return false;
     }
   }), [adoptedCandidates, authenticatedRole]);
+  const workflowPlanStep = useMemo(
+    () => scanPlan?.plan.steps.find((candidate) => candidate.kind === 'workflow-scan') ?? null,
+    [scanPlan],
+  );
 
   const defaultModel = useCallback((provider: AiProviderCatalog): string =>
     provider.models.find((model) => model.isDefault)?.id ?? provider.models[0]?.id ?? '', []);
@@ -1237,6 +1241,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
               kinds: run.workflow.checkKindCount,
               findings: run.workflow.checkCount,
               requests: run.workflow.requestCount,
+              payloadSet: run.workflow.payloadSet,
             });
       setRunSummary(`${t('wizard.s06.done', { engineVersion: run.engineVersion, overshoot: run.overshootReservation, findings: run.findings.length })} ${workflowStatus} ${nucleiStatus}`);
       setData((current) => ({ ...current, runFinished: true }));
@@ -1758,6 +1763,11 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
             <Text size={200} className={styles.hint}>
               {t(workflowScanEligible ? 'wizard.s05.workflowEnabled' : 'wizard.s05.workflowUnavailable')}
             </Text>
+            {workflowPlanStep?.engineVersion !== undefined && (
+              <Text size={200} className={styles.hint}>
+                {t('wizard.s05.workflowCatalog', { catalog: workflowPlanStep.engineVersion })}
+              </Text>
+            )}
           </div>
           <div className={styles.pathCard}>
             <Switch

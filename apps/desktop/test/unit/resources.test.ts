@@ -9,6 +9,10 @@ describe('ui string resources', () => {
   test('placeholder を置換し、未指定 placeholder は残さない主要文で検証', () => {
     assert.equal(t('wizard.s01.opened', { caseName: 'ScopePilot2 案件' }), '案件「ScopePilot2 案件」を開きました。');
     assert.equal(t('wizard.s04.adopt', { count: 3 }), '選択を採用する (3 件)');
+    assert.equal(
+      t('wizard.s05.workflowCatalog', { catalog: 'scopepilot-workflow-payloads/v2.0.0 sha256:abc' }),
+      'ペイロードカタログ（計画ハッシュ固定）: scopepilot-workflow-payloads/v2.0.0 sha256:abc',
+    );
     assert.equal(t('app.mode.simple'), 'シンプル');
   });
 

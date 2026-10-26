@@ -1,0 +1,11 @@
+{
+  "name": "@scopepilot2/payloads",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\""
+  }
+}

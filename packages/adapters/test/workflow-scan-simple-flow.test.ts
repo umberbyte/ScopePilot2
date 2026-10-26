@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import type { ActiveScanEnginePort, EvidenceStorePort, ExplorationPort, LoginExecutorPort, StoredEvidence } from '@scopepilot2/core';
-import { BaselineFlowService, FixedClock, SequentialIdGenerator } from '@scopepilot2/core';
+import { BaselineFlowService, FixedClock, SequentialIdGenerator, WORKFLOW_SCAN_PAYLOAD_SET } from '@scopepilot2/core';
 import type { EngineCapabilitySnapshot, OperatorProfile } from '@scopepilot2/contracts';
 import { NodeWorkflowScanTransport } from '../src/workflow-scan-transport.ts';
 import { startFakeDvwaServer, type FakeDvwaServer } from './fake-dvwa-server.ts';
@@ -133,6 +133,8 @@ describe('Simple mode workflow scan integration', () => {
     assert.deepEqual(plan.steps.map((step) => step.kind), ['active-scan', 'workflow-scan']);
     assert.equal(plan.steps.reduce((total, step) => total + step.limits.maxRequests, 0), plan.limits.maxRequests);
     assert.deepEqual(plan.steps[1]?.targetSnapshot, [new URL(server.baseUrl).origin + '/']);
+    assert.equal(plan.steps[1]?.engineVersion, WORKFLOW_SCAN_PAYLOAD_SET);
+    assert.match(WORKFLOW_SCAN_PAYLOAD_SET, /^scopepilot-workflow-payloads\/v2\.0\.0 sha256:[a-f0-9]{64}$/);
     service.authorizePlan(plan);
     const confirmation = service.confirmPlan(plan, OPERATOR);
     const result = await service.runActiveScan(OPERATOR, plan, confirmation, [{
@@ -147,6 +149,7 @@ describe('Simple mode workflow scan integration', () => {
     }], 'member');
 
     assert.equal(result.workflow?.status, 'completed');
+    assert.equal(result.workflow?.payloadSet, WORKFLOW_SCAN_PAYLOAD_SET);
     assert.equal(result.workflow?.checkKindCount, 21);
     assert.ok((result.workflow?.checkCount ?? 0) >= 21);
     assert.equal(result.workflow?.importedCount, result.workflow?.checkCount);
@@ -158,6 +161,7 @@ describe('Simple mode workflow scan integration', () => {
     assert.ok(!evidence.contents.join('\n').includes('Sp-sp'));
     const workflowEvidenceText = evidence.contents.find((content) => content.includes('"totalRequestCount"'));
     assert.ok(workflowEvidenceText !== undefined);
+    assert.ok(workflowEvidenceText.includes(`"payloadSet":"${WORKFLOW_SCAN_PAYLOAD_SET}"`));
     const workflowEvidence = JSON.parse(workflowEvidenceText) as {
       alerts: readonly { request: string; response: string }[];
     };

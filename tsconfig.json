@@ -19,6 +19,7 @@
     "paths": {
       "@scopepilot2/contracts": ["./packages/contracts/src/index.ts"],
       "@scopepilot2/core": ["./packages/core/src/index.ts"],
+      "@scopepilot2/payloads": ["./packages/payloads/src/index.ts"],
       "@scopepilot2/simulation": ["./tools/simulation/src/index.ts"]
     }
   },

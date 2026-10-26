@@ -9,6 +9,9 @@
     "test": "node --test \"test/unit/**/*.test.ts\"",
     "test:integration": "node --test \"test/integration/**/*.test.ts\""
   },
+  "dependencies": {
+    "@scopepilot2/payloads": "*"
+  },
   "devDependencies": {
     "@scopepilot2/contracts": "*"
   }
