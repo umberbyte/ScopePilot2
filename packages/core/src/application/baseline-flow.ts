@@ -96,27 +96,37 @@ import {
   judgeCorsPreflight,
   judgeCorsResponse,
   judgeInputRobustness,
+  judgeDirectoryListing,
   judgeIdorAccess,
   judgeLockout,
   judgeMassAssignment,
   judgeNucleiSpot,
+  judgeOtpBoundary,
+  judgeOtpSubmission,
   judgePasswordEcho,
   judgePiiExposure,
   judgePlainHttp,
   judgeReplay,
+  judgeResponseContentType,
   judgeSensitiveCache,
+  judgeSamlAssertionReplay,
   judgeUserEnumeration,
+  judgeVersionDisclosure,
   mergeJsonFields,
   normalizeEnumerationResponse,
   parseDefaultCredentialPairs,
   parseExtraFieldsJson,
   planIdorProbes,
   planLockoutSequence,
+  planOtpExpiryWaitMs,
+  planOtpWrongAttempts,
   planReplayCount,
   requireImplementedTheme,
   summarizeThemeOutcomes,
   substituteObjectParam,
   validateSpotTemplateIds,
+  OTP_INBOX_TIMEOUT_MS,
+  type OtpSubmissionOutcome,
   type ThemeCheckProbeResult,
   type ThemeCheckSummary,
   type ZapUnsupportedThemeNo,
@@ -160,6 +170,7 @@ import { buildWsSendPlan, importFrames, sendWithPolicy, validateWsSubprotocols, 
 import { checkAuthorityScope, negotiateTransport, transportCapability, transportEvidence, validateHeaderValues, validatePseudoHeaders } from '../domain/advanced-transport.ts';
 import { buildDomCandidate, domEvidenceProjection } from '../domain/dom-investigation.ts';
 import {
+  resolveWorkflowScanCheckIds,
   runWorkflowScan,
   WORKFLOW_SCAN_DEFAULT_MAX_REQUESTS,
   WORKFLOW_SCAN_PAYLOAD_SET,
@@ -167,6 +178,7 @@ import {
   type WorkflowScanRequestSpec,
   type WorkflowScanTransport,
 } from '../domain/workflow-scan.ts';
+import { resolveGuidelineThemeRoutes } from '../domain/guideline-execution.ts';
 import { checkCompatibility, respondToSecretRead, verifyExtensionManifest, type ExtensionManifest } from '../domain/product-api.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
@@ -223,6 +235,13 @@ export interface BaselineFlowDeps {
 
   /** login 実行器 (design/f09)。未構成の service では runLogin が ValidationFailed。 */
   readonly loginExecutor?: LoginExecutorPort;
+
+  /** 許可済み fixture の OTP inbox (テーマ6 OTP sub-check)。未構成なら該当 sub-check を skip する。 */
+  readonly otpInbox?: import('../ports/engines.ts').OtpInboxPort;
+  /** 隔離された試験 IdP/SP による SAML assertion replay (テーマ6 sub-check)。未構成なら skip する。 */
+  readonly samlFixture?: import('../ports/engines.ts').SamlFixturePort;
+  /** 期限切れ確認などの実待機。既定は実 setTimeout。fixture では即時解決の fake に差し替える。 */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 export interface CreateCaseInput {
@@ -345,6 +364,7 @@ export interface ActiveScanRunResult {
   readonly engineVersion: string;
   readonly requestCorpusEvidenceRef: string;
   readonly diagnosticRoutes: readonly DiagnosticRouteResult[];
+  readonly guidelineRoutes: readonly GuidelineRouteResult[];
   readonly workflow?: {
     readonly status: 'completed' | 'failed';
     readonly payloadSet: string;
@@ -377,6 +397,16 @@ export interface DiagnosticRouteResult {
   readonly status: 'delegated' | 'executed' | 'needs-input' | 'unavailable';
   readonly detail: string;
   readonly findingCount?: number;
+}
+
+export interface GuidelineRouteResult {
+  readonly routeId: string;
+  readonly themeNo: string;
+  readonly guidelineIds: readonly string[];
+  readonly status: 'delegated' | 'executed' | 'needs-input' | 'unavailable';
+  readonly detail: string;
+  readonly checkId?: string;
+  readonly checkStatus?: 'pass' | 'fail' | 'inconclusive';
 }
 
 export interface ActiveScanExecutionEvent {
@@ -518,6 +548,7 @@ export class BaselineFlowService {
   private assessmentEndedAt: string | undefined;
   private authenticationRole: string | null = null;
   private latestDiagnosticRoutes: readonly DiagnosticRouteResult[] = [];
+  private latestGuidelineRoutes: readonly GuidelineRouteResult[] = [];
   private delegatedSteps: {
     readonly stepId: string;
     readonly engineKind: 'zap' | 'nuclei' | 'node-http';
@@ -1375,6 +1406,178 @@ export class BaselineFlowService {
         skipped = ['high-volume / high-rate testing (JMeter scope, needs prior agreement)', 'precise rate-limit measurement'];
         break;
       }
+      case '6': {
+        // MFAの段階スキップを、一次認証直後のsessionで保護APIへ到達できるかに限定して確認する。
+        // OTP値の取得・再利用やSAML assertion replayは、対象固有fixtureを別途レビューして行う。
+        const signInTarget = targets[0];
+        const protectedTarget = targets[1];
+        if (signInTarget === undefined || protectedTarget === undefined) {
+          throw domainError('ValidationFailed', 'theme 6 requires sign-in and protected target URLs');
+        }
+        const usernameReference = params.usernameReference ?? 'username';
+        const passwordReference = params.passwordReference ?? 'password';
+        const username = secrets[usernameReference];
+        const password = secrets[passwordReference];
+        if (username === undefined || password === undefined) {
+          throw domainError('NeedsInput', `theme 6 requires secret values for '${usernameReference}' and '${passwordReference}'`);
+        }
+        // OTP sub-check (handoff 2026-10-31 P1): 必要入力と許可済み fixture inbox が
+        // 揃った sub-check だけ実行し、残りは理由を付けて skip する (全体を pass にしない)。
+        const otpInbox = this.deps.otpInbox;
+        const otpIssueUrl = (params.otpIssueUrl ?? '').trim();
+        const otpVerifyUrl = (params.otpVerifyUrl ?? '').trim();
+        const otpVerifyField = (params.otpVerifyField ?? '').trim() || 'code';
+        const otpSuccessMarker = params.otpSuccessMarker ?? '';
+        const otpMailboxRef = (params.otpMailboxRef ?? '').trim();
+        const otpBaseReady = otpIssueUrl !== '' && otpVerifyUrl !== '' && otpSuccessMarker !== '' && otpMailboxRef !== '' && otpInbox !== undefined;
+        const otpWrongAttempts = (params.otpWrongAttempts ?? '').trim() === '' ? null : planOtpWrongAttempts(Number.parseInt(params.otpWrongAttempts ?? '0', 10));
+        const otpExpiryWaitMs = (params.otpExpirySeconds ?? '').trim() === '' ? null : planOtpExpiryWaitMs(Number.parseInt(params.otpExpirySeconds ?? '0', 10));
+        const otpDestinationChangeUrl = (params.otpDestinationChangeUrl ?? '').trim();
+        const otpDestinationChangeMarker = params.otpDestinationChangeMarker ?? '';
+        const otpDestinationReady = otpDestinationChangeUrl !== '' && otpDestinationChangeMarker !== '' && input.role !== undefined && this.roleSessionCookies.has(input.role);
+        // SAML assertion replay は隔離された試験 IdP/SP fixture adapter が全体を駆動する
+        // (Core は直接送信しない。IdP/SP が審査済み fixture であることは adapter 側で保証)。
+        const samlFixture = this.deps.samlFixture;
+        const samlIdpStartUrl = (params.samlIdpStartUrl ?? '').trim();
+        const samlAcsUrl = (params.samlAcsUrl ?? '').trim();
+        const samlReady = samlFixture !== undefined && samlIdpStartUrl !== '' && samlAcsUrl !== '';
+        for (const otpEndpoint of [otpIssueUrl, otpVerifyUrl, otpDestinationChangeUrl]) {
+          if (otpEndpoint !== '' && !businessTargetInScope(otpEndpoint, caseRecord.scope)) {
+            throw domainError('OutOfScope', `theme 6 OTP endpoint is out of scope: ${otpEndpoint}`);
+          }
+        }
+        requestBudget(2
+          + (otpBaseReady ? 3 : 0)
+          + (otpBaseReady && otpExpiryWaitMs !== null ? 2 : 0)
+          + (otpBaseReady && otpWrongAttempts !== null ? 2 + otpWrongAttempts : 0)
+          + (otpDestinationReady ? 1 : 0)
+          + (samlReady ? 2 : 0));
+        const form = new URLSearchParams({ username, password }).toString();
+        const signIn = await repeater().send({
+          targetUrl: signInTarget,
+          requestBytes: rawRequest('POST', signInTarget, [['Content-Type', 'application/x-www-form-urlencoded']], form),
+        });
+        const cookies: LoginSessionCookie[] = signIn.headers
+          .filter(([name]) => name.toLocaleLowerCase() === 'set-cookie')
+          .flatMap(([, value]) => {
+            const pair = /^([^=;\s]+)=([^;]*)/u.exec(value);
+            if (pair === null || pair[1] === undefined || pair[2] === undefined || pair[2] === '') return [];
+            const path = /;\s*Path=([^;]+)/iu.exec(value)?.[1] ?? '/';
+            return [{ name: pair[1], value: pair[2], domain: new URL(signInTarget).hostname, path }];
+          });
+        // MFA entry points commonly issue a pending-session cookie with a 302.
+        // Treat a non-error redirect as a valid control only when that cookie exists.
+        const signInAccepted = signIn.status >= 200 && signIn.status < 400 && cookies.length > 0;
+        probes.push({ kind: 'http', pattern: 'mfa-primary-control', targetUrl: signInTarget, status: signIn.status, finalUrl: signIn.redirectLocations.at(-1) ?? signInTarget, bodyHash: hashStable('scopepilot2.theme', { body: signIn.body.toString('utf8') }), outcome: signInAccepted ? null : 'inconclusive', detail: `sessionIssued=${String(cookies.length > 0)}` });
+        let outcome: AuthBypassProbeOutcome = 'inconclusive';
+        let protectedStatus: number | null = null;
+        let protectedHash = '';
+        if (signInAccepted) {
+          const protectedResponse = await repeater().send({ targetUrl: protectedTarget, requestBytes: rawRequest('GET', protectedTarget, [], ''), sessionCookies: cookies });
+          protectedStatus = protectedResponse.status;
+          protectedHash = hashStable('scopepilot2.theme', { body: protectedResponse.body.toString('utf8') });
+          outcome = protectedResponse.status >= 200 && protectedResponse.status < 300
+            ? 'exposed'
+            : protectedResponse.status === 401 || protectedResponse.status === 403
+              ? 'denied'
+              : 'inconclusive';
+        }
+        probes.push({ kind: 'http', pattern: 'mfa-stage-skip', targetUrl: protectedTarget, status: protectedStatus, finalUrl: protectedTarget, bodyHash: protectedHash, outcome });
+        // ---- OTP sub-check。OTP値はこの呼び出しの間だけ保持し、probe結果・証跡へ出さない。 ----
+        const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
+        const sendOtpJson = async (targetUrl: string, body: string, marker: string, useCookies: readonly LoginSessionCookie[]): Promise<{ status: number; bodyHash: string; finalUrl: string; outcome: OtpSubmissionOutcome }> => {
+          const response = await repeater().send({ targetUrl, requestBytes: rawRequest('POST', targetUrl, [['Content-Type', 'application/json']], body), ...(useCookies.length === 0 ? {} : { sessionCookies: useCookies }) });
+          const text = response.body.toString('utf8');
+          return {
+            status: response.status,
+            bodyHash: hashStable('scopepilot2.theme', { body: text }),
+            finalUrl: response.redirectLocations.at(-1) ?? targetUrl,
+            outcome: judgeOtpSubmission({ status: response.status, markerFound: text.includes(marker) }),
+          };
+        };
+        const issueOtp = async (label: string): Promise<string | null> => {
+          const issuedAfter = this.deps.clock.now().toISOString();
+          const issue = await repeater().send({ targetUrl: otpIssueUrl, requestBytes: rawRequest('POST', otpIssueUrl, [['Content-Type', 'application/json']], '{}'), sessionCookies: cookies });
+          probes.push({ kind: 'http', pattern: `otp-issue:${label}`, targetUrl: otpIssueUrl, status: issue.status, finalUrl: issue.redirectLocations.at(-1) ?? otpIssueUrl, bodyHash: hashStable('scopepilot2.theme', { body: issue.body.toString('utf8') }), outcome: null });
+          const received = await otpInbox!.waitForOtp({ mailboxRef: otpMailboxRef, issuedAfter, timeoutMs: OTP_INBOX_TIMEOUT_MS });
+          return received === null ? null : received.otp;
+        };
+        if (otpBaseReady) {
+          // 正常対照: 新規OTPを期限内に1回だけ提出して受理を確認する (以後の sub-check の前提)。
+          const controlOtp = await issueOtp('control');
+          let control: OtpSubmissionOutcome = 'unknown';
+          if (controlOtp === null) {
+            probes.push({ kind: 'http', pattern: 'otp-reuse:control', targetUrl: otpVerifyUrl, status: null, finalUrl: '', bodyHash: '', outcome: 'inconclusive', detail: 'otp was not received from the authorized fixture inbox' });
+          } else {
+            const controlRun = await sendOtpJson(otpVerifyUrl, JSON.stringify({ [otpVerifyField]: controlOtp }), otpSuccessMarker, cookies);
+            control = controlRun.outcome;
+            probes.push({ kind: 'http', pattern: 'otp-reuse:control', targetUrl: otpVerifyUrl, status: controlRun.status, finalUrl: controlRun.finalUrl, bodyHash: controlRun.bodyHash, outcome: control === 'accepted' ? null : 'inconclusive' });
+            // 再利用: 同一の使用済みOTPを同一sessionで再送する。
+            const reuseRun = await sendOtpJson(otpVerifyUrl, JSON.stringify({ [otpVerifyField]: controlOtp }), otpSuccessMarker, cookies);
+            probes.push({ kind: 'http', pattern: 'otp-reuse:resubmit', targetUrl: otpVerifyUrl, status: reuseRun.status, finalUrl: reuseRun.finalUrl, bodyHash: reuseRun.bodyHash, outcome: judgeOtpBoundary({ control, action: reuseRun.outcome }) });
+          }
+          if (otpExpiryWaitMs !== null) {
+            // 寿命: 未使用の新規OTPを期限経過後に1回だけ提出する (実待機は上限内のみ)。
+            const expiryOtp = await issueOtp('expiry');
+            if (expiryOtp === null) {
+              probes.push({ kind: 'http', pattern: 'otp-expiry:expired-submit', targetUrl: otpVerifyUrl, status: null, finalUrl: '', bodyHash: '', outcome: 'inconclusive', detail: 'otp was not received from the authorized fixture inbox' });
+            } else {
+              await sleep(otpExpiryWaitMs);
+              const expiredRun = await sendOtpJson(otpVerifyUrl, JSON.stringify({ [otpVerifyField]: expiryOtp }), otpSuccessMarker, cookies);
+              probes.push({ kind: 'http', pattern: 'otp-expiry:expired-submit', targetUrl: otpVerifyUrl, status: expiredRun.status, finalUrl: expiredRun.finalUrl, bodyHash: expiredRun.bodyHash, outcome: judgeOtpBoundary({ control, action: expiredRun.outcome }) });
+            }
+          } else {
+            skipped.push('otp-expiry skipped: otpExpirySeconds (fixture-declared validity; wait capped at 120s) was not provided');
+          }
+          if (otpWrongAttempts !== null) {
+            // 試行制限: 事前合意した少数の誤OTPの後、正規OTPが受理されるかだけを観察する。
+            const attemptOtp = await issueOtp('attempt-limit');
+            if (attemptOtp === null) {
+              probes.push({ kind: 'http', pattern: 'otp-attempt-limit:correct-after-wrong', targetUrl: otpVerifyUrl, status: null, finalUrl: '', bodyHash: '', outcome: 'inconclusive', detail: 'otp was not received from the authorized fixture inbox' });
+            } else {
+              for (let index = 1; index <= otpWrongAttempts; index += 1) {
+                const otpWidth = /^\d{4,10}$/u.test(attemptOtp) ? attemptOtp.length : 6;
+                const candidate = String(index).padStart(otpWidth, '0').slice(-otpWidth);
+                const wrongOtp = candidate === attemptOtp ? '9'.repeat(otpWidth) : candidate;
+                const wrongRun = await sendOtpJson(otpVerifyUrl, JSON.stringify({ [otpVerifyField]: wrongOtp }), otpSuccessMarker, cookies);
+                probes.push({ kind: 'http', pattern: `otp-attempt-limit:wrong-${index}`, targetUrl: otpVerifyUrl, status: wrongRun.status, finalUrl: wrongRun.finalUrl, bodyHash: wrongRun.bodyHash, outcome: null });
+              }
+              const correctRun = await sendOtpJson(otpVerifyUrl, JSON.stringify({ [otpVerifyField]: attemptOtp }), otpSuccessMarker, cookies);
+              probes.push({ kind: 'http', pattern: 'otp-attempt-limit:correct-after-wrong', targetUrl: otpVerifyUrl, status: correctRun.status, finalUrl: correctRun.finalUrl, bodyHash: correctRun.bodyHash, outcome: judgeOtpBoundary({ control, action: correctRun.outcome }) });
+            }
+          } else {
+            skipped.push('otp-attempt-limit skipped: otpWrongAttempts (agreed 1..5) was not provided');
+          }
+        } else {
+          skipped.push(`otp-reuse/otp-expiry/otp-attempt-limit skipped: requires otpIssueUrl, otpVerifyUrl, otpSuccessMarker and otpMailboxRef${otpInbox === undefined ? ' plus a configured OTP inbox fixture adapter' : ''}`);
+        }
+        if (otpDestinationReady) {
+          // 宛先変更: 認証済みsessionで再認証なしの宛先変更が受理されるか。変更通知の送信だけでは安全とみなさない。
+          const destinationCookies = applicableSessionCookies([...this.roleSessionCookies.get(input.role!)!.cookies], otpDestinationChangeUrl) ?? [];
+          const changeRun = await sendOtpJson(otpDestinationChangeUrl, params.otpDestinationChangeBodyJson ?? '{}', otpDestinationChangeMarker, destinationCookies);
+          probes.push({ kind: 'http', pattern: 'otp-destination-change:without-reauth', targetUrl: otpDestinationChangeUrl, status: changeRun.status, finalUrl: changeRun.finalUrl, bodyHash: changeRun.bodyHash, outcome: changeRun.outcome === 'accepted' ? 'exposed' : changeRun.outcome === 'rejected' ? 'denied' : 'inconclusive', detail: 'reauth=not-performed (the supplied change body must not contain re-authentication)' });
+        } else {
+          skipped.push('otp-destination-change skipped: requires otpDestinationChangeUrl, otpDestinationChangeMarker and an authenticated role session');
+        }
+        if (samlReady) {
+          // SAML assertion replay: 試験 IdP が正規発行した同一 assertion を、session reset 後に
+          // 同一条件で再送する (生成・改ざんはしない)。assertion 本文は hash だけ記録する。
+          const replay = await samlFixture!.issueAndReplay({ idpStartUrl: samlIdpStartUrl, acsUrl: samlAcsUrl, role: input.role ?? 'diag-user' });
+          probes.push({
+            kind: 'http',
+            pattern: 'saml-assertion-replay',
+            targetUrl: samlAcsUrl,
+            status: replay.replayStatus,
+            finalUrl: samlAcsUrl,
+            bodyHash: replay.assertionHash,
+            outcome: judgeSamlAssertionReplay({ controlAccepted: replay.controlAccepted, replayAccepted: replay.replayAccepted }),
+            detail: `controlStatus=${replay.controlStatus === null ? '(none)' : String(replay.controlStatus)}; replayNewSession=${replay.replayAccepted === null ? 'unknown' : String(replay.replayAccepted)}`,
+          });
+        } else {
+          skipped.push('SAML assertion replay skipped: requires samlIdpStartUrl, samlAcsUrl and a configured isolated test IdP/SP fixture adapter');
+        }
+        break;
+      }
       case '7': {
         // ユーザ列挙: 正常系を確認した上で、既存/不在の誤資格応答を複数回比較する。
         const role = input.role ?? '';
@@ -1423,6 +1626,40 @@ export class BaselineFlowService {
           timingThresholdMs,
         );
         probes.push({ kind: 'browser', pattern: 'response-comparison', targetUrl: baseUrl, status: null, finalUrl: '', bodyHash: '', outcome: control.assertionsPassed ? enumeration : 'inconclusive', detail: `samples=${sampleCount}; existingAvgMs=${average(existingRuns).toFixed(1)}; nonexistentAvgMs=${average(nonexistentRuns).toFixed(1)}` });
+        break;
+      }
+      case '9': {
+        // JWT署名検証の最低限確認。正規tokenを対照にalg=none変種を再送する。
+        const target = targets[0];
+        if (target === undefined) throw domainError('ValidationFailed', 'theme 9 requires a JWT-protected target URL');
+        // Renderer sends bearer credentials through secretValues. Keep params as a
+        // compatibility fallback for older API clients.
+        const token = secrets.validToken ?? params.validToken ?? '';
+        if (token.trim() === '') throw domainError('NeedsInput', 'theme 9 requires validToken captured from the authorized test account');
+        const parts = token.split('.');
+        if (parts.length !== 3) throw domainError('ValidationFailed', 'theme 9 validToken is not a compact JWT');
+        let header: Record<string, unknown>;
+        let claims: Record<string, unknown>;
+        try {
+          header = JSON.parse(Buffer.from(parts[0]!, 'base64url').toString('utf8')) as Record<string, unknown>;
+          claims = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8')) as Record<string, unknown>;
+        } catch {
+          throw domainError('ValidationFailed', 'theme 9 JWT header or claims are not valid JSON');
+        }
+        requestBudget(2);
+        const unsignedHeader = Buffer.from(JSON.stringify({ ...header, alg: 'none' }), 'utf8').toString('base64url');
+        const unsigned = `${unsignedHeader}.${parts[1]!}.`;
+        const send = async (value: string) => repeater().send({ targetUrl: target, requestBytes: rawRequest('GET', target, [['Authorization', `Bearer ${value}`]], '') });
+        const baseline = await send(token);
+        const mutated = await send(unsigned);
+        const baselineAccepted = baseline.status >= 200 && baseline.status < 300;
+        const unsignedAccepted = mutated.status >= 200 && mutated.status < 300;
+        probes.push({ kind: 'http', pattern: 'jwt-valid-control', targetUrl: target, status: baseline.status, finalUrl: target, bodyHash: hashStable('scopepilot2.theme', { body: baseline.body.toString('utf8') }), outcome: baselineAccepted ? null : 'inconclusive' });
+        probes.push({ kind: 'http', pattern: 'jwt-alg-none', targetUrl: target, status: mutated.status, finalUrl: target, bodyHash: hashStable('scopepilot2.theme', { body: mutated.body.toString('utf8') }), outcome: !baselineAccepted ? 'inconclusive' : unsignedAccepted ? 'exposed' : 'denied' });
+        const nowSeconds = Math.floor(this.deps.clock.now().getTime() / 1000);
+        const exp = typeof claims.exp === 'number' ? claims.exp : null;
+        probes.push({ kind: 'http', pattern: 'jwt-exp-claim', targetUrl: target, status: null, finalUrl: target, bodyHash: '', outcome: exp === null || exp > nowSeconds + 86_400 ? 'exposed' : 'denied', detail: `exp=${exp === null ? '(missing)' : String(exp)}` });
+        skipped = ['OAuth/OIDC redirect, state, nonce, PKCE and issuer discovery require a registered authorization flow'];
         break;
       }
       case '10': {
@@ -1505,6 +1742,157 @@ export class BaselineFlowService {
           const preflight = origin === new URL(target).origin ? null : judgeCorsPreflight({ requestOrigin: origin, requestMethod, acao: headerValue(optionsResponse.headers, 'Access-Control-Allow-Origin'), acaom: headerValue(optionsResponse.headers, 'Access-Control-Allow-Methods') });
           probes.push({ kind: 'http', pattern: `preflight:${origin}`, targetUrl: target, status: optionsResponse.status, finalUrl: target, bodyHash: '', outcome: preflight, ...(headerValue(optionsResponse.headers, 'Access-Control-Allow-Methods') === null ? {} : { detail: `acaom=${headerValue(optionsResponse.headers, 'Access-Control-Allow-Methods') ?? ''}` }) });
         }
+        break;
+      }
+      case '14': {
+        // mail subject等へCRLFを入れ、正規値を対照に拒否されるか確認する。外部メールは送らない。
+        const target = targets[0];
+        if (target === undefined) throw domainError('ValidationFailed', 'theme 14 requires a mail submission target URL');
+        const fieldName = params.fieldName ?? 'subject';
+        if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(fieldName)) throw domainError('ValidationFailed', 'theme 14 fieldName is invalid');
+        const baselineValue = params.baselineValue ?? 'ScopePilot local notice';
+        const injectedValue = params.injectedValue ?? `${baselineValue}\r\nBcc: scopepilot-invalid@example.invalid`;
+        const sessionCookies = input.role === undefined ? undefined : applicableSessionCookies([...requireSession().cookies], target);
+        requestBudget(2);
+        const send = async (value: string) => repeater().send({
+          targetUrl: target,
+          requestBytes: rawRequest('POST', target, [['Content-Type', 'application/json']], JSON.stringify({ [fieldName]: value })),
+          ...(sessionCookies === undefined ? {} : { sessionCookies }),
+        });
+        const baseline = await send(baselineValue);
+        const injected = await send(injectedValue);
+        const baselineAccepted = baseline.status >= 200 && baseline.status < 300;
+        const injectionAccepted = injected.status >= 200 && injected.status < 300;
+        probes.push({ kind: 'http', pattern: 'mail-header-baseline', targetUrl: target, status: baseline.status, finalUrl: target, bodyHash: hashStable('scopepilot2.theme', { body: baseline.body.toString('utf8') }), outcome: baselineAccepted ? null : 'inconclusive' });
+        probes.push({ kind: 'http', pattern: 'mail-header-crlf', targetUrl: target, status: injected.status, finalUrl: target, bodyHash: hashStable('scopepilot2.theme', { body: injected.body.toString('utf8') }), outcome: !baselineAccepted ? 'inconclusive' : injectionAccepted ? 'exposed' : 'denied' });
+        skipped = ['no external mail is sent; delivery-header proof requires a local inbox/oracle supplied by the target fixture'];
+        break;
+      }
+      case '15': {
+        // LDAP/CSV/ReDoS/Host 等の対象固有注入を、正常要求と利用者レビュー済み変異要求の差分で確認する。
+        // 任意文字列をこちらで「成功」と推測せず、成立 marker または時間差を明示入力として要求する。
+        const target = targets[0];
+        if (target === undefined) throw domainError('ValidationFailed', 'theme 15 requires an injection target URL');
+        const baselineJson = params.baselineJson ?? '';
+        const variantJson = params.variantJson ?? '';
+        if (baselineJson.trim() === '' || variantJson.trim() === '') {
+          throw domainError('NeedsInput', 'theme 15 requires baselineJson and a reviewed variantJson');
+        }
+        const parseBody = (name: string, value: string): string => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(value) as unknown;
+          } catch {
+            throw domainError('ValidationFailed', `theme 15 ${name} must be valid JSON`);
+          }
+          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            throw domainError('ValidationFailed', `theme 15 ${name} must be a JSON object`);
+          }
+          if (Buffer.byteLength(value, 'utf8') > 65_536) throw domainError('ValidationFailed', `theme 15 ${name} exceeds 65536 bytes`);
+          return JSON.stringify(parsed);
+        };
+        const baselineBody = parseBody('baselineJson', baselineJson);
+        const variantBody = parseBody('variantJson', variantJson);
+        const method = (params.method ?? 'POST').toUpperCase();
+        if (!['POST', 'PUT', 'PATCH'].includes(method)) throw domainError('ValidationFailed', 'theme 15 method must be POST, PUT, or PATCH');
+        const pattern = (params.pattern ?? 'reviewed-injection').trim();
+        if (!/^[a-z0-9][a-z0-9_.:-]{0,63}$/iu.test(pattern)) throw domainError('ValidationFailed', 'theme 15 pattern is invalid');
+        const successMarker = params.successMarker;
+        const elapsedThresholdMs = params.elapsedThresholdMs === undefined ? null : Number.parseInt(params.elapsedThresholdMs, 10);
+        if (successMarker === undefined && elapsedThresholdMs === null) {
+          throw domainError('NeedsInput', 'theme 15 requires successMarker or elapsedThresholdMs so HTTP success is not misreported as injection');
+        }
+        if (elapsedThresholdMs !== null && (!Number.isInteger(elapsedThresholdMs) || elapsedThresholdMs < 100 || elapsedThresholdMs > 10_000)) {
+          throw domainError('ValidationFailed', 'theme 15 elapsedThresholdMs must be 100..10000');
+        }
+        const sessionCookies = input.role === undefined ? undefined : applicableSessionCookies([...requireSession().cookies], target);
+        requestBudget(2);
+        const send = async (body: string): Promise<{ response: Awaited<ReturnType<ReturnType<typeof repeater>['send']>>; elapsedMs: number }> => {
+          const startedAt = performance.now();
+          const response = await repeater().send({
+            targetUrl: target,
+            requestBytes: rawRequest(method, target, [['Content-Type', 'application/json']], body),
+            ...(sessionCookies === undefined ? {} : { sessionCookies }),
+          });
+          return { response, elapsedMs: Math.max(0, performance.now() - startedAt) };
+        };
+        const baseline = await send(baselineBody);
+        const variant = await send(variantBody);
+        const baselineText = baseline.response.body.toString('utf8');
+        const variantText = variant.response.body.toString('utf8');
+        const baselineAccepted = baseline.response.status >= 200 && baseline.response.status < 300;
+        const markerFound = successMarker === undefined ? null : variantText.includes(successMarker);
+        const timingExposed = elapsedThresholdMs !== null
+          && variant.elapsedMs >= elapsedThresholdMs
+          && variant.elapsedMs >= Math.max(baseline.elapsedMs * 3, baseline.elapsedMs + 75);
+        const rejected = variant.response.status === 400 || variant.response.status === 401 || variant.response.status === 403 || variant.response.status === 422;
+        const outcome: AuthBypassProbeOutcome = !baselineAccepted
+          ? 'inconclusive'
+          : markerFound === true || timingExposed
+            ? 'exposed'
+            : rejected || markerFound === false || elapsedThresholdMs !== null
+              ? 'denied'
+              : 'inconclusive';
+        probes.push({ kind: 'http', pattern: 'injection-baseline', targetUrl: target, status: baseline.response.status, finalUrl: baseline.response.redirectLocations.at(-1) ?? target, bodyHash: hashStable('scopepilot2.theme', { body: baselineText }), outcome: baselineAccepted ? null : 'inconclusive', detail: `elapsedMs=${String(Math.round(baseline.elapsedMs))}` });
+        probes.push({ kind: 'http', pattern: `injection:${pattern}`, targetUrl: target, status: variant.response.status, finalUrl: variant.response.redirectLocations.at(-1) ?? target, bodyHash: hashStable('scopepilot2.theme', { body: variantText }), outcome, ...(markerFound === null ? {} : { markersFound: markerFound }), detail: `elapsedMs=${String(Math.round(variant.elapsedMs))}; marker=${markerFound === null ? 'unused' : String(markerFound)}` });
+        skipped = ['only the supplied, reviewed injection variant was exercised; other interpreters in theme 15 remain separate checks'];
+        break;
+      }
+      case '16': {
+        // SSRF: 正常な公開URLを対照に、許可済みfixture/OAST URLへのサーバ側到達を marker で確認する。
+        const target = targets[0];
+        if (target === undefined) throw domainError('ValidationFailed', 'theme 16 requires an SSRF input endpoint URL');
+        const baselineJson = params.baselineJson ?? '';
+        const fieldName = (params.fieldName ?? 'url').trim();
+        const probeUrl = params.probeUrl ?? '';
+        const successMarker = params.successMarker;
+        if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(fieldName)) throw domainError('ValidationFailed', 'theme 16 fieldName is invalid');
+        if (baselineJson.trim() === '' || probeUrl.trim() === '') throw domainError('NeedsInput', 'theme 16 requires baselineJson and probeUrl');
+        let baselineObject: unknown;
+        try {
+          baselineObject = JSON.parse(baselineJson) as unknown;
+        } catch {
+          throw domainError('ValidationFailed', 'theme 16 baselineJson must be valid JSON');
+        }
+        if (typeof baselineObject !== 'object' || baselineObject === null || Array.isArray(baselineObject)) {
+          throw domainError('ValidationFailed', 'theme 16 baselineJson must be a JSON object');
+        }
+        if (Buffer.byteLength(baselineJson, 'utf8') > 65_536) throw domainError('ValidationFailed', 'theme 16 baselineJson exceeds 65536 bytes');
+        let parsedProbe: URL;
+        try {
+          parsedProbe = new URL(probeUrl);
+        } catch {
+          throw domainError('ValidationFailed', 'theme 16 probeUrl must be an absolute URL');
+        }
+        if (!['http:', 'https:'].includes(parsedProbe.protocol)) throw domainError('ValidationFailed', 'theme 16 probeUrl must use http or https');
+        const variantBody = JSON.stringify({ ...(baselineObject as Readonly<Record<string, unknown>>), [fieldName]: probeUrl });
+        const baselineBody = JSON.stringify(baselineObject);
+        const sessionCookies = input.role === undefined ? undefined : applicableSessionCookies([...requireSession().cookies], target);
+        requestBudget(2);
+        const send = async (body: string) => repeater().send({
+          targetUrl: target,
+          requestBytes: rawRequest('POST', target, [['Content-Type', 'application/json']], body),
+          ...(sessionCookies === undefined ? {} : { sessionCookies }),
+        });
+        const baseline = await send(baselineBody);
+        const variant = await send(variantBody);
+        const baselineText = baseline.body.toString('utf8');
+        const variantText = variant.body.toString('utf8');
+        const baselineAccepted = baseline.status >= 200 && baseline.status < 300;
+        const markerFound = successMarker === undefined ? null : variantText.includes(successMarker);
+        const rejected = variant.status === 400 || variant.status === 401 || variant.status === 403 || variant.status === 422;
+        const outcome: AuthBypassProbeOutcome = !baselineAccepted
+          ? 'inconclusive'
+          : markerFound === true
+            ? 'exposed'
+            : rejected || markerFound === false
+              ? 'denied'
+              : 'inconclusive';
+        probes.push({ kind: 'http', pattern: 'ssrf-public-control', targetUrl: target, status: baseline.status, finalUrl: baseline.redirectLocations.at(-1) ?? target, bodyHash: hashStable('scopepilot2.theme', { body: baselineText }), outcome: baselineAccepted ? null : 'inconclusive' });
+        probes.push({ kind: 'http', pattern: 'ssrf-reviewed-probe', targetUrl: target, status: variant.status, finalUrl: variant.redirectLocations.at(-1) ?? target, bodyHash: hashStable('scopepilot2.theme', { body: variantText }), outcome, ...(markerFound === null ? {} : { markersFound: markerFound }), detail: `probeProtocol=${parsedProbe.protocol}; marker=${markerFound === null ? 'unused' : String(markerFound)}` });
+        skipped = successMarker === undefined
+          ? ['HTTP acceptance alone is not SSRF evidence; configure successMarker or use the OAST attempt/callback flow']
+          : ['the supplied probe URL was checked; alternate encodings, redirects, DNS rebinding and other address families require separate reviewed probes'];
         break;
       }
       case '18': {
@@ -1609,6 +1997,157 @@ export class BaselineFlowService {
         probes.push({ kind: 'http', pattern: 'plain-http', targetUrl: plainTarget, status: plainResponse.status, finalUrl: plainResponse.redirectLocations.at(-1) ?? plainTarget, bodyHash: hashStable('scopepilot2.theme', { body: plainResponse.body.toString('utf8') }), outcome: judgePlainHttp({ status: plainResponse.status, finalUrl: plainResponse.redirectLocations.at(-1) ?? plainTarget, targetUrl: plainTarget }) });
         break;
       }
+      case '24': {
+        // ZAP受動ルール外のブラウザ保護ヘッダー。欠落は対象ページの機微性が不明なら保留にする。
+        if (targets.length === 0 || targets.length > 5) throw domainError('ValidationFailed', 'theme 24 accepts 1..5 target URLs');
+        const strict = params.sensitivePage === 'true';
+        requestBudget(targets.length * 2);
+        const session = input.role === undefined ? undefined : requireSession();
+        for (const target of targets) {
+          const sessionCookies = session === undefined ? undefined : applicableSessionCookies([...session.cookies], target);
+          const baseline = await repeater().send({ targetUrl: target, requestBytes: rawRequest('GET', target, [], ''), ...(sessionCookies === undefined ? {} : { sessionCookies }) });
+          const missing = (): AuthBypassProbeOutcome => strict ? 'exposed' : 'inconclusive';
+          const policyChecks: readonly { name: string; safe: (value: string) => boolean }[] = [
+            { name: 'Referrer-Policy', safe: (value) => /^(?:no-referrer|same-origin|strict-origin|strict-origin-when-cross-origin)$/iu.test(value.trim()) },
+            { name: 'Cross-Origin-Opener-Policy', safe: (value) => value.trim().toLocaleLowerCase() === 'same-origin' },
+            { name: 'Cross-Origin-Resource-Policy', safe: (value) => /^(?:same-origin|same-site)$/iu.test(value.trim()) },
+            { name: 'Permissions-Policy', safe: (value) => value.trim() !== '' && !/=\s*\*/u.test(value) },
+          ];
+          for (const policy of policyChecks) {
+            const value = headerValue(baseline.headers, policy.name);
+            probes.push({
+              kind: 'http',
+              pattern: `header:${policy.name.toLocaleLowerCase()}`,
+              targetUrl: target,
+              status: baseline.status,
+              finalUrl: baseline.redirectLocations.at(-1) ?? target,
+              bodyHash: '',
+              outcome: value === null ? missing() : policy.safe(value) ? 'denied' : 'exposed',
+              detail: `${policy.name}=${value ?? '(missing)'}`,
+            });
+          }
+          const hostCookies = baseline.headers.filter(([name, value]) => name.toLocaleLowerCase() === 'set-cookie' && /^__Host-/u.test(value));
+          for (const [, cookie] of hostCookies) {
+            const valid = /;\s*Secure(?:;|$)/iu.test(cookie) && /;\s*Path=\/(?:;|$)/iu.test(cookie) && !/;\s*Domain=/iu.test(cookie);
+            probes.push({ kind: 'http', pattern: 'cookie:__host-prefix', targetUrl: target, status: baseline.status, finalUrl: target, bodyHash: '', outcome: valid ? 'denied' : 'exposed', detail: valid ? '__Host- attributes valid' : '__Host- attributes invalid' });
+          }
+          const crossSite = await repeater().send({
+            targetUrl: target,
+            requestBytes: rawRequest('GET', target, [['Sec-Fetch-Site', 'cross-site'], ['Sec-Fetch-Mode', 'navigate'], ['Sec-Fetch-Dest', 'document']], ''),
+            ...(sessionCookies === undefined ? {} : { sessionCookies }),
+          });
+          const crossSiteBlocked = crossSite.status === 401 || crossSite.status === 403;
+          probes.push({ kind: 'http', pattern: 'sec-fetch-cross-site', targetUrl: target, status: crossSite.status, finalUrl: crossSite.redirectLocations.at(-1) ?? target, bodyHash: '', outcome: crossSiteBlocked ? 'denied' : strict ? 'exposed' : 'inconclusive', detail: `status=${String(crossSite.status)}` });
+        }
+        skipped = ['__Host- prefix is assessed only when such a Set-Cookie header is observed', ...(strict ? [] : ['missing headers are inconclusive unless sensitivePage=true'])];
+        break;
+      }
+      case '25': {
+        // TRACE/TRACK と Allow を確認する。PUT/DELETE は副作用を避け、明示指定なしでは送信しない。
+        const target = targets[0];
+        if (target === undefined) throw domainError('ValidationFailed', 'theme 25 requires a target URL');
+        const requestedMethods = (params.methods ?? 'TRACE,TRACK').split(',').map((method) => method.trim().toUpperCase()).filter((method) => method !== '');
+        if (requestedMethods.length === 0 || requestedMethods.length > 6) throw domainError('ValidationFailed', 'theme 25 accepts 1..6 methods');
+        const stateChanging = requestedMethods.filter((method) => method === 'PUT' || method === 'DELETE' || method === 'PATCH');
+        if (stateChanging.length > 0 && params.allowStateChangingMethods !== 'true') {
+          throw domainError('NeedsInput', 'theme 25 requires allowStateChangingMethods=true before PUT/DELETE/PATCH probes');
+        }
+        const sessionCookies = input.role === undefined ? undefined : applicableSessionCookies([...requireSession().cookies], target);
+        requestBudget(requestedMethods.length + 1);
+        const marker = 'scopepilot-method-probe';
+        const optionsResponse = await repeater().send({ targetUrl: target, requestBytes: rawRequest('OPTIONS', target, [], ''), ...(sessionCookies === undefined ? {} : { sessionCookies }) });
+        const allow = (headerValue(optionsResponse.headers, 'Allow') ?? '').split(',').map((method) => method.trim().toUpperCase()).filter((method) => method !== '');
+        const dangerousAdvertised = allow.filter((method) => requestedMethods.includes(method));
+        probes.push({ kind: 'http', pattern: 'options-allow', targetUrl: target, status: optionsResponse.status, finalUrl: target, bodyHash: '', outcome: dangerousAdvertised.length > 0 ? 'exposed' : allow.length > 0 ? 'denied' : 'inconclusive', detail: `allow=${allow.join(',') || '(missing)'}` });
+        for (const method of requestedMethods) {
+          const response = await repeater().send({ targetUrl: target, requestBytes: rawRequest(method, target, [['Content-Type', 'text/plain']], marker), ...(sessionCookies === undefined ? {} : { sessionCookies }) });
+          const body = response.body.toString('utf8');
+          const rejected = response.status === 401 || response.status === 403 || response.status === 405 || response.status === 501;
+          const echoed = body.includes(marker);
+          probes.push({
+            kind: 'http',
+            pattern: `method:${method.toLocaleLowerCase()}`,
+            targetUrl: target,
+            status: response.status,
+            finalUrl: response.redirectLocations.at(-1) ?? target,
+            bodyHash: hashStable('scopepilot2.theme', { body }),
+            outcome: rejected ? 'denied' : echoed || dangerousAdvertised.includes(method) ? 'exposed' : 'inconclusive',
+            detail: `status=${String(response.status)}; echoed=${String(echoed)}`,
+          });
+        }
+        skipped = stateChanging.length === 0 ? ['PUT/DELETE/PATCH were not sent without explicit side-effect authorization'] : [];
+        break;
+      }
+      case '26': {
+        // GraphQL introspection と、利用者指定のschema-validな深さ/コストqueryを確認する。
+        const target = targets[0];
+        if (target === undefined) throw domainError('ValidationFailed', 'theme 26 requires a GraphQL endpoint URL');
+        const deepQuery = params.deepQuery ?? '';
+        if (deepQuery.trim() === '') throw domainError('NeedsInput', 'theme 26 requires a schema-valid deepQuery');
+        if (deepQuery.length > 20_000) throw domainError('ValidationFailed', 'theme 26 deepQuery exceeds 20000 characters');
+        const baselineQuery = params.baselineQuery ?? '{__typename}';
+        const sessionCookies = input.role === undefined ? undefined : applicableSessionCookies([...requireSession().cookies], target);
+        requestBudget(3);
+        const sendQuery = async (query: string) => repeater().send({
+          targetUrl: target,
+          requestBytes: rawRequest('POST', target, [['Content-Type', 'application/json']], JSON.stringify({ query })),
+          ...(sessionCookies === undefined ? {} : { sessionCookies }),
+        });
+        const baseline = await sendQuery(baselineQuery);
+        const baselineText = baseline.body.toString('utf8');
+        const baselineWorks = baseline.status >= 200 && baseline.status < 300 && /"data"\s*:/u.test(baselineText) && !/"errors"\s*:/u.test(baselineText);
+        probes.push({ kind: 'http', pattern: 'graphql-baseline', targetUrl: target, status: baseline.status, finalUrl: target, bodyHash: hashStable('scopepilot2.theme', { body: baselineText }), outcome: baselineWorks ? null : 'inconclusive' });
+        const introspection = await sendQuery('{__schema{queryType{name}}}');
+        const introspectionText = introspection.body.toString('utf8');
+        const introspectionEnabled = introspection.status >= 200 && introspection.status < 300 && /"__schema"\s*:/u.test(introspectionText) && !/"errors"\s*:/u.test(introspectionText);
+        probes.push({ kind: 'http', pattern: 'graphql-introspection', targetUrl: target, status: introspection.status, finalUrl: target, bodyHash: hashStable('scopepilot2.theme', { body: introspectionText }), outcome: baselineWorks ? (introspectionEnabled ? 'exposed' : 'denied') : 'inconclusive' });
+        const deep = await sendQuery(deepQuery);
+        const deepText = deep.body.toString('utf8');
+        const explicitlyLimited = deep.status === 400 || deep.status === 413 || deep.status === 429 || /(?:depth|complexity|cost|limit).{0,80}(?:exceed|maximum|too|reject)/iu.test(deepText);
+        const deepExecuted = deep.status >= 200 && deep.status < 300 && /"data"\s*:/u.test(deepText) && !/"errors"\s*:/u.test(deepText);
+        probes.push({ kind: 'http', pattern: 'graphql-depth-cost', targetUrl: target, status: deep.status, finalUrl: target, bodyHash: hashStable('scopepilot2.theme', { body: deepText }), outcome: !baselineWorks ? 'inconclusive' : explicitlyLimited ? 'denied' : deepExecuted ? 'exposed' : 'inconclusive' });
+        skipped = ['query cost requires a schema-valid deepQuery supplied for the target; generic invalid queries are not evidence'];
+        break;
+      }
+      case '27': {
+        // Cookie認証WebSocketをsame-originとcross-originのOriginで比較し、CSWSHを確認する。
+        const target = targets[0];
+        if (target === undefined) throw domainError('ValidationFailed', 'theme 27 requires a WebSocket target URL');
+        if (this.deps.webSocketTransport === undefined) throw domainError('CapabilityUnavailable', 'websocket transport is not configured for this service');
+        const origins = (params.evilOrigins ?? 'https://scopepilot.invalid').split(',').map((origin) => origin.trim()).filter((origin) => origin !== '');
+        if (origins.length === 0 || origins.length > 3) throw domainError('ValidationFailed', 'theme 27 accepts 1..3 evil origins');
+        const message = params.message ?? '{"action":"report"}';
+        if (Buffer.byteLength(message, 'utf8') > 16_384) throw domainError('ValidationFailed', 'theme 27 message exceeds 16384 bytes');
+        const sessionCookies = input.role === undefined ? undefined : applicableSessionCookies([...requireSession().cookies], target);
+        requestBudget(origins.length + 1);
+        const exchange = async (origin: string): Promise<boolean> => {
+          try {
+            const result = await this.deps.webSocketTransport!.exchange({
+              targetUrl: target,
+              messages: [message],
+              origin,
+              ...(sessionCookies === undefined ? {} : { sessionCookies }),
+              onSentFrame: () => undefined,
+              onTextFrame: () => undefined,
+            });
+            return result.sent === 1;
+          } catch {
+            return false;
+          }
+        };
+        const sameOrigin = new URL(target).origin;
+        const controlConnected = await exchange(sameOrigin);
+        probes.push({ kind: 'websocket', pattern: 'websocket-same-origin-control', targetUrl: target, status: null, finalUrl: target, bodyHash: '', outcome: controlConnected ? null : 'inconclusive' });
+        for (const origin of origins) {
+          const connected = await exchange(origin);
+          probes.push({ kind: 'websocket', pattern: `websocket-cross-origin:${origin}`, targetUrl: target, status: null, finalUrl: target, bodyHash: '', outcome: !controlConnected ? 'inconclusive' : connected ? 'exposed' : 'denied' });
+        }
+        if (new URL(target).protocol === 'http:') {
+          probes.push({ kind: 'websocket', pattern: 'websocket-plaintext-transport', targetUrl: target, status: null, finalUrl: target, bodyHash: '', outcome: params.requireWss === 'true' ? 'exposed' : 'inconclusive' });
+        }
+        skipped = ['message-level authorization and token replay require target-specific messages and expected results'];
+        break;
+      }
       case '29': {
         // データ保護・機微露出: 認証後ページの DOM 観測で PII 疑い node を数える。
         if (targets.length === 0 || targets.length > 5) throw domainError('ValidationFailed', 'theme 29 accepts 1..5 target URLs');
@@ -1641,6 +2180,100 @@ export class BaselineFlowService {
           probes.push({ kind: 'dom', pattern: 'pii-exposure', targetUrl: canonical, status: null, finalUrl: canonical, bodyHash: '', outcome, detail: `piiCandidates=${String(piiCount)}; confirmedUnmasked=${String(confirmedUnmaskedCount)}; nodes=${String(observation.nodes.length)}` });
         }
         skipped = ['API over-fetching/ownership and third-party transmission require traffic context', 'file metadata (ExifTool) verification'];
+        break;
+      }
+      case '30': {
+        // 公開情報・設定面: 既に選択されたHTTP対象の応答だけを観測する。共通パスの
+        // 推測列挙はここでは行わず、Server等の版、Content-Type、directory listing、
+        // source map参照を本文を保存せずに判定する。
+        if (targets.length === 0 || targets.length > 5) throw domainError('ValidationFailed', 'theme 30 accepts 1..5 target URLs');
+        requestBudget(targets.length);
+        const session = input.role === undefined ? undefined : requireSession();
+        const disclosureHeaders = ['Server', 'X-Powered-By', 'X-AspNet-Version', 'X-AspNetMvc-Version'] as const;
+        for (const target of targets) {
+          const canonical = ScopePolicy.canonicalUrl(target);
+          const sessionCookies = session === undefined ? undefined : applicableSessionCookies([...session.cookies], canonical);
+          const response = await repeater().send({
+            targetUrl: canonical,
+            requestBytes: rawRequest('GET', canonical, [['Accept', 'text/html,application/json;q=0.9,*/*;q=0.1']], ''),
+            ...(sessionCookies === undefined ? {} : { sessionCookies }),
+          });
+          const bodyText = response.body.toString('utf8');
+          const finalUrl = response.redirectLocations.at(-1) ?? canonical;
+          for (const name of disclosureHeaders) {
+            const value = headerValue(response.headers, name);
+            probes.push({
+              kind: 'http',
+              pattern: `version-header:${name.toLocaleLowerCase()}`,
+              targetUrl: canonical,
+              status: response.status,
+              finalUrl,
+              bodyHash: '',
+              outcome: judgeVersionDisclosure(value),
+              detail: `${name}=${value ?? '(missing)'}`,
+            });
+          }
+          const contentType = headerValue(response.headers, 'Content-Type');
+          probes.push({
+            kind: 'http',
+            pattern: 'response-content-type',
+            targetUrl: canonical,
+            status: response.status,
+            finalUrl,
+            bodyHash: '',
+            outcome: judgeResponseContentType({ status: response.status, bodyByteLength: response.body.byteLength, contentType }),
+            detail: `contentType=${contentType ?? '(missing)'}`,
+          });
+          probes.push({
+            kind: 'http',
+            pattern: 'directory-listing',
+            targetUrl: canonical,
+            status: response.status,
+            finalUrl,
+            bodyHash: hashStable('scopepilot2.theme', { body: bodyText }),
+            outcome: judgeDirectoryListing(bodyText),
+          });
+          const sourceMapReference = /(?:\/\/[#@]\s*sourceMappingURL=|\/\*[#@]\s*sourceMappingURL=)/u.test(bodyText);
+          probes.push({
+            kind: 'http',
+            pattern: 'source-map-reference',
+            targetUrl: canonical,
+            status: response.status,
+            finalUrl,
+            bodyHash: '',
+            outcome: sourceMapReference ? 'exposed' : 'denied',
+            detail: `referenceFound=${String(sourceMapReference)}`,
+          });
+          const parsedTarget = new URL(canonical);
+          const callbackName = parsedTarget.searchParams.get('callback') ?? parsedTarget.searchParams.get('jsonp');
+          const jsonpReturned = callbackName !== null
+            && /^[A-Za-z_$][A-Za-z0-9_$.[\]]{0,127}$/u.test(callbackName)
+            && bodyText.trimStart().startsWith(`${callbackName}(`);
+          probes.push({
+            kind: 'http',
+            pattern: 'jsonp-response',
+            targetUrl: canonical,
+            status: response.status,
+            finalUrl,
+            bodyHash: '',
+            outcome: jsonpReturned ? 'exposed' : 'denied',
+            detail: `callbackObserved=${String(jsonpReturned)}`,
+          });
+          const metadataLikePath = /(?:\/(?:\.git|\.svn)(?:\/|$)|\/(?:\.env|server-status|phpinfo\.php)$|\.(?:bak|old|orig|save|swp|zip|tar|gz)$)/iu.test(parsedTarget.pathname);
+          const metadataSignature = /(?:^ref:\s+refs\/heads\/|<title>phpinfo\(\)|\[(?:core|remote\s+"origin")\]|(?:APP_KEY|DATABASE_URL|DB_PASSWORD)\s*=)/imu.test(bodyText);
+          const publishedMetadata = response.status >= 200 && response.status < 300 && metadataLikePath && metadataSignature;
+          probes.push({
+            kind: 'http',
+            pattern: 'published-metadata',
+            targetUrl: canonical,
+            status: response.status,
+            finalUrl,
+            bodyHash: '',
+            outcome: publishedMetadata ? 'exposed' : 'denied',
+            detail: `sensitivePath=${String(metadataLikePath)}; signatureFound=${String(metadataSignature)}`,
+          });
+        }
+        skipped = ['common-path guessing and authenticated administrative-surface discovery require reviewed target URLs'];
         break;
       }
       default:
@@ -3148,7 +3781,7 @@ export class BaselineFlowService {
     operator: OperatorProfile,
     targets: readonly string[],
     limitsRequest?: { readonly maxRequests: number; readonly maxPages: number; readonly maxDurationMinutes: number },
-    options: { readonly includeNuclei?: boolean; readonly includeWorkflowScan?: boolean } = {},
+    options: { readonly includeNuclei?: boolean; readonly includeWorkflowScan?: boolean; readonly guidelines?: readonly string[] } = {},
   ): { plan: ExecutionPlan; planHash: string } {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
@@ -3187,6 +3820,7 @@ export class BaselineFlowService {
       authorizationId: authorization.authorizationId,
       operatorId: operator.operatorId,
       targetRole: authorization.targetRoles[0] ?? 'unauthenticated',
+      guidelineIds: options.guidelines ?? [],
       steps: [
         {
           kind: 'active-scan',
@@ -3258,6 +3892,7 @@ export class BaselineFlowService {
       planHash: planHashOf(plan),
       confirmedBy: operator.operatorId,
       confirmedAt: this.deps.clock.now().toISOString(),
+      guidelineIds: plan.guidelineIds,
       confirmedView: plan.steps.map((step) => ({ kind: step.kind, targets: step.targetSnapshot, limits: step.limits })),
     };
     aggregate.registerConfirmation({ confirmationId: confirmation.confirmationId, planHash: confirmation.planHash });
@@ -3528,9 +4163,18 @@ export class BaselineFlowService {
     machine.transition('Running');
     this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Running', attempt: 1 });
 
-    // Delegated 経路は最大 overshoot 分を共有上限の内側に予約する。
+    // Delegated 経路は最大 overshoot 分を共有上限の内側に予約する。ガイドラインから
+    // 自動接続するScopePilot HTTP検査も同じ案件上限の内側へ先に予約し、ZAP leaseと
+    // 二重計上しない。
     const reservedRequests = Math.ceil(step.limits.maxRequests * snapshot.maxOvershootRatio);
-    const engineLease = step.limits.maxRequests - reservedRequests;
+    const guidelineThemePlans = resolveGuidelineThemeRoutes(plan.guidelineIds);
+    const guidelineTargetUrls = [...new Set(targets.map((target) => ScopePolicy.canonicalUrl(target)))].slice(0, 5);
+    const desiredAutomaticThemeNos = guidelineThemePlans.filter((route) => route.mode === 'automatic').map((route) => route.themeNo);
+    const desiredGuidelineRequestCount = desiredAutomaticThemeNos.length * guidelineTargetUrls.length;
+    const automaticGuidelineChecksEnabled = desiredGuidelineRequestCount > 0
+      && step.limits.maxRequests - reservedRequests - desiredGuidelineRequestCount >= 1;
+    const guidelineRequestReservation = automaticGuidelineChecksEnabled ? desiredGuidelineRequestCount : 0;
+    const engineLease = step.limits.maxRequests - reservedRequests - guidelineRequestReservation;
     const zapCandidates = adopted.filter(candidateAllowsAutomatedZap);
     const scanRequest: ActiveScanRequest = {
       runId,
@@ -3542,6 +4186,21 @@ export class BaselineFlowService {
       requestSeedCount: zapCandidates.length,
     };
     let diagnosticRoutes = planDiagnosticRoutes(adopted, this.deps.domObserver !== undefined);
+    let guidelineRoutes: readonly GuidelineRouteResult[] = guidelineThemePlans.map((route) => ({
+      routeId: `zap-unsupported:${route.themeNo}`,
+      themeNo: route.themeNo,
+      guidelineIds: route.guidelineIds,
+      status: route.mode === 'needs-input'
+        ? 'needs-input'
+        : automaticGuidelineChecksEnabled
+          ? 'delegated'
+          : 'unavailable',
+      detail: route.mode === 'needs-input'
+        ? '対象固有のURL・資格情報・比較条件またはレビュー済みpayloadをA03で指定して実行します'
+        : automaticGuidelineChecksEnabled
+          ? `確認済みHTTP対象 ${String(guidelineTargetUrls.length)} 件へ自動実行します`
+          : '案件の最大リクエスト数にZAP用の最低1件と自動検査分を確保できないため実行しません',
+    }));
 
     let requestCorpusEvidence;
     try {
@@ -3677,6 +4336,41 @@ export class BaselineFlowService {
     });
     this.persistFindings([...importResult.created, ...importResult.reobserved]);
 
+    for (const themeNo of automaticGuidelineChecksEnabled ? desiredAutomaticThemeNos : []) {
+      throwIfCancelled();
+      emit({
+        phase: 'running',
+        engine: 'scopepilot',
+        message: `ガイドライン実行経路 zap-unsupported:${themeNo} を開始します`,
+        command: `ScopePilot guideline route: zap-unsupported:${themeNo}`,
+      });
+      try {
+        const summary = await this.runZapUnsupportedCheck(operator, {
+          themeNo,
+          targetUrls: guidelineTargetUrls,
+          ...(role === undefined ? {} : { role }),
+        });
+        guidelineRoutes = guidelineRoutes.map((route) => route.themeNo === themeNo
+          ? {
+              ...route,
+              status: 'executed' as const,
+              detail: `自動HTTP検査を完了しました: ${summary.status}; ${String(summary.totalRequests)} probes`,
+              checkId: summary.checkId,
+              checkStatus: summary.status,
+            }
+          : route);
+      } catch (cause) {
+        if (control.signal?.aborted === true || (cause instanceof DomainError && cause.code === 'Cancelled')) {
+          throw domainError('Cancelled', 'scan stopped by user');
+        }
+        const error = cause instanceof Error ? cause.message : String(cause);
+        guidelineRoutes = guidelineRoutes.map((route) => route.themeNo === themeNo
+          ? { ...route, status: 'unavailable' as const, detail: `自動HTTP検査を完了できませんでした: ${error}` }
+          : route);
+        emit({ phase: 'running', engine: 'scopepilot', message: `ガイドライン実行経路 zap-unsupported:${themeNo} は独立して失敗しました: ${error}` });
+      }
+    }
+
     const domTargets = diagnosticRoutes
       .filter((route) => route.track === 'browser-dom' && route.status === 'delegated')
       .map((route) => route.targetUrl);
@@ -3758,6 +4452,7 @@ export class BaselineFlowService {
     let workflowSummary: ActiveScanRunResult['workflow'];
     if (workflowStep !== undefined && workflowCredentials !== undefined && this.deps.workflowScanTransportFactory !== undefined) {
       const baseUrls = [...new Set(workflowStep.targetSnapshot.map((target) => new URL(target).origin))];
+      const selectedWorkflowCheckIds = resolveWorkflowScanCheckIds(plan.guidelineIds);
       const budget = { limit: workflowStep.limits.maxRequests, used: 0 };
       const evidenceRefs: string[] = [];
       const allChecks: import('../domain/workflow-scan.ts').WorkflowScanCheckResult[] = [];
@@ -3785,7 +4480,7 @@ export class BaselineFlowService {
           emit({
             phase: 'starting',
             engine: 'scopepilot',
-            message: `Workflow scan (21 checks) starting for ${baseUrl}`,
+            message: `Workflow scan (${String(selectedWorkflowCheckIds.length)} checks) starting for ${baseUrl}`,
             command: `ScopePilot workflow scan: ${WORKFLOW_SCAN_PAYLOAD_SET}; maxRequests=${String(workflowStep.limits.maxRequests)}`,
             progress: 0,
           });
@@ -3795,6 +4490,7 @@ export class BaselineFlowService {
               username: workflowCredentials.username,
               password: workflowCredentials.password,
               maxRequests: workflowStep.limits.maxRequests,
+              checkIds: selectedWorkflowCheckIds,
               ...(control.signal === undefined ? {} : { signal: control.signal }),
             },
             primary,
@@ -3841,7 +4537,12 @@ export class BaselineFlowService {
           importedCount += imported.created.length;
           duplicateCount += imported.duplicateCount;
           this.persistFindings([...imported.created, ...imported.reobserved]);
-          diagnosticRoutes = completeWorkflowRoutes(diagnosticRoutes, baseUrl, result.checks.length);
+          diagnosticRoutes = completeWorkflowRoutes(
+            diagnosticRoutes,
+            baseUrl,
+            result.checks.length,
+            [...new Set([...result.checks.map((check) => check.checkId), ...result.skips.map((check) => check.checkId)])],
+          );
           this.record({
             type: 'FindingsImported',
             at: this.deps.clock.now().toISOString(),
@@ -3905,6 +4606,11 @@ export class BaselineFlowService {
       canonicalJson({ runId, routes: diagnosticRoutes }),
     );
     this.latestDiagnosticRoutes = diagnosticRoutes;
+    await this.deps.evidence.saveText(
+      `guideline-routes:${runId}`,
+      canonicalJson({ runId, guidelineIds: plan.guidelineIds, routes: guidelineRoutes }),
+    );
+    this.latestGuidelineRoutes = guidelineRoutes;
 
     const nucleiStep = plan.steps.find((candidate) => candidate.kind === 'nuclei-scan');
     let nucleiSummary: ActiveScanRunResult['nuclei'];
@@ -4034,6 +4740,7 @@ export class BaselineFlowService {
       engineVersion: this.deps.scanEngine.engineVersion,
       requestCorpusEvidenceRef: requestCorpusEvidence.evidenceId,
       diagnosticRoutes,
+      guidelineRoutes,
       ...(workflowSummary === undefined ? {} : { workflow: workflowSummary }),
       ...(nucleiSummary === undefined ? {} : { nuclei: nucleiSummary }),
     };
@@ -4148,6 +4855,7 @@ export class BaselineFlowService {
           status: route.status,
           detail: route.detail,
         })),
+        guidelineRoutes: this.latestGuidelineRoutes.map((route) => ({ ...route })),
         limitations: [
           '外部 engine (Delegated 経路) の個々の送信は送信前に拒否できない。入力 scope・停止・版ごとの実測で管理する。',
           'engine 由来の所見は実影響未確認であり、人の確認なしに確定扱いにしない。',
@@ -4432,13 +5140,25 @@ function completeWorkflowRoutes(
   routes: readonly DiagnosticRouteResult[],
   baseUrl: string,
   findingCount: number,
+  executedCheckIds: readonly string[],
 ): readonly DiagnosticRouteResult[] {
   const origin = new URL(baseUrl).origin;
-  return routes.map((route) => WORKFLOW_DIAGNOSTIC_TRACKS.has(route.track) && new URL(route.targetUrl).origin === origin
+  const executed = new Set(executedCheckIds);
+  const routeChecks: Readonly<Record<Exclude<DiagnosticTrack, 'zap-active' | 'browser-dom'>, readonly string[]>> = {
+    'workflow-state': ['csrf-password', 'file-upload', 'captcha-bypass', 'xss-stored'],
+    'session-analysis': ['weak-session', 'brute-force'],
+    'authorization-differential': ['authorization-bypass', 'bac-open-access', 'api-mass-assignment'],
+    'upload-workflow': ['file-upload'],
+    'api-schema': ['api-legacy', 'api-mass-assignment', 'api-command-injection'],
+    'cryptography-review': ['crypto-xor', 'crypto-ecb', 'crypto-cbc-oracle'],
+  };
+  return routes.map((route) => WORKFLOW_DIAGNOSTIC_TRACKS.has(route.track)
+    && new URL(route.targetUrl).origin === origin
+    && routeChecks[route.track as keyof typeof routeChecks].some((checkId) => executed.has(checkId))
     ? {
         ...route,
         status: 'executed' as const,
-        detail: `ScopePilot workflow scan v1 completed all 21 checks for ${origin}`,
+        detail: `ScopePilot workflow scan completed ${String(executed.size)} selected checks for ${origin}`,
         findingCount,
       }
     : route);

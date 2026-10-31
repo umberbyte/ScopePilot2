@@ -176,6 +176,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           {
             includeNuclei: body.enableNuclei === true,
             includeWorkflowScan: body.enableWorkflowScan === true,
+            guidelines: body.guidelines === undefined ? [] : stringArrayField(body, 'guidelines'),
           },
         );
         service.authorizePlan(result.plan);
@@ -320,6 +321,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
             requestCorpusEvidenceRef: execution.result.requestCorpusEvidenceRef,
             findings: execution.result.findings,
             diagnosticRoutes: execution.result.diagnosticRoutes,
+            guidelineRoutes: execution.result.guidelineRoutes,
             ...(execution.result.workflow === undefined ? {} : { workflow: execution.result.workflow }),
             ...(execution.result.nuclei === undefined ? {} : { nuclei: execution.result.nuclei }),
           },
@@ -362,6 +364,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           requestCorpusEvidenceRef: result.requestCorpusEvidenceRef,
           findings: result.findings,
           diagnosticRoutes: result.diagnosticRoutes,
+          guidelineRoutes: result.guidelineRoutes,
           ...(result.workflow === undefined ? {} : { workflow: result.workflow }),
           ...(result.nuclei === undefined ? {} : { nuclei: result.nuclei }),
         });

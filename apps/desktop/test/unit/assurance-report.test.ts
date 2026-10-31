@@ -6,8 +6,11 @@ import JSZip from 'jszip';
 import {
   DEFAULT_REPORT_PROFILE,
   appendAssuranceHttpEvidenceMarkdown,
+  buildReportFindingFamilies,
   buildAssuranceReport,
   renderAssuranceReport,
+  renderExecutiveReport,
+  renderTechnicalAnnexHtml,
 } from '../../src/main/assurance-report.ts';
 
 describe('ScopePilot2 assurance report', () => {
@@ -135,6 +138,32 @@ describe('ScopePilot2 assurance report', () => {
     const findingPositions = [...plainWord.matchAll(/F-001/gu)].map((match) => match.index);
     assert.ok((findingPositions[1] ?? Number.MAX_SAFE_INTEGER) < plainWord.indexOf('CWE'), '指摘見出しの後に同じ指摘の分類を配置する');
 
+    const families = buildReportFindingFamilies(report);
+    assert.equal(families.length, 1);
+    assert.match(families[0]?.concreteRisk ?? '', /他利用者の情報を閲覧・変更|許可されていない機能/u);
+    assert.match(families[0]?.verificationStatus ?? '', /要確認|未確認/u);
+    assert.deepEqual(families[0]?.findingIds, ['F-001']);
+    const executiveWord = await renderExecutiveReport(report);
+    assert.equal(executiveWord.subarray(0, 2).toString('ascii'), 'PK');
+    const executiveArchive = await JSZip.loadAsync(executiveWord);
+    const executiveXml = await executiveArchive.file('word/document.xml')?.async('string') ?? '';
+    const executiveText = executiveXml.replace(/<[^>]+>/gu, '');
+    assert.match(executiveText, /第一部.*意思決定・対応用サマリー/u);
+    assert.match(executiveText, /攻撃者が具体的にできること/u);
+    assert.match(executiveText, /F-001/u);
+    assert.doesNotMatch(executiveText, /GET \/account\?id=102 HTTP\/1\.1|HTTP\/1\.1 200 OK/u);
+
+    const technicalAnnexHtml = renderTechnicalAnnexHtml(report).toString('utf8');
+    assert.match(technicalAnnexHtml, /^<!doctype html>/u);
+    assert.match(technicalAnnexHtml, /position: fixed/u, '固定ナビゲーションを持つ');
+    assert.match(technicalAnnexHtml, /id="finding-index"/u, '指摘索引を持つ');
+    assert.match(technicalAnnexHtml, /href="#finding-1"[^>]*>F-001<\/a>/u, '索引から指摘詳細へ移動できる');
+    assert.match(technicalAnnexHtml, /id="finding-1-http-1"/u, 'HTTP証跡にアンカーを持つ');
+    assert.match(technicalAnnexHtml, /GET \/account\?id=102 HTTP\/1\.1/u);
+    assert.match(technicalAnnexHtml, /HTTP\/1\.1 200 OK/u);
+    assert.doesNotMatch(technicalAnnexHtml, /COOKIE_SECRET|AUTH_SECRET|RESPONSE_SECRET/u);
+    assert.match(technicalAnnexHtml, /<mark>102<\/mark>/u, '着目語を強調する');
+
     const emptyProfileReport = buildAssuranceReport({
       ...input,
       profile: {
@@ -185,6 +214,7 @@ describe('ScopePilot2 assurance report', () => {
     if (qaDirectory !== undefined && qaDirectory.trim() !== '') {
       await mkdir(qaDirectory, { recursive: true });
       await writeFile(join(qaDirectory, 'ScopePilot2-report-v2-QA.docx'), word);
+      await writeFile(join(qaDirectory, 'ScopePilot2-report-v2-technical-annex-QA.html'), renderTechnicalAnnexHtml(report));
       await writeFile(join(qaDirectory, 'ScopePilot2-report-v2-QA.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
     }
   });

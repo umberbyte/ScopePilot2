@@ -6,6 +6,7 @@ import {
   HeadingLevel,
   HighlightColor,
   PageNumber,
+  PageOrientation,
   Packer,
   Paragraph,
   ShadingType,
@@ -230,6 +231,20 @@ export interface AssuranceReportDocument {
     readonly relatedFindingIds: readonly string[];
   }[];
   readonly specialNotes: readonly string[];
+}
+
+export interface ReportFindingFamily {
+  readonly id: string;
+  readonly title: string;
+  readonly severity: string;
+  readonly concreteRisk: string;
+  readonly verificationStatus: string;
+  readonly affectedUrlCount: number;
+  readonly findingIds: readonly string[];
+  readonly sourceFindingIds: readonly string[];
+  readonly evidenceIds: readonly string[];
+  readonly remediationSummary: string;
+  readonly annexReference: string;
 }
 
 const markdownCodeBlock = (value: string): string => value
@@ -1595,13 +1610,607 @@ function keyValue(rows: readonly (readonly [string, string])[]): Table {
   return table(['項目', '内容'], rows, [2500, 7140]);
 }
 
+function normalizedFindingFamilyTitle(title: string): string {
+  return title
+    .replace(/\s*[（(]検証レベル\s*[:：]\s*(?:low|medium|high)[）)]\s*$/iu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+function severityRank(severity: string): number {
+  return ({ High: 5, Medium: 4, Low: 3, Informational: 2, Unrated: 1 } as Readonly<Record<string, number>>)[severity] ?? 0;
+}
+
+function concreteAttackerOutcome(title: string): string {
+  const value = title.normalize('NFKC').toLowerCase();
+  if (/remote file|rfi|リモート.*ファイル|外部.*ファイル.*(?:読|取|include|インクル)/iu.test(value)) {
+    return '成立した場合、攻撃者が外部のファイルやコードをサーバーに読み込ませ、サーバー上で任意のコードを実行できる可能性があります。';
+  }
+  if (/local file|lfi|ローカル.*ファイル|path traversal|ディレクトリ.*トラバーサル/iu.test(value)) {
+    return '成立した場合、攻撃者がサーバー内の設定ファイル・認証情報・ソースコードなどを認証なしで読み取れる可能性があります。';
+  }
+  if (/os.*command|command injection|コマンド.*インジェクション|コマンド実行/iu.test(value)) {
+    return '成立した場合、攻撃者がWebサーバーの実行権限で任意のOSコマンドを実行し、情報の窃取・改ざんや他システムへの侵入拠点化を行える可能性があります。';
+  }
+  if (/sql.*injection|sql.*インジェクション/iu.test(value)) {
+    return '成立した場合、攻撃者がデータベース内の情報を認証なしで読み取り・改ざんでき、実装によってはログインを回避して他人になりすませる可能性があります。';
+  }
+  if (/server.side template|ssti|template injection|テンプレート.*インジェクション/iu.test(value)) {
+    return '成立した場合、攻撃者がサーバー側テンプレートの権限で機密情報を読み取り、任意のコードを実行できる可能性があります。';
+  }
+  if (/stored.*xss|persistent.*xss|格納.*xss|保存.*xss/iu.test(value)) {
+    return '成立した場合、保存された悪意あるスクリプトが閲覧者（管理者を含む）のブラウザーで実行され、本人として操作されたり、セッションを奪われたりする可能性があります。';
+  }
+  if (/cross.site scripting|\bxss\b|クロスサイト.*スクリプ|dom.*xss/iu.test(value)) {
+    return '成立した場合、誘導された利用者のブラウザーで任意のスクリプトが実行され、利用者本人として操作されたり、セッションを奪われたりする可能性があります。';
+  }
+  if (/authentication bypass|auth.*bypass|認証.*回避|認証.*バイパス/iu.test(value)) {
+    return '成立した場合、攻撃者が有効なアカウントを持たなくても認証を回避し、ログイン後の機能を利用できる可能性があります。';
+  }
+  if (/weak.*crypt|xor|\becb\b|暗号|ハッシュ/iu.test(value)) {
+    return '成立した場合、攻撃者が保護対象の値を復号・推測・偽造し、認証情報の取得、他人へのなりすまし、または権限の不正取得に利用できる可能性があります。';
+  }
+  if (/client.side.*(?:security|token)|クライアント側.*(?:セキュリティ|トークン)/iu.test(value)) {
+    return '成立した場合、攻撃者がクライアント側だけの制御やトークン生成規則を再現・迂回し、認証なしで保護機能を利用したり、他人になりすましたりできる可能性があります。';
+  }
+  if (/session|セッション.*(?:予測|固定|漏えい|id)|cookie.*(?:予測|固定)/iu.test(value)) {
+    return '成立した場合、攻撃者が他人のセッションを取得または固定し、その利用者になりすましてログイン後の機能を操作できる可能性があります。';
+  }
+  if (/authorization|access control|idor|認可|権限|他人|他利用者/iu.test(value)) {
+    return '成立した場合、攻撃者が権限のない他利用者の情報を閲覧・変更したり、本来許可されていない機能を利用したりできる可能性があります。';
+  }
+  if (/csrf|cross.site request forgery/iu.test(value)) {
+    return '成立した場合、攻撃者がログイン中の利用者を誘導し、パスワード変更・設定変更・登録処理などを本人の意思に反して実行させられる可能性があります。';
+  }
+  if (/upload|アップロード/iu.test(value)) {
+    return '成立した場合、攻撃者が悪意あるファイルを保存・公開でき、実行可能な配置であればサーバー上で任意のコードを実行できる可能性があります。';
+  }
+  if (/open redirect|external redirect|外部リダイレクト|オープンリダイレクト/iu.test(value)) {
+    return '成立した場合、正規サイトのURLから偽サイトへ利用者を転送し、フィッシングによる認証情報の窃取に悪用できる可能性があります。';
+  }
+  if (/clickjacking|クリックジャッキング/iu.test(value)) {
+    return '成立した場合、攻撃者が画面を透明な枠などで重ね、ログイン中の利用者に意図しないボタン操作や設定変更を実行させられる可能性があります。';
+  }
+  if (/content security policy|\bcsp\b/iu.test(value)) {
+    return 'この設定不足だけで直ちに侵害は成立しませんが、別のスクリプト注入が存在する場合に、任意スクリプトの実行や情報窃取を防ぐ力が弱くなります。';
+  }
+  if (/captcha|rate limit|throttl|brute force|ブルートフォース|総当たり/iu.test(value)) {
+    return '成立した場合、攻撃者がログイン等を自動で繰り返し試行し、パスワードを推測して他人になりすませる可能性があります。';
+  }
+  if (/buffer overflow|バッファ.*オーバーフロー/iu.test(value)) {
+    return '成立した場合、攻撃者が処理を異常終了させてサービスを停止でき、影響する実装によっては任意のコードを実行できる可能性があります。';
+  }
+  if (/xslt|xml.*transform/iu.test(value)) {
+    return '成立した場合、XSLT処理系の機能を悪用してサーバー内ファイルの読み取り、内部ネットワークへの通信、または任意コード実行を行える可能性があります。';
+  }
+  if (/parameter tamper|mass assignment|パラメーター.*改ざん/iu.test(value)) {
+    return '成立した場合、攻撃者が送信値を改ざんし、価格・権限・所有者など本来変更できない状態を変更したり、許可されていない機能を利用したりできる可能性があります。';
+  }
+  if (/sensitive|information disclosure|deprecated|機密|情報漏えい|情報公開/iu.test(value)) {
+    return '成立した場合、攻撃者が認証なしで内部情報・識別子・秘密値などを取得し、追加攻撃や他人へのなりすましに利用できる可能性があります。';
+  }
+  return '成立した場合、攻撃者が本来許可されていない情報の取得または機能の利用を行える可能性があります。具体的な到達範囲は技術証跡別冊の通信内容と修正確認で確定してください。';
+}
+
+function findingVerificationStatus(findings: readonly AssuranceReportDocument['findings'][number][]): string {
+  const confidence = findings.map((finding) => finding.confidence).join(' / ');
+  const collectionStatus = findings.map((finding) => finding.technicalEvidence.collectionStatus).join(' / ');
+  if (/要確認|未確認|candidate|unverified/iu.test(confidence)) {
+    return /再送は行っていません|保存済みHTTP履歴/iu.test(collectionStatus)
+      ? '候補（要確認）。保存済みHTTP通信で兆候を観測していますが、再送による成立確認と業務影響の確認は未実施です。'
+      : '候補（要確認）。自動診断で兆候を観測していますが、脆弱性の成立と業務影響は未確認です。';
+  }
+  if (/確認済み|confirmed|verified/iu.test(confidence)) {
+    return '技術的な成立を確認済みです。記載した攻撃者の到達範囲は、確認した条件に基づきます。';
+  }
+  return '通信上の兆候を観測済みです。脆弱性の成立と業務影響は、技術証跡別冊を参照して確認してください。';
+}
+
+export function buildReportFindingFamilies(report: AssuranceReportDocument): readonly ReportFindingFamily[] {
+  const groups = new Map<string, AssuranceReportDocument['findings'][number][]>();
+  for (const finding of report.findings) {
+    const title = normalizedFindingFamilyTitle(finding.title);
+    const current = groups.get(title) ?? [];
+    current.push(finding);
+    groups.set(title, current);
+  }
+  return [...groups.entries()]
+    .sort((left, right) => {
+      const leftSeverity = Math.max(...left[1].map((finding) => severityRank(finding.severity)));
+      const rightSeverity = Math.max(...right[1].map((finding) => severityRank(finding.severity)));
+      return rightSeverity - leftSeverity || left[0].localeCompare(right[0], 'ja');
+    })
+    .map(([title, findings], index) => {
+      const representative = [...findings].sort((left, right) => severityRank(right.severity) - severityRank(left.severity))[0]!;
+      const urls = new Set(findings.flatMap((finding) => finding.urls));
+      const findingIds = findings.map((finding) => finding.id);
+      return {
+        id: `RISK-${String(index + 1).padStart(3, '0')}`,
+        title,
+        severity: representative.severity,
+        concreteRisk: concreteAttackerOutcome(title),
+        verificationStatus: findingVerificationStatus(findings),
+        affectedUrlCount: urls.size,
+        findingIds,
+        sourceFindingIds: [...new Set(findings.flatMap((finding) => finding.sourceFindingIds))],
+        evidenceIds: [...new Set(findings.flatMap((finding) => finding.evidenceIds))],
+        remediationSummary: representative.remediation.permanent,
+        annexReference: findingIds.join(' / '),
+      };
+    });
+}
+
 const dateTime = (value: string | null): string => value === null ? '未入力' : value.replace('T', ' ').replace(/\.\d{3}Z$/u, 'Z');
+
+function compactCell(text: string, width: number, options: { header?: boolean; alternate?: boolean; center?: boolean } = {}): TableCell {
+  return new TableCell({
+    width: { size: width, type: WidthType.DXA },
+    verticalAlign: VerticalAlignTable.CENTER,
+    margins: { top: 70, bottom: 70, left: 90, right: 90 },
+    borders,
+    ...(options.header ? { shading: { type: ShadingType.CLEAR, fill: NAVY, color: 'auto' } }
+      : options.alternate ? { shading: { type: ShadingType.CLEAR, fill: PALE_BLUE, color: 'auto' } } : {}),
+    children: text.replaceAll('\r\n', '\n').split('\n').map((line) => new Paragraph({
+      alignment: options.center || options.header ? AlignmentType.CENTER : AlignmentType.LEFT,
+      spacing: { after: 0, line: 235 },
+      children: [new TextRun({
+        text: line || ' ',
+        ...(options.header ? { bold: true } : {}),
+        color: options.header ? 'FFFFFF' : '000000',
+        size: 17,
+        font: 'Yu Gothic',
+      })],
+    })),
+  });
+}
+
+function compactTable(headers: readonly string[], rows: readonly (readonly string[])[], widths: readonly number[]): Table {
+  const materialized = rows.length === 0 ? [headers.map(() => '該当なし')] : rows;
+  return new Table({
+    width: { size: widths.reduce((sum, width) => sum + width, 0), type: WidthType.DXA },
+    columnWidths: widths,
+    layout: TableLayoutType.FIXED,
+    borders,
+    rows: [
+      new TableRow({ tableHeader: true, cantSplit: true, children: headers.map((header, index) => compactCell(header, widths[index] ?? 1000, { header: true })) }),
+      ...materialized.map((row, rowIndex) => new TableRow({
+        cantSplit: true,
+        children: headers.map((_header, columnIndex) => compactCell(row[columnIndex] ?? '', widths[columnIndex] ?? 1000, {
+          alternate: rowIndex % 2 === 1,
+          center: columnIndex === 0 || columnIndex === 1,
+        })),
+      })),
+    ],
+  });
+}
+
+export async function renderExecutiveReport(report: AssuranceReportDocument): Promise<Buffer> {
+  const families = buildReportFindingFamilies(report);
+  const reportFooter = (): Footer => new Footer({ children: [new Paragraph({
+    children: [
+      new TextRun({ text: `${report.report.id}  |  ${report.report.classification}`, size: 16, color: GRAY, font: 'Yu Gothic' }),
+      new TextRun({ text: '                                  Page ', size: 16, color: GRAY, font: 'Aptos' }),
+      new TextRun({ children: [PageNumber.CURRENT], size: 16, color: GRAY, font: 'Aptos' }),
+    ],
+  })] });
+  const cover: (Paragraph | Table)[] = [
+    new Paragraph({ spacing: { before: 2300, after: 280 }, children: [new TextRun({ text: 'ウェブアプリケーション脆弱性診断結果報告書', bold: true, size: 42, font: 'Yu Gothic', color: NAVY })] }),
+    new Paragraph({ spacing: { after: 900 }, children: [new TextRun({ text: '第一部　意思決定・対応用サマリー', bold: true, size: 30, font: 'Yu Gothic' })] }),
+    new Paragraph({ spacing: { after: 500 }, children: [new TextRun({ text: report.engagement.systemName || report.engagement.name, size: 30, font: 'Yu Gothic' })] }),
+    keyValue([
+      ['報告書ID', report.report.id],
+      ['版', report.report.version],
+      ['生成日時', dateTime(report.report.generatedAt)],
+      ['機密区分', report.report.classification],
+      ['第一部の指摘系統数', String(families.length)],
+      ['第二部との対応', '各行の「技術証跡別冊」欄に、第二部の指摘IDを記載'],
+    ]),
+    body('本書は人が判断・対応するための第一部です。個々のHTTP Request/Response、全URL、証跡ハッシュ、再現手順は削除せず第二部「技術証跡別冊」に収録しています。二部を合わせて正式な診断成果物とします。'),
+  ];
+  const overview: (Paragraph | Table)[] = [
+    heading('1  結論と読み方', 1),
+    body(report.summary.conclusion),
+    body('「攻撃者ができること」は、脆弱性が成立した場合に到達し得る具体的な結果です。「確認状態」が候補（要確認）の項目は、その結果まで実証したという意味ではありません。兆候・成立確認・業務影響を区別して判断してください。'),
+    keyValue([
+      ['最高深刻度', report.summary.highestSeverity],
+      ['第一部の指摘系統', `${String(families.length)} 系統（第二部の ${String(report.findings.length)} 指摘を統合）`],
+      ['対象URL', `${String(report.coverageSummary.exploredUrlCount)} 探索 / ${String(report.coverageSummary.scannedUrlCount)} 診断`],
+      ['証跡', `${String(report.evidence.length)} 件（第二部に索引とHTTP通信を収録）`],
+    ]),
+    heading('2  対象・前提・制約', 1),
+    keyValue([
+      ['対象システム', report.engagement.systemName],
+      ['許可Origin', report.assessment.allowedOrigins.join('\n') || '未設定'],
+      ['認証条件', report.assessment.authentication],
+      ['診断方式', report.assessment.methods.join(' / ') || '未設定'],
+      ['除外事項', report.assessment.exclusions.join('\n') || 'なし'],
+      ['主要な制約', report.summary.majorLimitations.join('\n') || 'なし'],
+    ]),
+    heading('3  対応優先順位', 1),
+    ...bullets(report.summary.priorities.length > 0 ? report.summary.priorities : [
+      'Highの候補は、技術証跡別冊のRequest/Responseを確認し、管理された条件で成立確認を行う。',
+      '任意コード実行・認証回避・他利用者データへのアクセスにつながる系統を優先する。',
+      '修正後は第二部の再現条件と確認基準に従い、同一条件で再診断する。',
+    ]),
+  ];
+  const familyRows = families.map((family) => [
+    family.id,
+    family.severity,
+    family.title,
+    family.concreteRisk,
+    `${family.verificationStatus}\n対象URL: ${String(family.affectedUrlCount)} 件 / 元指摘: ${String(family.sourceFindingIds.length)} 件\n技術証跡別冊: ${family.annexReference}`,
+  ] as const);
+  const register: (Paragraph | Table)[] = [
+    heading('4  脆弱性リスク一覧', 1),
+    body('同一の脆弱性を検証レベル別・URL別に重複表示せず、系統単位で統合しています。情報は削除しておらず、元の指摘ID・全通信・全証跡は第二部で追跡できます。'),
+  ];
+  for (let offset = 0; offset < familyRows.length; offset += 6) {
+    if (offset > 0) register.push(heading(`4  脆弱性リスク一覧（続き ${String(Math.floor(offset / 6) + 1)}）`, 2, true));
+    register.push(compactTable(
+      ['ID', '深刻度', '指摘系統', '攻撃者が具体的にできること', '確認状態・対象・技術証跡別冊'],
+      familyRows.slice(offset, offset + 6),
+      [760, 860, 1800, 3000, 3220],
+    ));
+  }
+  const closing: (Paragraph | Table)[] = [
+    heading('5  成果物の完全性と参照方法', 1),
+    body('第一部は重複を統合した意思決定用サマリーです。第二部「技術証跡別冊」には、第一部から参照されるすべての指摘について、対象URL、HTTP Request/Response、観測根拠、再現手順、原因、対策、修正確認基準、証跡索引を収録しています。'),
+    keyValue([
+      ['第一部', '本書。20ページ以内を目標とし、具体的リスク・確認状態・対応優先度を提示'],
+      ['第二部', '技術証跡別冊。情報を省略せず、監査・再現・修正確認に必要な詳細を保持'],
+      ['構造化データ', '同一モデルのJSON。機械処理と差分確認に使用'],
+      ['モデルハッシュ', report.modelHash],
+    ]),
+    ...bullets(report.specialNotes),
+  ];
+  const document = new Document({
+    creator: 'ScopePilot2',
+    title: 'ウェブアプリケーション脆弱性診断結果報告書 第一部',
+    subject: report.engagement.name,
+    description: '意思決定・対応用サマリー。完全な技術情報は第二部に収録。',
+    evenAndOddHeaderAndFooters: true,
+    styles: {
+      default: {
+        document: { run: { font: 'Yu Gothic', size: 20, color: '000000' }, paragraph: { spacing: { line: 300 } } },
+        heading1: { run: { font: 'Yu Gothic', size: 30, bold: true, color: NAVY }, paragraph: { spacing: { before: 240, after: 150 }, keepNext: true } },
+        heading2: { run: { font: 'Yu Gothic', size: 24, bold: true, color: NAVY }, paragraph: { spacing: { before: 200, after: 110 }, keepNext: true } },
+        heading3: { run: { font: 'Yu Gothic', size: 21, bold: true, color: '000000' }, paragraph: { spacing: { before: 160, after: 90 }, keepNext: true } },
+      },
+    },
+    sections: [
+      {
+        properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1020, right: 1080, bottom: 1020, left: 1080, header: 440, footer: 440, gutter: 0 }, pageNumbers: { start: 1 } } },
+        footers: { default: reportFooter(), even: reportFooter() },
+        children: [...cover, ...overview],
+      },
+      {
+        properties: { type: SectionType.NEXT_PAGE, page: { size: { width: 11906, height: 16838, orientation: PageOrientation.PORTRAIT }, margin: { top: 900, right: 1080, bottom: 900, left: 1080, header: 400, footer: 400, gutter: 0 } } },
+        footers: { default: reportFooter(), even: reportFooter() },
+        children: register,
+      },
+      {
+        properties: { type: SectionType.NEXT_PAGE, page: { size: { width: 11906, height: 16838, orientation: PageOrientation.PORTRAIT }, margin: { top: 1020, right: 1080, bottom: 1020, left: 1080, header: 440, footer: 440, gutter: 0 } } },
+        footers: { default: reportFooter(), even: reportFooter() },
+        children: closing,
+      },
+    ],
+  });
+  return Buffer.from(await Packer.toBuffer(document));
+}
+
+const escapeHtml = (value: string): string => value
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#39;');
+
+const htmlLines = (value: string): string => escapeHtml(value).replaceAll('\n', '<br>');
+
+function htmlList(values: readonly string[], empty = 'なし'): string {
+  if (values.length === 0) return `<p class="empty">${escapeHtml(empty)}</p>`;
+  return `<ul>${values.map((value) => `<li>${htmlLines(value)}</li>`).join('')}</ul>`;
+}
+
+function htmlKeyValues(rows: readonly (readonly [string, string])[]): string {
+  return `<dl class="key-values">${rows.map(([label, value]) => (
+    `<div><dt>${escapeHtml(label)}</dt><dd>${htmlLines(value || '未入力')}</dd></div>`
+  )).join('')}</dl>`;
+}
+
+function htmlTable(headers: readonly string[], rows: readonly (readonly string[])[], rowAttributes?: (index: number) => string): string {
+  const body = rows.length === 0
+    ? `<tr><td colspan="${String(headers.length)}" class="empty">該当なし</td></tr>`
+    : rows.map((row, rowIndex) => `<tr${rowAttributes?.(rowIndex) ?? ''}>${headers.map((_header, columnIndex) => (
+      `<td>${htmlLines(row[columnIndex] ?? '')}</td>`
+    )).join('')}</tr>`).join('');
+  return `<div class="table-scroll"><table><thead><tr>${headers.map((header) => `<th scope="col">${escapeHtml(header)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function highlightedEvidenceHtml(value: string, terms: readonly string[], enabled: boolean): string {
+  if (!enabled) return escapeHtml(value);
+  const normalizedTerms = [...new Set(terms.map((term) => term.trim()).filter((term) => term.length > 0))]
+    .sort((left, right) => right.length - left.length);
+  if (normalizedTerms.length === 0) return escapeHtml(value);
+  const escapedTerms = normalizedTerms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'));
+  const pattern = new RegExp(`(${escapedTerms.join('|')})`, 'giu');
+  return value.split(pattern).map((part, index) => index % 2 === 1
+    ? `<mark>${escapeHtml(part)}</mark>`
+    : escapeHtml(part)).join('');
+}
+
+/**
+ * 第二部を、外部依存のない単一HTMLとして生成する。
+ * 固定ナビゲーションと指摘・HTTP証跡・証拠原本の相互リンクにより、件数が多くても参照位置を失わない。
+ */
+export function renderTechnicalAnnexHtml(report: AssuranceReportDocument): Buffer {
+  const findingAnchor = (index: number): string => `finding-${String(index + 1)}`;
+  const evidenceAnchor = (index: number): string => `evidence-${String(index + 1)}`;
+  const findingIndexById = new Map(report.findings.flatMap((finding, index) => (
+    [finding.id, ...finding.sourceFindingIds].map((id) => [id, index] as const)
+  )));
+  const evidenceIndexById = new Map(report.evidence.map((evidence, index) => [evidence.id, index] as const));
+  const relatedFindingLinks = (ids: readonly string[]): string => ids.length === 0
+    ? 'なし'
+    : ids.map((id) => {
+        const index = findingIndexById.get(id);
+        return index === undefined ? escapeHtml(id) : `<a href="#${findingAnchor(index)}">${escapeHtml(id)}</a>`;
+      }).join(' / ');
+  const evidenceLinks = (ids: readonly string[]): string => ids.length === 0
+    ? '未記録'
+    : ids.map((id) => {
+        const index = evidenceIndexById.get(id);
+        return index === undefined ? escapeHtml(id) : `<a href="#${evidenceAnchor(index)}">${escapeHtml(id)}</a>`;
+      }).join(' / ');
+
+  const navigationFindings = report.findings.map((finding, index) => (
+    `<li class="finding-nav-item" data-search="${escapeHtml(`${finding.id} ${finding.title}`.toLocaleLowerCase('ja'))}"><a href="#${findingAnchor(index)}"><span>${escapeHtml(finding.id)}</span>${escapeHtml(finding.title)}</a></li>`
+  )).join('');
+  const findingIndexRows = report.findings.map((finding, index) => [
+    `<a href="#${findingAnchor(index)}">${escapeHtml(finding.id)}</a>`,
+    escapeHtml(finding.title),
+    escapeHtml(finding.severity),
+    String(finding.urls.length),
+    escapeHtml(finding.method),
+  ] as const);
+  const findingIndexTable = `<div class="table-scroll"><table><thead><tr><th scope="col">ID</th><th scope="col">指摘名</th><th scope="col">深刻度</th><th scope="col">対象URL数</th><th scope="col">HTTP</th></tr></thead><tbody>${findingIndexRows.map((row, index) => (
+    `<tr class="finding-index-row" data-search="${escapeHtml(`${report.findings[index]?.id ?? ''} ${report.findings[index]?.title ?? ''}`.toLocaleLowerCase('ja'))}">${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`
+  )).join('')}</tbody></table></div>`;
+
+  const findingDetails = report.findings.length === 0
+    ? '<p class="empty">報告対象の指摘はありません。</p>'
+    : report.findings.map((finding, findingIndex) => {
+        const exchanges = finding.technicalEvidenceByUrl.map((entry, exchangeIndex) => {
+          const anchor = `${findingAnchor(findingIndex)}-http-${String(exchangeIndex + 1)}`;
+          return `<section class="http-exchange" id="${anchor}" data-nav-target>
+            <h4>診断時HTTP証跡 ${String(exchangeIndex + 1)} / ${String(finding.technicalEvidenceByUrl.length)}</h4>
+            <p class="url">${escapeHtml(entry.url)}</p>
+            <p class="focus"><strong>着目箇所:</strong> ${htmlLines(entry.technicalEvidence.focusSummary)}</p>
+            ${htmlKeyValues([
+              ['自動判定根拠', entry.automatedRationale],
+              ['HTTP メソッド', entry.method],
+              ['パラメータ', entry.parameter],
+              ['レスポンスステータス', entry.technicalEvidence.responseStatusCode === null ? '取得不可' : String(entry.technicalEvidence.responseStatusCode)],
+              ...entry.technicalEvidence.measuredValues.map((item) => [item.label, item.value] as const),
+            ])}
+            <p><strong>証拠ID:</strong> ${evidenceLinks(entry.evidenceIds)}</p>
+            <h5>Request</h5>
+            <pre>${highlightedEvidenceHtml(entry.technicalEvidence.request, entry.technicalEvidence.highlightTerms, entry.technicalEvidence.highlightEnabled)}</pre>
+            <h5>Response</h5>
+            <pre>${highlightedEvidenceHtml(entry.technicalEvidence.response, entry.technicalEvidence.highlightTerms, entry.technicalEvidence.highlightEnabled)}</pre>
+            ${entry.technicalEvidence.responseDeficiencies.map((deficiency) => `<p class="focus"><strong>確認結果:</strong> ${htmlLines(deficiency)}</p>`).join('')}
+            ${entry.technicalEvidence.attackInput !== '' || entry.technicalEvidence.observedEvidence !== '' ? htmlKeyValues([
+              ['診断入力・攻撃文字列', entry.technicalEvidence.attackInput || '未入力'],
+              ['観測した根拠', entry.technicalEvidence.observedEvidence || '未入力'],
+            ]) : ''}
+            <p class="back-link"><a href="#${findingAnchor(findingIndex)}">この指摘の先頭へ戻る</a></p>
+          </section>`;
+        }).join('');
+        return `<article class="finding" id="${findingAnchor(findingIndex)}" data-nav-target>
+          <header class="finding-header"><p class="eyebrow">指摘 ${String(findingIndex + 1)} / ${String(report.findings.length)}</p><h3>${escapeHtml(finding.id)}　${escapeHtml(finding.title)}</h3></header>
+          ${htmlKeyValues([
+            ['深刻度', finding.severity], ['確信度', finding.confidence], ['検出元', finding.source],
+            ['CWE', finding.cwe.join(' / ') || '未分類'], ['OWASP Top 10', finding.owaspTop10.join(' / ') || '未分類'],
+            ['HTTP メソッド', finding.method], ['パラメータ', finding.parameter],
+            ['初回確認', dateTime(finding.firstSeenAt)], ['最終確認', dateTime(finding.lastSeenAt)], ['観測回数', String(finding.occurrences)],
+          ])}
+          <h4>対象URL</h4>${htmlList(finding.urls, '未入力')}
+          <p><strong>証拠ID:</strong> ${evidenceLinks(finding.evidenceIds)}</p>
+          <h4>概要と成立条件</h4><p>${htmlLines(finding.summary)}</p><p>${htmlLines(finding.conditions)}</p>
+          <h4>自動判定根拠</h4><p>${htmlLines(finding.automatedRationale)}</p>
+          <h4>原因</h4><p>${htmlLines(finding.cause)}</p>
+          <h4>再現手順</h4><p>${htmlLines(finding.reproduction.prerequisites)}</p><ol>${finding.reproduction.steps.map((step) => `<li>${htmlLines(step)}</li>`).join('')}</ol>
+          ${exchanges}
+          <h4>実際の結果</h4><p>${htmlLines(finding.reproduction.actual)}</p>
+          <h4>改善策</h4>${htmlKeyValues([['暫定対策', finding.remediation.immediate], ['恒久対策', finding.remediation.permanent]])}
+          <h4>修正確認条件</h4><p>${htmlLines(finding.verificationCriteria)}</p>
+          <p class="back-link"><a href="#finding-index">指摘索引へ戻る</a></p>
+        </article>`;
+      }).join('');
+
+  const evidenceRows = report.evidence.map((item, index) => [
+    item.id,
+    item.type,
+    item.sha256,
+    dateTime(item.capturedAt),
+    item.redactionStatus,
+    item.relatedFindingIds.join(' / ') || 'なし',
+  ] as const);
+  const evidenceTable = `<div class="table-scroll"><table><thead><tr><th scope="col">証拠 ID</th><th scope="col">種類</th><th scope="col">SHA-256</th><th scope="col">取得日時</th><th scope="col">秘匿状態</th><th scope="col">関連指摘</th></tr></thead><tbody>${evidenceRows.length === 0 ? '<tr><td colspan="6" class="empty">該当なし</td></tr>' : evidenceRows.map((row, index) => (
+    `<tr id="${evidenceAnchor(index)}" data-nav-target><td>${escapeHtml(row[0])}</td><td>${escapeHtml(row[1])}</td><td class="hash">${escapeHtml(row[2])}</td><td>${escapeHtml(row[3])}</td><td>${escapeHtml(row[4])}</td><td>${relatedFindingLinks(report.evidence[index]?.relatedFindingIds ?? [])}</td></tr>`
+  )).join('')}</tbody></table></div>`;
+
+  const html = `<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
+  <title>${escapeHtml(report.engagement.systemName || report.engagement.name)} | 第二部 技術証跡別冊</title>
+  <style>
+    :root { color-scheme: light; --navy: #17365d; --blue: #0f6cbd; --pale: #eff6fc; --line: #d1d7e0; --muted: #5b6472; --nav-width: 20rem; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; color: #17191c; background: #f5f6f8; font-family: "Yu Gothic", "Meiryo", system-ui, sans-serif; line-height: 1.65; }
+    a { color: #075ea8; text-underline-offset: .18em; }
+    .report-nav { position: fixed; inset: 0 auto 0 0; z-index: 20; width: var(--nav-width); overflow-y: auto; padding: 1.25rem 1rem 2rem; color: #fff; background: var(--navy); box-shadow: .2rem 0 1rem #0003; }
+    .report-nav h2 { margin: 0 0 .2rem; font-size: 1.05rem; }
+    .report-nav .report-id { margin: 0 0 1rem; color: #d7e8fa; font-size: .78rem; overflow-wrap: anywhere; }
+    .report-nav label { display: block; margin: .75rem 0 .25rem; font-size: .78rem; font-weight: 700; }
+    .report-nav input { width: 100%; min-height: 2.35rem; border: 1px solid #91bde5; border-radius: .25rem; padding: .4rem .55rem; font: inherit; }
+    .report-nav ul { margin: .7rem 0 0; padding: 0; list-style: none; }
+    .report-nav li { margin: .12rem 0; }
+    .report-nav a { display: block; border-left: .2rem solid transparent; border-radius: .2rem; padding: .35rem .5rem; color: #fff; text-decoration: none; font-size: .84rem; line-height: 1.35; }
+    .report-nav a:hover, .report-nav a:focus-visible, .report-nav a[aria-current="location"] { border-left-color: #7dc9ff; background: #ffffff1f; }
+    .report-nav a span { display: inline-block; min-width: 4.8rem; color: #a9d7ff; font-weight: 700; }
+    .finding-nav { border-top: 1px solid #ffffff42; padding-top: .55rem !important; }
+    main { width: min(90rem, calc(100% - var(--nav-width))); margin-left: var(--nav-width); padding: 2.5rem clamp(1.25rem, 3vw, 3.5rem) 5rem; }
+    .cover, .report-section, .finding { margin: 0 auto 1.5rem; border: 1px solid var(--line); border-radius: .5rem; padding: clamp(1.25rem, 3vw, 2.5rem); background: #fff; box-shadow: 0 .15rem .6rem #16233a10; }
+    .cover { border-top: .45rem solid var(--navy); }
+    .eyebrow { margin: 0 0 .25rem; color: var(--blue); font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 0; color: var(--navy); font-size: clamp(1.8rem, 4vw, 3.2rem); line-height: 1.25; }
+    h2 { margin: 0 0 1rem; color: var(--navy); font-size: 1.65rem; }
+    h3 { margin: 0; color: var(--navy); font-size: 1.35rem; }
+    h4 { margin: 1.6rem 0 .55rem; color: #243b53; font-size: 1.05rem; }
+    h5 { margin: 1.2rem 0 .45rem; font-size: .92rem; }
+    [data-nav-target] { scroll-margin-top: 1rem; }
+    .key-values { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 0; margin: 1rem 0; border: 1px solid var(--line); border-radius: .35rem; overflow: hidden; }
+    .key-values div { display: grid; grid-template-columns: minmax(7rem, 35%) 1fr; border-bottom: 1px solid var(--line); }
+    .key-values div:last-child { border-bottom: 0; }
+    .key-values dt, .key-values dd { margin: 0; padding: .55rem .7rem; overflow-wrap: anywhere; }
+    .key-values dt { background: var(--pale); font-weight: 700; }
+    .table-scroll { overflow-x: auto; margin: 1rem 0; }
+    table { width: 100%; border-collapse: collapse; background: #fff; font-size: .88rem; }
+    th, td { border: 1px solid var(--line); padding: .55rem .65rem; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+    th { position: sticky; top: 0; z-index: 2; color: #fff; background: var(--navy); }
+    tbody tr:nth-child(even) { background: #f7fafe; }
+    .finding { border-top: .35rem solid var(--blue); }
+    .finding-header { border-bottom: 1px solid var(--line); padding-bottom: .8rem; }
+    .http-exchange { margin: 1.5rem 0; border: 1px solid #9cb8d3; border-radius: .4rem; padding: 1rem; background: #fbfdff; }
+    .url { overflow-wrap: anywhere; color: var(--muted); font-family: Consolas, "Courier New", monospace; font-size: .86rem; }
+    pre { max-height: 42rem; overflow: auto; margin: .4rem 0 1rem; border: 1px solid #c7cdd5; border-radius: .3rem; padding: .85rem; background: #f3f4f6; white-space: pre-wrap; overflow-wrap: anywhere; font: .82rem/1.5 Consolas, "Courier New", monospace; tab-size: 2; }
+    mark, .focus { background: #fff3a3; }
+    .focus { border-left: .25rem solid #e0b800; padding: .55rem .75rem; }
+    .hash { font-family: Consolas, "Courier New", monospace; font-size: .78rem; }
+    .empty { color: var(--muted); }
+    .back-link { text-align: right; font-size: .82rem; }
+    .is-filtered { display: none !important; }
+    @media (max-width: 860px) {
+      :root { --nav-width: 15rem; }
+      main { padding: 1rem; }
+      .key-values { grid-template-columns: 1fr; }
+    }
+    @media print {
+      .report-nav { display: none; }
+      main { width: auto; margin: 0; padding: 0; }
+      .cover, .report-section, .finding { border: 0; box-shadow: none; break-inside: avoid-page; }
+      .http-exchange { break-inside: auto; }
+      pre { max-height: none; overflow: visible; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="report-nav" aria-label="技術証跡別冊の固定ナビゲーション">
+    <h2>第二部　技術証跡別冊</h2>
+    <p class="report-id">${escapeHtml(report.report.id)}</p>
+    <label for="finding-search">指摘を検索</label>
+    <input id="finding-search" type="search" placeholder="IDまたは指摘名" autocomplete="off">
+    <ul>
+      <li><a href="#top">表紙</a></li>
+      <li><a href="#document-control">1 文書管理</a></li>
+      <li><a href="#summary">2 概要</a></li>
+      <li><a href="#scope">3 診断条件と対象範囲</a></li>
+      <li><a href="#coverage">4 診断カバレッジ</a></li>
+      <li><a href="#method">5 評価方法</a></li>
+      <li><a href="#finding-index">6 指摘索引</a></li>
+      <li><a href="#finding-details">7 指摘事項詳細</a></li>
+    </ul>
+    <ul class="finding-nav" aria-label="指摘別索引">${navigationFindings || '<li>指摘なし</li>'}</ul>
+    <ul>
+      <li><a href="#remediation-plan">8 対応計画と再診断</a></li>
+      <li><a href="#evidence-index">9 証拠索引</a></li>
+      <li><a href="#notes">10 特記事項</a></li>
+    </ul>
+  </nav>
+  <main>
+    <header class="cover" id="top" data-nav-target>
+      <p class="eyebrow">SCOPEPILOT2 ASSURANCE REPORT</p>
+      <h1>第二部　技術証跡別冊</h1>
+      <p>${escapeHtml(report.engagement.systemName || report.engagement.name)}</p>
+      ${htmlKeyValues([
+        ['レポート ID', report.report.id], ['案件名', report.engagement.name], ['提出先', report.engagement.clientName],
+        ['診断区分', report.assessment.type], ['発行日', dateTime(report.report.generatedAt)],
+        ['発行者', report.engagement.serviceProvider], ['機密区分', report.report.classification],
+      ])}
+    </header>
+    <section class="report-section" id="document-control" data-nav-target><h2>1　文書管理</h2>${htmlKeyValues([
+      ['版数', report.report.version], ['文書状態', report.report.status], ['作成者', report.report.author],
+      ['レビュー担当', report.report.reviewer], ['承認者', report.report.approver],
+      ['配布先', report.report.distribution.join(' / ') || '未入力'], ['正規モデル SHA-256', report.modelHash],
+    ])}</section>
+    <section class="report-section" id="summary" data-nav-target><h2>2　概要</h2><p>${htmlLines(report.summary.conclusion)}</p>${htmlKeyValues([
+      ['最高深刻度', report.summary.highestSeverity], ['指摘総数', String(report.findings.length)],
+      ['深刻度別', Object.entries(report.summary.severityCounts).map(([key, count]) => `${key} ${String(count)}`).join(' / ') || '0'],
+    ])}<h3>優先対応事項</h3>${htmlList(report.summary.priorities)}<h3>重大な制約</h3>${htmlList(report.summary.majorLimitations)}</section>
+    <section class="report-section" id="scope" data-nav-target><h2>3　診断条件と対象範囲</h2>${htmlKeyValues([
+      ['診断期間', `${dateTime(report.assessment.startedAt)} ～ ${dateTime(report.assessment.endedAt)}`],
+      ['診断方法', report.assessment.methods.join(' / ') || '未実施'], ['診断元 IP', report.assessment.sourceIps.join(' / ') || '未入力'],
+      ['対象ロール', report.assessment.roles.join(' / ') || '未入力'], ['許可 Origin', report.assessment.allowedOrigins.join('\n') || '未入力'],
+      ['禁止操作', report.assessment.forbiddenActions.join(' / ') || '未入力'], ['除外対象', report.assessment.exclusions.join(' / ') || 'なし'],
+      ['前提条件', report.assessment.assumptions.join(' / ') || 'なし'],
+      ['実行上限', `送信 ${String(report.assessment.requestLimits.maxRequests)} / ページ ${String(report.assessment.requestLimits.maxPages)} / 時間 ${String(report.assessment.requestLimits.maxDurationMinutes)} 分`],
+    ])}<h3>対象資産</h3>${htmlTable(['ID', '名称', 'FQDN', '代表 URL'], report.assets.map((asset) => [asset.id, asset.name, asset.fqdn, asset.urls.join('\n') || '未入力']))}</section>
+    <section class="report-section" id="coverage" data-nav-target><h2>4　診断カバレッジ</h2><p>実施済みと未実施を区別し、警告がないことを実施済みの根拠にしません。</p>${htmlKeyValues([
+      ['探索 URL 数', String(report.coverageSummary.exploredUrlCount)], ['診断 URL 数', String(report.coverageSummary.scannedUrlCount)],
+      ['外部エンジン委譲数', String(report.coverageSummary.delegatedStepCount)],
+    ])}${htmlTable(['ID', '診断観点', '状態', '検証手段', '対象URL・ロール', '制約'], report.coverage.map((item) => [item.controlId, item.title, item.status, item.method, [...item.targets, ...item.roles].join('\n') || '未記録', item.limitations]))}</section>
+    <section class="report-section" id="method" data-nav-target><h2>5　評価方法</h2>${htmlTable(['評価軸', '値', '意味'], [
+      ['深刻度', 'High / Medium / Low / Informational / 未評価', '成立時の技術的・業務的な影響度'],
+      ['対応状態', '未着手 / 対応中 / 対応済み / 受容 / 保留', '修正とリスク受容の管理状態'],
+      ['再診断', '解消 / 一部解消 / 未解消 / 再診断不能 / 未実施', '修正確認の結果'],
+    ])}</section>
+    <section class="report-section" id="finding-index" data-nav-target><h2>6　指摘索引</h2><p>指摘IDまたは名称を選ぶと、該当する技術詳細へ直接移動します。</p>${findingIndexTable}</section>
+    <section class="report-section" id="finding-details" data-nav-target><h2>7　指摘事項詳細</h2>${htmlKeyValues([
+      ['認証条件', report.assessment.authentication], ['スキャンポリシー', report.assessment.scanPolicies.join(' / ') || '未実施'],
+    ])}<h3>探索URLと診断対象判定</h3>${htmlTable(['URL', 'HTTP', '深さ', '判定', '対象外理由'], report.urlCoverage.map((item) => [item.url, item.statusCode === null ? '不明' : String(item.statusCode), String(item.depth), item.scanStatus, item.exclusionReason]))}</section>
+    ${findingDetails}
+    <section class="report-section" id="remediation-plan" data-nav-target><h2>8　対応計画と再診断</h2>${htmlTable(['指摘 ID', '対応方針', '担当', '期限', '状態', '再診断結果'], report.findings.map((finding) => [finding.id, '未入力', '未入力', '未入力', '未着手', '未実施']))}</section>
+    <section class="report-section" id="evidence-index" data-nav-target><h2>9　証拠索引</h2><p>各指摘の本文には診断時の Request と Response を掲載します。この索引は原本の完全性確認に使用します。</p>${evidenceTable}</section>
+    <section class="report-section" id="notes" data-nav-target><h2>10　特記事項</h2>${htmlList(report.specialNotes)}<p class="hash">ScopePilot2 report model hash: ${escapeHtml(report.modelHash)}</p></section>
+  </main>
+  <script>
+    (() => {
+      const search = document.getElementById('finding-search');
+      const filter = () => {
+        const query = search.value.trim().toLocaleLowerCase('ja');
+        document.querySelectorAll('.finding-nav-item, .finding-index-row').forEach((item) => {
+          item.classList.toggle('is-filtered', query !== '' && !item.dataset.search.includes(query));
+        });
+      };
+      search.addEventListener('input', filter);
+      const links = [...document.querySelectorAll('.report-nav a[href^="#"]')];
+      const linksById = new Map(links.map((link) => [decodeURIComponent(link.hash.slice(1)), link]));
+      const observer = new IntersectionObserver((entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting).sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top)[0];
+        if (!visible) return;
+        links.forEach((link) => link.removeAttribute('aria-current'));
+        linksById.get(visible.target.id)?.setAttribute('aria-current', 'location');
+      }, { rootMargin: '0px 0px -78% 0px', threshold: 0 });
+      document.querySelectorAll('[data-nav-target][id]').forEach((section) => observer.observe(section));
+    })();
+  </script>
+</body>
+</html>\n`;
+  return Buffer.from(html, 'utf8');
+}
 
 export async function renderAssuranceReport(report: AssuranceReportDocument): Promise<Buffer> {
   const coverChildren: (Paragraph | Table)[] = [
     new Paragraph({ spacing: { before: 900, after: 140 }, children: [new TextRun({ text: 'SCOPEPILOT2  ASSURANCE REPORT', color: GRAY, bold: true, size: 18, font: 'Aptos' })] }),
     new Paragraph({ style: 'Title', children: [new TextRun('ウェブアプリケーション')], spacing: { before: 780, after: 80 } }),
     new Paragraph({ style: 'Title', children: [new TextRun('脆弱性診断報告書')], spacing: { after: 420 } }),
+    new Paragraph({ spacing: { after: 320 }, children: [new TextRun({ text: '第二部　技術証跡別冊', bold: true, size: 28, font: 'Yu Gothic', color: NAVY })] }),
     body(report.engagement.systemName, { after: 360 }),
     keyValue([
       ['レポート ID', report.report.id],

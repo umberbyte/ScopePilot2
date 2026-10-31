@@ -1,9 +1,26 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { DomainError, type ScanCandidate } from '@scopepilot2/contracts';
+import type { RepeaterTransportPort } from '@scopepilot2/core';
 import { bootstrapFlow } from '../support/test-flow.ts';
 
 describe('ScanStartPolicy (BaselineFlowService.runActiveScan)', () => {
+  test('ガイドライン選択を変更すると確認済み計画を再利用できない', async () => {
+    const { service, operator, scanEngine } = await bootstrapFlow();
+    const target = 'http://fixture.target.test/';
+    const { plan: asvsPlan } = service.buildActiveScanPlan(operator, [target], undefined, { guidelines: ['OWASP ASVS 5.0'] });
+    service.authorizePlan(asvsPlan);
+    const asvsConfirmation = service.confirmPlan(asvsPlan, operator);
+    const { plan: ds221Plan } = service.buildActiveScanPlan(operator, [target], undefined, { guidelines: ['デジタル庁 DS-221'] });
+    service.authorizePlan(ds221Plan);
+    assert.notEqual(asvsConfirmation.planHash, service.confirmPlan(ds221Plan, operator).planHash);
+    await assert.rejects(
+      service.runActiveScan(operator, ds221Plan, asvsConfirmation, []),
+      (error: unknown) => error instanceof DomainError && error.code === 'ConfirmationRequired',
+    );
+    assert.equal(scanEngine.startCalls.length, 0);
+  });
+
   test('[F11-UT-004] 確認 hash が現在の計画と不一致なら engine を起動しない', async () => {
     const { service, operator, scanEngine } = await bootstrapFlow();
     const { plan: confirmedPlan } = service.buildActiveScanPlan(operator, ['http://fixture.target.test/']);
@@ -36,5 +53,42 @@ describe('ScanStartPolicy (BaselineFlowService.runActiveScan)', () => {
       },
     );
     assert.equal(scanEngine.startCalls.length, 0, 'engine は起動しない');
+  });
+
+  test('ASVS選択はテーマ30を実行関数へ接続し、送信数をZAP leaseから予約する', async () => {
+    const sent: string[] = [];
+    const repeaterTransport: RepeaterTransportPort = {
+      send: async (input) => {
+        sent.push(input.targetUrl);
+        return {
+          status: 200,
+          headers: [['Server', 'Apache/2.4.65 (Debian)'], ['Content-Type', 'text/html; charset=UTF-8']],
+          body: Buffer.from('<html>DVWA</html>', 'utf8'),
+          redirectLocations: [],
+        };
+      },
+    };
+    const { service, operator, scanEngine } = await bootstrapFlow({ repeaterTransport });
+    const target = 'http://fixture.target.test/';
+    const { plan } = service.buildActiveScanPlan(operator, [target], undefined, { guidelines: ['OWASP ASVS 5.0'] });
+    service.authorizePlan(plan);
+    const result = await service.runActiveScan(operator, plan, service.confirmPlan(plan, operator), [{
+      candidateId: 'cand-guideline-1',
+      url: target,
+      method: 'GET',
+      category: 'page',
+      guidelineBasis: ['OWASP ASVS 5.0'],
+      confidence: 1,
+      observationUrl: target,
+    }]);
+
+    assert.deepEqual(sent, [target]);
+    const route = result.guidelineRoutes.find((candidate) => candidate.routeId === 'zap-unsupported:30');
+    assert.equal(route?.status, 'executed');
+    assert.equal(route?.checkStatus, 'fail');
+    assert.ok(route?.checkId?.startsWith('themecheck-'));
+    assert.ok(result.guidelineRoutes.some((candidate) => candidate.status === 'needs-input'));
+    const activeStep = plan.steps.find((step) => step.kind === 'active-scan')!;
+    assert.equal(scanEngine.startCalls[0]?.leasedMaxRequests, activeStep.limits.maxRequests - result.overshootReservation - 1);
   });
 });

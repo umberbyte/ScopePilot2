@@ -62,10 +62,12 @@ async function listenEcho(
   receivedAt: number[],
   receivedCookies: (string | undefined)[],
   receivedSubprotocols: (string | undefined)[],
+  receivedOrigins: (string | undefined)[],
 ): Promise<string> {
   server.on('upgrade', (request, socket, head) => {
     receivedCookies.push(request.headers.cookie);
     receivedSubprotocols.push(request.headers['sec-websocket-protocol']);
+    receivedOrigins.push(request.headers.origin);
     const key = request.headers['sec-websocket-key'];
     if (typeof key !== 'string') {
       socket.destroy();
@@ -99,8 +101,9 @@ describe('NodeWebSocketTransport (実 text frame 送受信)', () => {
     const receivedAt: number[] = [];
     const receivedCookies: (string | undefined)[] = [];
     const receivedSubprotocols: (string | undefined)[] = [];
+    const receivedOrigins: (string | undefined)[] = [];
     const server = createServer();
-    const base = await listenEcho(server, receivedAt, receivedCookies, receivedSubprotocols);
+    const base = await listenEcho(server, receivedAt, receivedCookies, receivedSubprotocols, receivedOrigins);
     try {
       const frames: string[] = [];
       const transport = new NodeWebSocketTransport({ connectTimeoutMs: 2_000, responseWaitMs: 100 });
@@ -109,6 +112,7 @@ describe('NodeWebSocketTransport (実 text frame 送受信)', () => {
         messages: ['one', 'two'],
         subprotocols: ['scopepilot.echo', 'json-v2'],
         sessionCookies: [{ name: 'WS_SESSION', value: 'transport-secret', domain: '127.0.0.1', path: '/' }],
+        origin: 'https://evil.example',
         onSentFrame: () => {},
         onTextFrame: (payload) => frames.push(payload),
       });
@@ -117,6 +121,7 @@ describe('NodeWebSocketTransport (実 text frame 送受信)', () => {
       assert.deepEqual(frames, ['echo:one', 'echo:two']);
       assert.deepEqual(receivedCookies, ['WS_SESSION=transport-secret']);
       assert.deepEqual(receivedSubprotocols, ['scopepilot.echo, json-v2']);
+      assert.deepEqual(receivedOrigins, ['https://evil.example']);
       assert.ok((receivedAt[1] ?? 0) - (receivedAt[0] ?? 0) >= 80, '既定10 message/s の間隔を守る');
     } finally {
       await close(server);

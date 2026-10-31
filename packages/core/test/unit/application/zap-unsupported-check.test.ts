@@ -7,7 +7,10 @@ import type {
   LoginExecutorPort,
   LoginFlowStep,
   NucleiScanPort,
+  OtpInboxPort,
   RepeaterTransportPort,
+  SamlFixturePort,
+  WebSocketTransportPort,
 } from '@scopepilot2/core';
 import { bootstrapFlow } from '../support/test-flow.ts';
 
@@ -105,6 +108,10 @@ async function flowWithSession(options: {
   readonly fuzz?: FuzzTransportPort;
   readonly domObserver?: DomObservationPort;
   readonly nuclei?: NucleiScanPort;
+  readonly webSocket?: WebSocketTransportPort;
+  readonly otpInbox?: OtpInboxPort;
+  readonly samlFixture?: SamlFixturePort;
+  readonly sleep?: (ms: number) => Promise<void>;
   readonly allowedOrigins?: readonly string[];
 }) {
   const { service, operator } = await bootstrapFlow({
@@ -122,6 +129,10 @@ async function flowWithSession(options: {
     ...(options.fuzz === undefined ? {} : { fuzzTransport: options.fuzz }),
     ...(options.domObserver === undefined ? {} : { domObserver: options.domObserver }),
     ...(options.nuclei === undefined ? {} : { nucleiRunner: options.nuclei }),
+    ...(options.webSocket === undefined ? {} : { webSocketTransport: options.webSocket }),
+    ...(options.otpInbox === undefined ? {} : { otpInbox: options.otpInbox }),
+    ...(options.samlFixture === undefined ? {} : { samlFixture: options.samlFixture }),
+    ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
   });
   service.registerLoginFlow(operator, { role: 'admin', flowVersion: 'f1', steps: loginSteps() });
   const login = await service.runLogin(operator, { role: 'admin', baseUrl: `${BASE}/`, secretValues: { username: 'admin', password: PASSWORD }, expectedUrlPrefix: `${BASE}/app/` });
@@ -280,6 +291,269 @@ describe('zap-unsupported check (service, Top10 対象テーマ)', () => {
     );
   });
 
+  test('テーマ6: 一次認証直後のsessionでMFA保護APIへ到達できれば段階スキップを検出する', async () => {
+    const repeater = rawTransport(({ targetUrl, hasSession }) => {
+      if (targetUrl.endsWith('/two-factor-signin')) {
+        return { status: 302, headers: [['Set-Cookie', 'sid=pending-mfa; Path=/; HttpOnly']], body: '', redirects: [`${BASE}/otp`] };
+      }
+      return { status: hasSession ? 200 : 401, body: hasSession ? '{"privateNote":"secret"}' : '' };
+    });
+    const { service, operator } = await flowWithSession({ browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })), repeater });
+    const summary = await service.runZapUnsupportedCheck(operator, {
+      themeNo: '6',
+      targetUrls: [`${BASE}/two-factor-signin`, `${BASE}/secure-data`],
+      secretValues: { username: 'alice', password: PASSWORD },
+    });
+    assert.equal(summary.status, 'fail');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'mfa-stage-skip')?.outcome, 'exposed');
+    assert.ok((summary.skipped ?? []).some((note) => note.includes('SAML')));
+    assert.ok((summary.skipped ?? []).some((note) => note.includes('otp-reuse')));
+  });
+
+  /** テーマ6 OTP sub-check 用の fake 群。policy で V (脆弱) / F (安全) 境界を作る。 */
+  function otpFixtureFlow(options: {
+    readonly inboxReturns: 'last' | 'none';
+    readonly policy: (input: { readonly code: string; readonly issued: readonly string[]; readonly used: readonly string[]; readonly waited: boolean; readonly wrongCount: number }) => boolean;
+    readonly destinationChange?: 'accept' | 'reject';
+  }) {
+    const issued: string[] = [];
+    const used: string[] = [];
+    const state = { waited: false, wrongCount: 0 };
+    const inbox: OtpInboxPort = {
+      engineVersion: 'fake-otp-inbox-1',
+      waitForOtp: async () => {
+        if (options.inboxReturns === 'none' || issued.length === 0) return null;
+        return { otp: issued.at(-1)!, receivedAt: '2026-10-18T09:00:00.000Z' };
+      },
+    };
+    const repeater = rawTransport(({ targetUrl, body }) => {
+      if (targetUrl.endsWith('/two-factor-signin')) {
+        return { status: 200, headers: [['Set-Cookie', 'sid=pending-mfa; Path=/; HttpOnly']], body: '{"secondFactorRequired":true}' };
+      }
+      if (targetUrl.endsWith('/otp/issue')) {
+        issued.push(`49302${issued.length + 1}`);
+        return { status: 200, body: '{"sent":true}' };
+      }
+      if (targetUrl.endsWith('/otp/verify')) {
+        const code = ((JSON.parse(body) as { code?: string }).code) ?? '';
+        if (!issued.includes(code)) {
+          state.wrongCount += 1;
+          return { status: 200, body: '{"error":"invalid code"}' };
+        }
+        const accept = options.policy({ code, issued: [...issued], used: [...used], waited: state.waited, wrongCount: state.wrongCount });
+        used.push(code);
+        return { status: 200, body: accept ? '{"result":"mfa-complete"}' : '{"error":"code rejected"}' };
+      }
+      if (targetUrl.endsWith('/otp/destination')) {
+        return options.destinationChange === 'accept'
+          ? { status: 200, body: '{"result":"destination-updated"}' }
+          : { status: 403, body: 're-authentication required' };
+      }
+      return { status: 403, body: 'mfa required' };
+    });
+    const sleep = async (ms: number): Promise<void> => {
+      state.waited = true;
+      sleepCalls.push(ms);
+    };
+    const sleepCalls: number[] = [];
+    return { inbox, repeater, sleep, sleepCalls, issued };
+  }
+
+  test('テーマ6 OTP: 使用済みOTPの再送が受理されれば再利用を検出し、OTP値は結果へ出ない', async () => {
+    const base = otpFixtureFlow({ inboxReturns: 'last', policy: ({ code, issued }) => issued.includes(code) });
+    const { service, operator } = await flowWithSession({
+      browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })),
+      repeater: base.repeater,
+      otpInbox: base.inbox,
+      sleep: base.sleep,
+    });
+    // vulnerable とは限らない: 再利用だけを見るため宛先変更は reject にする。
+    const summary = await service.runZapUnsupportedCheck(operator, {
+      themeNo: '6',
+      targetUrls: [`${BASE}/two-factor-signin`, `${BASE}/secure-data`],
+      secretValues: { username: 'alice', password: PASSWORD },
+      params: {
+        otpIssueUrl: `${BASE}/otp/issue`,
+        otpVerifyUrl: `${BASE}/otp/verify`,
+        otpSuccessMarker: 'mfa-complete',
+        otpMailboxRef: 'fixture-primary',
+      },
+    });
+    assert.equal(summary.results.find((probe) => probe.pattern === 'otp-reuse:resubmit')?.outcome, 'exposed');
+    assert.equal(summary.status, 'fail');
+    // OTP 値 (493021 等) は API 応答へ出ない (証跡も同じ probe 投影から作る)。
+    for (const otp of base.issued) {
+      assert.ok(!JSON.stringify(summary).includes(otp), `otp value ${otp} must not appear in the summary`);
+    }
+    assert.ok((summary.skipped ?? []).some((note) => note.includes('otp-expiry skipped')));
+  });
+
+  test('テーマ6 OTP: 使用済みOTPの再送が拒否されれば denied。未実施sub-checkが残るので全体は pass にしない', async () => {
+    const base = otpFixtureFlow({ inboxReturns: 'last', policy: ({ code, used }) => !used.includes(code) });
+    const { service, operator } = await flowWithSession({
+      browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })),
+      repeater: base.repeater,
+      otpInbox: base.inbox,
+      sleep: base.sleep,
+    });
+    const summary = await service.runZapUnsupportedCheck(operator, {
+      themeNo: '6',
+      targetUrls: [`${BASE}/two-factor-signin`, `${BASE}/secure-data`],
+      secretValues: { username: 'alice', password: PASSWORD },
+      params: {
+        otpIssueUrl: `${BASE}/otp/issue`,
+        otpVerifyUrl: `${BASE}/otp/verify`,
+        otpSuccessMarker: 'mfa-complete',
+        otpMailboxRef: 'fixture-primary',
+      },
+    });
+    assert.equal(summary.results.find((probe) => probe.pattern === 'otp-reuse:resubmit')?.outcome, 'denied');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'mfa-stage-skip')?.outcome, 'denied');
+    assert.equal(summary.status, 'inconclusive');
+  });
+
+  test('テーマ6 OTP: 正常対照 (inbox からOTP未受領) では再利用判定を行わない', async () => {
+    const base = otpFixtureFlow({ inboxReturns: 'none', policy: () => true });
+    const { service, operator } = await flowWithSession({
+      browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })),
+      repeater: base.repeater,
+      otpInbox: base.inbox,
+      sleep: base.sleep,
+    });
+    const summary = await service.runZapUnsupportedCheck(operator, {
+      themeNo: '6',
+      targetUrls: [`${BASE}/two-factor-signin`, `${BASE}/secure-data`],
+      secretValues: { username: 'alice', password: PASSWORD },
+      params: {
+        otpIssueUrl: `${BASE}/otp/issue`,
+        otpVerifyUrl: `${BASE}/otp/verify`,
+        otpSuccessMarker: 'mfa-complete',
+        otpMailboxRef: 'fixture-primary',
+      },
+    });
+    assert.equal(summary.results.find((probe) => probe.pattern === 'otp-reuse:control')?.outcome, 'inconclusive');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'otp-reuse:resubmit'), undefined);
+  });
+
+  test('テーマ6 OTP: 期限切れ・試行制限・宛先変更のV (全受理) と F (全拒否) の境界', async () => {
+    const otpParams = {
+      otpIssueUrl: `${BASE}/otp/issue`,
+      otpVerifyUrl: `${BASE}/otp/verify`,
+      otpSuccessMarker: 'mfa-complete',
+      otpMailboxRef: 'fixture-primary',
+      otpExpirySeconds: '5',
+      otpWrongAttempts: '2',
+      otpDestinationChangeUrl: `${BASE}/otp/destination`,
+      otpDestinationChangeMarker: 'destination-updated',
+    };
+    const runTheme = async (fixture: ReturnType<typeof otpFixtureFlow>) => {
+      const { service, operator } = await flowWithSession({
+        browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })),
+        repeater: fixture.repeater,
+        otpInbox: fixture.inbox,
+        sleep: fixture.sleep,
+      });
+      return await service.runZapUnsupportedCheck(operator, {
+        themeNo: '6',
+        role: 'admin',
+        targetUrls: [`${BASE}/two-factor-signin`, `${BASE}/secure-data`],
+        secretValues: { username: 'alice', password: PASSWORD },
+        params: otpParams,
+      });
+    };
+    // V: 期限切れ後も受理・誤試行後も受理・再認証なしで宛先変更が受理される。
+    const vulnerable = otpFixtureFlow({ inboxReturns: 'last', policy: ({ code, issued }) => issued.includes(code), destinationChange: 'accept' });
+    const vulnerableSummary = await runTheme(vulnerable);
+    assert.equal(vulnerableSummary.results.find((probe) => probe.pattern === 'otp-expiry:expired-submit')?.outcome, 'exposed');
+    assert.equal(vulnerableSummary.results.find((probe) => probe.pattern === 'otp-attempt-limit:correct-after-wrong')?.outcome, 'exposed');
+    assert.equal(vulnerableSummary.results.find((probe) => probe.pattern === 'otp-destination-change:without-reauth')?.outcome, 'exposed');
+    assert.equal(vulnerableSummary.status, 'fail');
+    // 待機は fixture 宣言の期限 + 猶予 (5s + 5s)。
+    assert.deepEqual(vulnerable.sleepCalls, [10_000]);
+
+    // F: 期限切れ・試行制限・再認証なし宛先変更をすべて拒否する。
+    const safe = otpFixtureFlow({
+      inboxReturns: 'last',
+      policy: ({ code, used, waited, wrongCount }) => !used.includes(code) && !waited && wrongCount === 0,
+      destinationChange: 'reject',
+    });
+    const safeSummary = await runTheme(safe);
+    assert.equal(safeSummary.results.find((probe) => probe.pattern === 'otp-expiry:expired-submit')?.outcome, 'denied');
+    assert.equal(safeSummary.results.find((probe) => probe.pattern === 'otp-attempt-limit:correct-after-wrong')?.outcome, 'denied');
+    assert.equal(safeSummary.results.find((probe) => probe.pattern === 'otp-destination-change:without-reauth')?.outcome, 'denied');
+    // SAML sub-check が未実施のため、全 deny でも pass にしない。
+    assert.equal(safeSummary.status, 'inconclusive');
+  });
+
+  test('テーマ6 SAML: 同一assertion再送のV/F境界。対照不成立・区別不能は inconclusive', async () => {
+    const samlRepeater = rawTransport(({ targetUrl, hasSession }) => {
+      if (targetUrl.endsWith('/two-factor-signin')) {
+        return { status: 200, headers: [['Set-Cookie', 'sid=pending-mfa; Path=/; HttpOnly']], body: '{"secondFactorRequired":true}' };
+      }
+      return { status: hasSession ? 403 : 403, body: 'mfa required' };
+    });
+    const runSaml = async (fixture: SamlFixturePort) => {
+      const { service, operator } = await flowWithSession({
+        browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })),
+        repeater: samlRepeater,
+        samlFixture: fixture,
+      });
+      return await service.runZapUnsupportedCheck(operator, {
+        themeNo: '6',
+        targetUrls: [`${BASE}/two-factor-signin`, `${BASE}/secure-data`],
+        secretValues: { username: 'alice', password: PASSWORD },
+        params: { samlIdpStartUrl: 'https://idp.fixture.test/sso', samlAcsUrl: 'https://sp.fixture.test/acs' },
+      });
+    };
+    const replayProbe = 'saml-assertion-replay';
+    // V: 対照ログイン成立 + 同一assertion再送が新規sessionとして受理される。
+    const vulnerableSummary = await runSaml({
+      engineVersion: 'fake-saml-1',
+      issueAndReplay: async () => ({ controlAccepted: true, replayAccepted: true, controlStatus: 302, replayStatus: 302, assertionHash: 'sha256:assertion-1' }),
+    });
+    assert.equal(vulnerableSummary.results.find((probe) => probe.pattern === replayProbe)?.outcome, 'exposed');
+    // F: 再送が新規sessionとして拒否される。
+    const safeSummary = await runSaml({
+      engineVersion: 'fake-saml-1',
+      issueAndReplay: async () => ({ controlAccepted: true, replayAccepted: false, controlStatus: 302, replayStatus: 403, assertionHash: 'sha256:assertion-1' }),
+    });
+    assert.equal(safeSummary.results.find((probe) => probe.pattern === replayProbe)?.outcome, 'denied');
+    assert.equal(safeSummary.status, 'inconclusive');
+    // 対照不成立: 再送が受理されても fail にしない。
+    const noControl = await runSaml({
+      engineVersion: 'fake-saml-1',
+      issueAndReplay: async () => ({ controlAccepted: false, replayAccepted: true, controlStatus: 500, replayStatus: 302, assertionHash: 'sha256:assertion-1' }),
+    });
+    assert.equal(noControl.results.find((probe) => probe.pattern === replayProbe)?.outcome, 'inconclusive');
+    // 既存session継続との区別不能 (replayAccepted null) は inconclusive。
+    const indistinguishable = await runSaml({
+      engineVersion: 'fake-saml-1',
+      issueAndReplay: async () => ({ controlAccepted: true, replayAccepted: null, controlStatus: 302, replayStatus: 200, assertionHash: 'sha256:assertion-1' }),
+    });
+    assert.equal(indistinguishable.results.find((probe) => probe.pattern === replayProbe)?.outcome, 'inconclusive');
+    // assertion 本文は port が返さないため、結果にも出ない (hash のみ)。
+    assert.ok(indistinguishable.results.find((probe) => probe.pattern === replayProbe)?.bodyHash === 'sha256:assertion-1');
+  });
+
+  test('テーマ6 SAML: fixture未構成なら理由付きでskipする', async () => {
+    const repeater = rawTransport(({ targetUrl }) => {
+      if (targetUrl.endsWith('/two-factor-signin')) {
+        return { status: 200, headers: [['Set-Cookie', 'sid=pending-mfa; Path=/; HttpOnly']], body: '{"secondFactorRequired":true}' };
+      }
+      return { status: 403, body: 'mfa required' };
+    });
+    const { service, operator } = await flowWithSession({ browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })), repeater });
+    const summary = await service.runZapUnsupportedCheck(operator, {
+      themeNo: '6',
+      targetUrls: [`${BASE}/two-factor-signin`, `${BASE}/secure-data`],
+      secretValues: { username: 'alice', password: PASSWORD },
+      params: { samlIdpStartUrl: 'https://idp.fixture.test/sso', samlAcsUrl: 'https://sp.fixture.test/acs' },
+    });
+    assert.equal(summary.results.find((probe) => probe.pattern === 'saml-assertion-replay'), undefined);
+    assert.ok((summary.skipped ?? []).some((note) => note.includes('SAML assertion replay skipped')));
+    assert.equal(summary.status, 'inconclusive');
+  });
+
   test('テーマ7: 既存/不在ユーザの応答差を列按として検出する', async () => {
     const browser = flowBrowser(({ fills }) => {
       const existing = fills['input[name="username"]'] === 'admin';
@@ -319,6 +593,18 @@ describe('zap-unsupported check (service, Top10 対象テーマ)', () => {
       safeService.runZapUnsupportedCheck(safeOperator, { themeNo: '7', role: 'admin', params: { nonexistentUsername: 'admin', baseUrl: `${BASE}/` }, secretValues: { username: 'admin', password: PASSWORD } }),
       /must differ/u,
     );
+  });
+
+  test('テーマ9: 正規JWTと同じclaimsのalg=noneが受理されれば検出する', async () => {
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+    const claims = Buffer.from(JSON.stringify({ sub: 'alice', exp: Math.floor(Date.parse('2026-10-18T10:00:00.000Z') / 1000) })).toString('base64url');
+    const token = `${header}.${claims}.signature`;
+    const repeater = rawTransport(({ headers }) => ({ status: headers.authorization?.endsWith('signature') || headers.authorization?.endsWith('.') ? 200 : 401, body: '{"report":"ok"}' }));
+    const { service, operator } = await flowWithSession({ browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })), repeater });
+    const summary = await service.runZapUnsupportedCheck(operator, { themeNo: '9', targetUrls: [`${BASE}/report`], secretValues: { validToken: token } });
+    assert.equal(summary.status, 'fail');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'jwt-alg-none')?.outcome, 'exposed');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'jwt-exp-claim')?.outcome, 'denied');
   });
 
   test('テーマ10: 2ロールの正当応答と候補ロールの応答を比較する', async () => {
@@ -393,6 +679,57 @@ describe('zap-unsupported check (service, Top10 対象テーマ)', () => {
     const { service: safeService, operator: safeOperator } = await flowWithSession({ browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })), repeater: secure });
     const safe = await safeService.runZapUnsupportedCheck(safeOperator, { themeNo: '13', role: 'admin', targetUrls: [`${BASE}/api/data`], params: { evilOrigins: 'https://evil.example' } });
     assert.equal(safe.status, 'pass');
+  });
+
+  test('テーマ14: mail subjectのCRLF値が正規値と同様に受理されれば検出する', async () => {
+    const repeater = rawTransport(() => ({ status: 200, body: '{"delivered":true}' }));
+    const { service, operator } = await flowWithSession({ browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })), repeater });
+    const summary = await service.runZapUnsupportedCheck(operator, { themeNo: '14', role: 'admin', targetUrls: [`${BASE}/mail`] });
+    assert.equal(summary.status, 'fail');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'mail-header-crlf')?.outcome, 'exposed');
+  });
+
+  test('テーマ15: レビュー済みLDAP変異で保護対象markerが返れば検出する', async () => {
+    const repeater = rawTransport(({ body }) => ({
+      status: 200,
+      body: body.includes('*)(uid=*') ? '{"rows":[{"cn":"Bob Private"}]}' : '{"rows":[{"cn":"Alice"}]}',
+    }));
+    const { service, operator } = await flowWithSession({ browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })), repeater });
+    const summary = await service.runZapUnsupportedCheck(operator, {
+      themeNo: '15',
+      role: 'admin',
+      targetUrls: [`${BASE}/directory`],
+      params: {
+        pattern: 'ldap-filter',
+        baselineJson: '{"uid":"alice"}',
+        variantJson: '{"uid":"*)(uid=*"}',
+        successMarker: 'Bob Private',
+      },
+    });
+    assert.equal(summary.status, 'fail');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'injection:ldap-filter')?.outcome, 'exposed');
+    assert.ok((summary.skipped ?? []).some((note) => note.includes('other interpreters')));
+  });
+
+  test('テーマ16: 公開URL対照から内部fixtureへの到達markerが返ればSSRFとして検出する', async () => {
+    const repeater = rawTransport(({ body }) => ({
+      status: 200,
+      body: body.includes('internal.fixture.test') ? '{"target":"private"}' : '{"target":"public"}',
+    }));
+    const { service, operator } = await flowWithSession({ browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })), repeater });
+    const summary = await service.runZapUnsupportedCheck(operator, {
+      themeNo: '16',
+      role: 'admin',
+      targetUrls: [`${BASE}/fetch`],
+      params: {
+        baselineJson: '{"url":"http://public.fixture.test/"}',
+        fieldName: 'url',
+        probeUrl: 'http://internal.fixture.test/',
+        successMarker: '"target":"private"',
+      },
+    });
+    assert.equal(summary.status, 'fail');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'ssrf-reviewed-probe')?.outcome, 'exposed');
   });
 
   test('テーマ18: リクエスト履歴サンプルの直列化署名を候補として観察する', async () => {
@@ -494,6 +831,89 @@ describe('zap-unsupported check (service, Top10 対象テーマ)', () => {
     await assert.rejects(safeService.runZapUnsupportedCheck(safeOperator, { themeNo: '23', targetUrls: [`http://fixture.target.test/`] }), /https:\/\/ target/u);
   });
 
+  test('テーマ24: ZAP対象外ヘッダーの緩い値とSec-Fetch未拒否を検出する', async () => {
+    const repeater = rawTransport(() => ({
+      status: 200,
+      headers: [
+        ['Referrer-Policy', 'unsafe-url'],
+        ['Cross-Origin-Opener-Policy', 'unsafe-none'],
+        ['Cross-Origin-Resource-Policy', 'cross-origin'],
+        ['Permissions-Policy', 'geolocation=*'],
+        ['Set-Cookie', '__Host-session=abc; Path=/'],
+      ],
+      body: 'ok',
+    }));
+    const { service, operator } = await flowWithSession({ browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })), repeater });
+    const summary = await service.runZapUnsupportedCheck(operator, {
+      themeNo: '24',
+      role: 'admin',
+      targetUrls: [`${BASE}/account`],
+      params: { sensitivePage: 'true' },
+    });
+    assert.equal(summary.status, 'fail');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'header:referrer-policy')?.outcome, 'exposed');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'cookie:__host-prefix')?.outcome, 'exposed');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'sec-fetch-cross-site')?.outcome, 'exposed');
+  });
+
+  test('テーマ25: OPTIONSのTRACE許可とTRACE echoを検出し、副作用メソッドは明示確認を要求する', async () => {
+    const repeater = rawTransport(({ method, body }) => {
+      if (method === 'OPTIONS') return { status: 204, headers: [['Allow', 'GET, POST, TRACE']] };
+      if (method === 'TRACE') return { status: 200, body };
+      return { status: 405 };
+    });
+    const { service, operator } = await flowWithSession({ browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })), repeater });
+    const summary = await service.runZapUnsupportedCheck(operator, { themeNo: '25', role: 'admin', targetUrls: [`${BASE}/account`] });
+    assert.equal(summary.status, 'fail');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'options-allow')?.outcome, 'exposed');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'method:trace')?.outcome, 'exposed');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'method:track')?.outcome, 'denied');
+    await assert.rejects(
+      service.runZapUnsupportedCheck(operator, { themeNo: '25', role: 'admin', targetUrls: [`${BASE}/account`], params: { methods: 'PUT' } }),
+      /allowStateChangingMethods=true/u,
+    );
+  });
+
+  test('テーマ26: GraphQLイントロスペクションと深いqueryの無制限実行を検出する', async () => {
+    const repeater = rawTransport(({ body }) => {
+      const query = (JSON.parse(body) as { query: string }).query;
+      if (query.includes('__schema')) return { status: 200, body: '{"data":{"__schema":{"queryType":{"name":"Query"}}}}' };
+      if (query.includes('child')) return { status: 200, body: '{"data":{"node":{"child":{"child":{"label":"x"}}}}}' };
+      return { status: 200, body: '{"data":{"__typename":"Query"}}' };
+    });
+    const { service, operator } = await flowWithSession({ browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })), repeater });
+    const summary = await service.runZapUnsupportedCheck(operator, {
+      themeNo: '26',
+      targetUrls: [`${BASE}/graphql`],
+      params: { deepQuery: '{node{child{child{label}}}}' },
+    });
+    assert.equal(summary.status, 'fail');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'graphql-introspection')?.outcome, 'exposed');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'graphql-depth-cost')?.outcome, 'exposed');
+  });
+
+  test('テーマ27: Cookie付きWebSocketが任意Originを受理すればCSWSHとして検出する', async () => {
+    const origins: string[] = [];
+    const webSocket: WebSocketTransportPort = {
+      exchange: async (input) => {
+        origins.push(input.origin ?? '');
+        input.onSentFrame(input.messages[0] ?? '');
+        input.onTextFrame('{"report":"secret"}');
+        return { sent: input.messages.length };
+      },
+    };
+    const { service, operator } = await flowWithSession({ browser: flowBrowser(() => ({ finalUrl: '', status: 200, bodyText: '', assertionsPassed: false })), webSocket });
+    const summary = await service.runZapUnsupportedCheck(operator, {
+      themeNo: '27',
+      role: 'admin',
+      targetUrls: [`${BASE}/socket`],
+      params: { evilOrigins: 'https://evil.example' },
+    });
+    assert.equal(summary.status, 'fail');
+    assert.deepEqual(origins, [BASE, 'https://evil.example']);
+    assert.equal(summary.results.find((probe) => probe.pattern.startsWith('websocket-cross-origin:'))?.outcome, 'exposed');
+  });
+
   test('テーマ29: DOM 観測の PII 疑い node を検出する', async () => {
     const domObserver: DomObservationPort = {
       observe: async ({ targetUrl }) => ({
@@ -517,6 +937,30 @@ describe('zap-unsupported check (service, Top10 対象テーマ)', () => {
     // 実 adapter と同じく nodes を返さない観測は判定保留 (未観測を問題なしにしない)。
     assert.equal(summary.results.find((probe) => probe.targetUrl.endsWith('/empty') && probe.pattern === 'pii-exposure')?.outcome, 'inconclusive');
     assert.ok(summary.results.find((probe) => probe.targetUrl.endsWith('/profile') && probe.pattern === 'pii-exposure')?.detail?.includes('confirmedUnmasked=1'));
+  });
+
+  test('テーマ30: 既存HTTP対象の版情報・Content-Type・directory listingを観測する', async () => {
+    const repeater = rawTransport(({ targetUrl }) => ({
+      status: 200,
+      headers: [
+        ['Server', targetUrl.endsWith('/versioned') ? 'Apache/2.4.65 (Debian)' : 'Apache'],
+        ['Content-Type', 'text/html; charset=UTF-8'],
+      ],
+      body: targetUrl.endsWith('/listing') ? '<title>Index of /uploads</title>' : '<html>ok</html>',
+    }));
+    const { service, operator } = await flowWithSession({
+      browser: flowBrowser(({ targetUrl }) => ({ finalUrl: targetUrl, status: 200, bodyText: '', assertionsPassed: false })),
+      repeater,
+    });
+    const summary = await service.runZapUnsupportedCheck(operator, {
+      themeNo: '30',
+      targetUrls: [`${BASE}/versioned`, `${BASE}/listing`],
+    });
+    assert.equal(summary.status, 'fail');
+    assert.equal(summary.results.find((probe) => probe.targetUrl.endsWith('/versioned') && probe.pattern === 'version-header:server')?.outcome, 'exposed');
+    assert.equal(summary.results.find((probe) => probe.targetUrl.endsWith('/listing') && probe.pattern === 'directory-listing')?.outcome, 'exposed');
+    assert.equal(summary.results.find((probe) => probe.pattern === 'response-content-type')?.outcome, 'denied');
+    assert.ok(summary.skipped?.some((entry) => entry.includes('common-path guessing')));
   });
 
   test('履歴と監査 event に結果が残り、秘密値・cookie 値を含まない', async () => {

@@ -184,7 +184,9 @@ function registerDesktopPathHandlers(
     const saved = await workspaceManager.saveReport(value.content, value.modelHash, value.reportId, model as ReportModel, value.profile, findingNarratives);
     rememberPath(saved.markdownPath);
     rememberPath(saved.wordPath);
+    rememberPath(saved.technicalAnnexHtmlPath);
     rememberPath(saved.structuredJsonPath);
+    rememberPath(saved.manifestPath);
     return saved;
   });
 
@@ -489,6 +491,8 @@ async function bootstrap(): Promise<void> {
     advancedTransport: engines.advancedTransport,
     domObserver: engines.domObserver,
     interactiveBrowser: engines.interactiveBrowser,
+    ...(engines.otpInbox === undefined ? {} : { otpInbox: engines.otpInbox }),
+    ...(engines.samlFixture === undefined ? {} : { samlFixture: engines.samlFixture }),
     runtimeBundleHash: engines.runtimeBundleHash,
   };
   const createProductService = (options: {

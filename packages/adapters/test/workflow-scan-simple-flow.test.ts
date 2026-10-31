@@ -129,7 +129,11 @@ describe('Simple mode workflow scan integration', () => {
     });
 
     const target = `${server.baseUrl}/vulnerabilities/sqli/`;
-    const { plan } = service.buildActiveScanPlan(OPERATOR, [target], undefined, { includeWorkflowScan: true });
+    const { plan } = service.buildActiveScanPlan(OPERATOR, [target], undefined, {
+      includeWorkflowScan: true,
+      guidelines: ['OWASP ASVS 5.0'],
+    });
+    assert.deepEqual(plan.guidelineIds, ['OWASP ASVS 5.0']);
     assert.deepEqual(plan.steps.map((step) => step.kind), ['active-scan', 'workflow-scan']);
     assert.equal(plan.steps.reduce((total, step) => total + step.limits.maxRequests, 0), plan.limits.maxRequests);
     assert.deepEqual(plan.steps[1]?.targetSnapshot, [new URL(server.baseUrl).origin + '/']);

@@ -16,6 +16,7 @@ import {
   forgeResetToken,
   judgeCorsPreflight,
   judgeCorsResponse,
+  judgeDirectoryListing,
   judgeInputRobustness,
   judgeIdorAccess,
   judgeLockout,
@@ -25,8 +26,10 @@ import {
   judgePiiExposure,
   judgePlainHttp,
   judgeReplay,
+  judgeResponseContentType,
   judgeSensitiveCache,
   judgeUserEnumeration,
+  judgeVersionDisclosure,
   mergeJsonFields,
   normalizeEnumerationResponse,
   parseDefaultCredentialPairs,
@@ -41,11 +44,22 @@ import {
 } from '@scopepilot2/core';
 
 describe('zap-unsupported domain (Top10 対象テーマ共通)', () => {
-  test('実装テーマ一覧は Top10 対象 15 テーマ (困難観点は除外済み)', () => {
-    assert.deepEqual([...ZAP_UNSUPPORTED_IMPLEMENTED_THEMES], ['1', '2', '3', '4', '5', '7', '10', '11', '13', '18', '20', '21', '22', '23', '29']);
+  test('実装テーマ一覧は25テーマ (未実装観点は除外済み)', () => {
+    assert.deepEqual([...ZAP_UNSUPPORTED_IMPLEMENTED_THEMES], ['1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '13', '14', '15', '16', '18', '20', '21', '22', '23', '24', '25', '26', '27', '29', '30']);
     assert.equal(requireImplementedTheme('13'), '13');
-    assert.throws(() => requireImplementedTheme('6'), /not implemented/u);
+    assert.throws(() => requireImplementedTheme('17'), /not implemented/u);
     assert.throws(() => requireImplementedTheme('999'), /not implemented/u);
+  });
+
+  test('テーマ30: 版番号・Content-Type・directory listingを保守的に判定する', () => {
+    assert.equal(judgeVersionDisclosure(null), 'denied');
+    assert.equal(judgeVersionDisclosure('Apache'), 'inconclusive');
+    assert.equal(judgeVersionDisclosure('Apache/2.4.65 (Debian)'), 'exposed');
+    assert.equal(judgeResponseContentType({ status: 200, bodyByteLength: 12, contentType: null }), 'exposed');
+    assert.equal(judgeResponseContentType({ status: 200, bodyByteLength: 12, contentType: 'text/html; charset=utf-8' }), 'denied');
+    assert.equal(judgeResponseContentType({ status: 204, bodyByteLength: 0, contentType: null }), 'denied');
+    assert.equal(judgeDirectoryListing('<title>Index of /uploads</title>'), 'exposed');
+    assert.equal(judgeDirectoryListing('<title>ScopePilot</title>'), 'denied');
   });
 
   test('送信数が案件上限を超える計画は validation error', () => {

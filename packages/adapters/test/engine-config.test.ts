@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { describe, test } from 'node:test';
 import { composeEngines, createCapabilitySnapshots, createExplorerEngine, createScanEngine, resolveEngineSelection } from '../src/engine-config.ts';
 import { PlaywrightExplorerAdapter } from '../src/playwright-explorer.ts';
+import { HttpSecurityFixtureOtpInbox, HttpSecurityFixtureSaml } from '../src/security-fixture.ts';
 import { ZapEngineAdapter } from '../src/zap-engine.ts';
 
 describe('production engine composition', () => {
@@ -44,12 +45,17 @@ describe('production engine composition', () => {
     const address = server.address();
     try {
       if (address === null || typeof address === 'string') throw new Error('expected TCP address');
-      const engines = await composeEngines({ SCOPEPILOT_ZAP_BASE_URL: `http://127.0.0.1:${address.port}` }, ['http://a.test']);
+      const engines = await composeEngines({
+        SCOPEPILOT_ZAP_BASE_URL: `http://127.0.0.1:${address.port}`,
+        SCOPEPILOT_SECURITY_FIXTURE_BASE_URL: 'http://127.0.0.1:4317',
+      }, ['http://a.test']);
       assert.equal(engines.mode, 'real');
       assert.ok(engines.explorer instanceof PlaywrightExplorerAdapter);
       assert.ok(engines.scanEngine instanceof ZapEngineAdapter);
       assert.equal(engines.scanEngine.engineVersion, 'zap 2.17.0');
       assert.equal(engines.capabilities.find((item) => item.engineKind === 'zap')?.source, 'measured');
+      assert.ok(engines.otpInbox instanceof HttpSecurityFixtureOtpInbox);
+      assert.ok(engines.samlFixture instanceof HttpSecurityFixtureSaml);
       assert.deepEqual(await engines.recoverHttpExchanges?.([{
         url: 'http://a.test/x', method: 'GET', pluginId: 'test', title: 'test finding',
       }]), [null], 'runtime ZAP API calls must not retain the 1.5 second startup probe timeout');

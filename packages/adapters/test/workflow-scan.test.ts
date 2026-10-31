@@ -16,6 +16,7 @@ import {
   analyzeSessionPattern,
   md5Hex,
   parseExternalScriptOrigins,
+  resolveWorkflowScanCheckIds,
   runWorkflowScan,
   tryGetHost,
   xorBytes,
@@ -150,9 +151,38 @@ describe('WorkflowScan (DVWA 18分類の網羅検出)', () => {
     assert.equal(result.checks.length, 0);
     assert.equal(server.loginAttempted, true);
   });
+
+  test('DS-221選択時は対応するチェックだけを実行する', async () => {
+    assert.ok(server !== undefined);
+    const checkIds = resolveWorkflowScanCheckIds(['デジタル庁 DS-221']);
+    const transport = createTransport(server.baseUrl, 1000, ['SecretPass123']);
+    const result = await runWorkflowScan(
+      { baseUrl: server.baseUrl, username: 'admin', password: 'SecretPass123', checkIds },
+      transport,
+      { createProbeTransport: () => createTransport(server!.baseUrl, 1000, ['SecretPass123']) },
+    );
+    const executed = new Set([
+      ...result.checks.map((check) => check.checkId),
+      ...result.skips.map((check) => check.checkId),
+    ]);
+    assert.ok(executed.has('csrf-password'));
+    assert.ok(executed.has('weak-session'));
+    assert.ok(!executed.has('xss-reflected'));
+    assert.ok(!executed.has('lfi'));
+  });
 });
 
 describe('WorkflowScan 純粋関数', () => {
+  test('ガイドライン選択でワークフローチェック集合を切り替える', () => {
+    assert.deepEqual(resolveWorkflowScanCheckIds([]), EXPECTED_CHECK_IDS);
+    assert.deepEqual(resolveWorkflowScanCheckIds(['OWASP ASVS 5.0']), EXPECTED_CHECK_IDS);
+    const ds221 = resolveWorkflowScanCheckIds(['デジタル庁 DS-221']);
+    assert.ok(ds221.includes('csrf-password'));
+    assert.ok(ds221.includes('weak-session'));
+    assert.ok(!ds221.includes('xss-reflected'));
+    assert.deepEqual(resolveWorkflowScanCheckIds(['デジタル庁 DS-221', 'OWASP WSTG 4.2']), EXPECTED_CHECK_IDS);
+  });
+
   test('セッションID系列からDVWAの生成規則を特定する', () => {
     assert.equal(analyzeSessionPattern(['1', '2', '3', '4'])?.name, '単純連番');
     const now = String(Math.floor(Date.now() / 1000));

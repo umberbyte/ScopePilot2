@@ -102,7 +102,9 @@ interface DesktopBridge {
   }): Promise<{
     readonly markdownPath: string;
     readonly wordPath: string;
+    readonly technicalAnnexHtmlPath: string;
     readonly structuredJsonPath: string;
+    readonly manifestPath: string;
   }>;
   analyzeMaterials(): Promise<{
     readonly provider: 'zcode' | 'codex' | 'claude';

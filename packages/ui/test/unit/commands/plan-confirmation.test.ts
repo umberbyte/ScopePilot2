@@ -8,6 +8,7 @@ const confirmation = (planHash: string): PlanConfirmation => ({
   planHash,
   confirmedBy: 'operator-1',
   confirmedAt: '2026-10-19T00:00:00.000Z',
+  guidelineIds: [],
   confirmedView: [],
 });
 

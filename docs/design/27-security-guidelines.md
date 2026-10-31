@@ -27,7 +27,13 @@
 - 初期の項目・template対応入力は[診断項目Excel](../WebAppPentestGuidelines_診断項目_ScopePilot_作業用.xlsx)とする。
   source hash、sheet、row、importer versionを保持するが、workbookをruntimeで直接解釈しない。ガイドライン6sheetの
   769行を`CheckCatalog`へ、ZAP対応/非対応sheetを`DiagnosticTemplateCatalog`の候補へ変換し、実行記録sheetは
-  A0 fixtureとして分離する。上流licenseと出典の検証済み部分だけを配布bundleへ昇格する。
+  A0 fixtureとして分離する。
+- 国内Web診断ガイドラインは、公式[WebAppPentestGuidelines](https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines)
+  第1.2版（2022-02-16公開）を第2の版固定sourceとする。commit
+  `bcc4df46a7371ea0860e0d0900a22f89286ce5b8`、公式Excel SHA-256
+  `bc25519a2b270e5c244cebdf26a08dd1387de7e08143f3ffbd71f2e8e5306dd8`、原本行2〜103を固定し、
+  `WAPG-1.2-001`〜`WAPG-1.2-102`へ一意に対応づける。licenseが明示されるまでは原文・payloadを再配布せず、
+  項目ID、公式link、原本行、ScopePilotのcoverage routeだけをbundleへ収録する。これによりcatalogは計871項目となる。
 
 ## 4. コンポーネント構成
 
@@ -84,7 +90,8 @@ CandidateSelector（core）:
 ## 9. 確定事項
 
 1. 初期bundleの必須catalogはWSTG、ASVS、OWASP Top 10とし、build時点のstable releaseをversion/hash固定する。
-   WebAppPentestGuidelinesは項目IDと公式linkだけを含め、licenseが明示されるまで本文・要約を再配布しない。
+   WebAppPentestGuidelinesは公式第1.2版の102項目を安定ID、公式link、原本行、coverage routeで保持し、
+   licenseが明示されるまで本文・payloadを再配布しない。
    AISVS、Cloud Native Top 10、DS-221はconditional catalogとする。旧769項目は[17](17-organizer-reporting.md)の
    `CheckCatalog`へ一方向変換し、guideline itemとはmany-to-many mappingにする。旧件数を初期catalogの完成条件にせず、
    source座標、根拠、reviewer、catalog versionがあるmappingだけを公開する。
@@ -101,6 +108,18 @@ CandidateSelector（core）:
    updateは新catalogを追加するだけで過去snapshotを書き換えない。項目番号変更は
    `Supersedes|SplitInto|MergedInto|NoMapping`の明示relationで表し、自動的に新番号へ置換しない。
    再診断は旧・新版を並べ、比較不能を表示できる。
+
+## 10. 実行計画への反映
+
+- Simple の選択値は `ExecutionPlan.guidelineIds` へ正規化して保存し、plan hash と確認内容の対象にする。
+  選択を変更した場合は既存 confirmation を再利用できず、再確認を要求する。
+- `workflow-scan` は選択ガイドラインからチェックID集合を解決してから実行する。未指定の旧計画は互換性のため
+  21チェックを実行する。ASVS、WSTG、OWASP Top 10、国内Web診断プロファイルは21チェック、DS-221は
+  workbookでDS項目へ直接対応づけられた9チェックを実行する。
+- 実行済み表示は、実際に検出または未検出として記録されたチェックIDと診断経路の対応がある場合だけ更新する。
+  選択外の経路を「実施済」と表示しない。
+- 実DVWAでASVS（21チェック）とDS-221（9チェック）の切替を回帰確認する。DVWAに存在しない機能は
+  vulnerabilitiesBoxを補助対象にし、対象機能も検証前提もない項目をモデルの推測だけで実施済みにしない。
 
 公式参照: [OWASP WSTG](https://github.com/OWASP/wstg)、[OWASP ASVS](https://owasp.org/projects/asvs)、
 [OWASP Top 10](https://owasp.org/projects/top-ten)、[デジタル庁 DS-221](https://www.digital.go.jp/resources/standard_guidelines)、

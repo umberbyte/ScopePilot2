@@ -41,6 +41,8 @@ export interface ExecutionPlan {
   readonly authorizationId: string;
   readonly operatorId: string;
   readonly targetRole: string;
+  /** 診断計画を構成したガイドライン。空配列は従来互換の全チェック実行を表す。 */
+  readonly guidelineIds: readonly string[];
   readonly steps: readonly PlanStep[];
   /** 案件の共有上限から step へ配分する前の plan 全体枠。 */
   readonly limits: PlanLimits;
@@ -56,6 +58,7 @@ export interface PlanHashInput {
   readonly authorizationId: string;
   readonly operatorId: string;
   readonly targetRole: string;
+  readonly guidelineIds: readonly string[];
   readonly steps: readonly {
     readonly kind: PlanStepKind;
     readonly operationClass: OperationClass;
@@ -76,6 +79,7 @@ export interface PlanConfirmation {
   readonly planHash: string;
   readonly confirmedBy: string;
   readonly confirmedAt: string;
+  readonly guidelineIds: readonly string[];
   readonly confirmedView: readonly {
     readonly kind: PlanStepKind;
     readonly targets: readonly string[];

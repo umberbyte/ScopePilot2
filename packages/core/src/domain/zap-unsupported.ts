@@ -15,11 +15,11 @@ import { domainError } from '@scopepilot2/contracts';
 import type { AuthBypassProbeOutcome } from './auth-bypass.ts';
 
 /** 実装済みテーマ (テーマ1を含む。A03 の実行ボタンと同期する)。 */
-export const ZAP_UNSUPPORTED_IMPLEMENTED_THEMES = ['1', '2', '3', '4', '5', '7', '10', '11', '13', '18', '20', '21', '22', '23', '29'] as const;
+export const ZAP_UNSUPPORTED_IMPLEMENTED_THEMES = ['1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '13', '14', '15', '16', '18', '20', '21', '22', '23', '24', '25', '26', '27', '29', '30'] as const;
 export type ZapUnsupportedThemeNo = (typeof ZAP_UNSUPPORTED_IMPLEMENTED_THEMES)[number];
 
 export interface ThemeCheckProbeResult {
-  readonly kind: 'browser' | 'flow' | 'login' | 'http' | 'fuzz' | 'dom' | 'nuclei';
+  readonly kind: 'browser' | 'flow' | 'login' | 'http' | 'fuzz' | 'dom' | 'nuclei' | 'websocket';
   readonly pattern: string;
   readonly targetUrl: string;
   readonly status: number | null;
@@ -168,6 +168,87 @@ export function judgeLockout(correctLoginAfterFailures: 'authenticated' | 'rejec
   if (correctLoginAfterFailures === 'rejected') {
     return 'denied';
   }
+  return 'inconclusive';
+}
+
+// ---------------------------------------------------------------------------
+// テーマ6: MFA (OTP) sub-check — 再利用・寿命・試行制限・宛先変更
+// ---------------------------------------------------------------------------
+
+/** 試行制限観察で事前合意の上送る誤 OTP 回数の上限 (handoff 2026-10-31 P1)。 */
+export const OTP_WRONG_ATTEMPTS_MAX = 5;
+/** 期限切れ再送のために実待機してよい上限 (長い実 sleep を製品経路に入れない)。 */
+export const OTP_EXPIRY_WAIT_MAX_MS = 120_000;
+/** OTP 受信待ち (許可済み fixture inbox) の上限。 */
+export const OTP_INBOX_TIMEOUT_MS = 30_000;
+
+/** OTP 提出の観測結果。marker は対象固有の受理marker (HTTP 2xx だけでは受理としない)。 */
+export type OtpSubmissionOutcome = 'accepted' | 'rejected' | 'unknown';
+
+/** HTTP status と受理 marker から OTP 提出結果を判定する。marker 未設定は unknown。 */
+export function judgeOtpSubmission(input: {
+  readonly status: number;
+  readonly markerFound: boolean | null;
+}): OtpSubmissionOutcome {
+  if (input.status === 401 || input.status === 403 || input.status >= 500) {
+    return 'rejected';
+  }
+  if (input.status >= 400) {
+    return 'rejected';
+  }
+  if (input.markerFound === true) return 'accepted';
+  if (input.markerFound === false) return 'rejected';
+  return 'unknown';
+}
+
+/**
+ * OTP sub-check 共通の境界判定。正常対照 (control) が受理されて初めて、
+ * action (使用済み再送・期限後提出・誤試行後の正規提出・再認証なし宛先変更) の
+ * 受理を exposed、拒否を denied とする。対照不成立・marker 不明は inconclusive。
+ */
+export function judgeOtpBoundary(input: {
+  readonly control: OtpSubmissionOutcome;
+  readonly action: OtpSubmissionOutcome;
+}): AuthBypassProbeOutcome {
+  if (input.control !== 'accepted') return 'inconclusive';
+  if (input.action === 'accepted') return 'exposed';
+  if (input.action === 'rejected') return 'denied';
+  return 'inconclusive';
+}
+
+/** 事前合意した誤 OTP 試行回数 (1..OTP_WRONG_ATTEMPTS_MAX)。 */
+export function planOtpWrongAttempts(count: number): number {
+  if (!Number.isInteger(count) || count < 1 || count > OTP_WRONG_ATTEMPTS_MAX) {
+    throw domainError('ValidationFailed', `otp wrong attempts must be 1..${OTP_WRONG_ATTEMPTS_MAX} (agreed small count only)`);
+  }
+  return count;
+}
+
+/**
+ * 期限切れ確認の待機時間。fixture が宣言した OTP 有効期限 (秒) に猶予を足し、
+ * 上限を超えるなら null (長い実待機を強要する fixture では sub-check を行わない)。
+ */
+export function planOtpExpiryWaitMs(expirySeconds: number): number | null {
+  if (!Number.isInteger(expirySeconds) || expirySeconds < 0 || expirySeconds > 600) {
+    throw domainError('ValidationFailed', 'otp expiry seconds must be 0..600 as declared by the fixture');
+  }
+  const waitMs = expirySeconds * 1_000 + 5_000;
+  return waitMs <= OTP_EXPIRY_WAIT_MAX_MS ? waitMs : null;
+}
+
+/**
+ * SAML assertion replay の判定。正常対照 (試験 IdP が正規発行した assertion による
+ * ログイン) が成立し、同一 assertion の再送が新しい session として受理された場合
+ * だけ exposed。対照不成立・新規 session との区別不能 (replayAccepted null) は
+ * inconclusive。assertion の生成・改ざんは行わない (handoff 2026-10-31 P2)。
+ */
+export function judgeSamlAssertionReplay(input: {
+  readonly controlAccepted: boolean;
+  readonly replayAccepted: boolean | null;
+}): AuthBypassProbeOutcome {
+  if (!input.controlAccepted) return 'inconclusive';
+  if (input.replayAccepted === true) return 'exposed';
+  if (input.replayAccepted === false) return 'denied';
   return 'inconclusive';
 }
 
@@ -490,4 +571,36 @@ export function judgeSensitiveCache(cacheControl: string | null): AuthBypassProb
 export function judgePiiExposure(piiNodeCount: number, confirmedUnmaskedSensitiveCount = 0): AuthBypassProbeOutcome {
   if (confirmedUnmaskedSensitiveCount > 0) return 'exposed';
   return piiNodeCount > 0 ? 'inconclusive' : 'denied';
+}
+
+// ---------------------------------------------------------------------------
+// テーマ30: 公開情報・設定面の観測
+// ---------------------------------------------------------------------------
+
+const VERSION_BEARING_HEADER = /\b\d+(?:\.\d+){1,3}(?:[-+._][A-Za-z0-9]+)*\b/u;
+const DIRECTORY_LISTING_MARKER = /(?:<title>\s*Index of\s+\/|<h1>\s*Index of\s+\/|Directory listing for\s+\/|\bApache\/\S+ Server at\b)/iu;
+
+/**
+ * Server 等の製品ヘッダーは、存在だけでは脆弱性と断定しない。具体的な版番号まで
+ * 公開されている場合だけ exposed、一般名のみは inconclusive、未送信は denied とする。
+ */
+export function judgeVersionDisclosure(value: string | null): AuthBypassProbeOutcome {
+  if (value === null || value.trim() === '') return 'denied';
+  return VERSION_BEARING_HEADER.test(value) ? 'exposed' : 'inconclusive';
+}
+
+/** body を返す成功応答で Content-Type が無い場合だけ露出とする。 */
+export function judgeResponseContentType(input: {
+  readonly status: number;
+  readonly bodyByteLength: number;
+  readonly contentType: string | null;
+}): AuthBypassProbeOutcome {
+  if (input.status === 204 || input.status === 304 || input.bodyByteLength === 0) return 'denied';
+  if (input.status < 200 || input.status >= 400) return 'inconclusive';
+  return input.contentType === null || input.contentType.trim() === '' ? 'exposed' : 'denied';
+}
+
+/** ディレクトリ一覧の既知マーカーだけを一時的に検査し、本文は保存しない。 */
+export function judgeDirectoryListing(bodyText: string): AuthBypassProbeOutcome {
+  return DIRECTORY_LISTING_MARKER.test(bodyText) ? 'exposed' : 'denied';
 }

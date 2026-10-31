@@ -25,7 +25,8 @@ import {
   buildAssuranceReport,
   hasCompleteFindingHttpEvidence,
   normalizeReportProfile,
-  renderAssuranceReport,
+  renderExecutiveReport,
+  renderTechnicalAnnexHtml,
   type ReportFindingNarrative,
   type ReportProfile,
 } from './assurance-report.ts';
@@ -69,7 +70,9 @@ export interface ActiveWorkspaceRepositories {
 export interface SavedReportFiles {
   readonly markdownPath: string;
   readonly wordPath: string;
+  readonly technicalAnnexHtmlPath: string;
   readonly structuredJsonPath: string;
+  readonly manifestPath: string;
 }
 
 export type ReportHttpEvidenceRecovery = (
@@ -414,14 +417,45 @@ export class DesktopWorkspaceManager {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const markdownPath = resolve(reportDirectory, `diagnostic-report-${stamp}.md`);
     const wordPath = resolve(reportDirectory, `diagnostic-report-${stamp}.docx`);
+    const technicalAnnexHtmlPath = resolve(reportDirectory, `diagnostic-report-${stamp}-technical-annex.html`);
     const structuredJsonPath = resolve(reportDirectory, `diagnostic-report-${stamp}.json`);
+    const manifestPath = resolve(reportDirectory, `diagnostic-report-${stamp}-manifest.json`);
     ensureChild(this.activeDirectory, markdownPath);
     ensureChild(this.activeDirectory, wordPath);
+    ensureChild(this.activeDirectory, technicalAnnexHtmlPath);
     ensureChild(this.activeDirectory, structuredJsonPath);
-    await writeFile(markdownPath, appendAssuranceHttpEvidenceMarkdown(content, structured), 'utf8');
-    await writeFile(structuredJsonPath, `${JSON.stringify(structured, null, 2)}\n`, 'utf8');
-    await writeFile(wordPath, await renderAssuranceReport(structured));
-    return { markdownPath, wordPath, structuredJsonPath };
+    ensureChild(this.activeDirectory, manifestPath);
+    const markdown = appendAssuranceHttpEvidenceMarkdown(content, structured);
+    const structuredJson = `${JSON.stringify(structured, null, 2)}\n`;
+    const executiveWord = await renderExecutiveReport(structured);
+    const technicalAnnexHtml = renderTechnicalAnnexHtml(structured);
+    const artifacts = [
+      { role: 'executive-report', path: wordPath, content: executiveWord },
+      { role: 'technical-annex', path: technicalAnnexHtmlPath, content: technicalAnnexHtml },
+      { role: 'technical-markdown', path: markdownPath, content: Buffer.from(markdown, 'utf8') },
+      { role: 'structured-report', path: structuredJsonPath, content: Buffer.from(structuredJson, 'utf8') },
+    ] as const;
+    for (const artifact of artifacts) await writeFile(artifact.path, artifact.content);
+    const manifest = {
+      formatVersion: '1',
+      reportId: structured.report.id,
+      modelHash: structured.modelHash,
+      generatedAt: structured.report.generatedAt,
+      counts: {
+        executiveFindingFamilies: new Set(structured.findings.map((finding) => finding.title.replace(/\s*[（(]検証レベル\s*[:：]\s*(?:low|medium|high)[）)]\s*$/iu, '').trim())).size,
+        technicalFindings: structured.findings.length,
+        sourceFindings: structured.findings.reduce((sum, finding) => sum + finding.sourceFindingIds.length, 0),
+        evidence: structured.evidence.length,
+      },
+      artifacts: artifacts.map((artifact) => ({
+        role: artifact.role,
+        fileName: basename(artifact.path),
+        bytes: artifact.content.byteLength,
+        sha256: createHash('sha256').update(artifact.content).digest('hex'),
+      })),
+    };
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+    return { markdownPath, wordPath, technicalAnnexHtmlPath, structuredJsonPath, manifestPath };
   }
 
   close(): void {

@@ -74,6 +74,23 @@ describe('desktop case workspace', () => {
     assert.match(markdown, /session=\[redacted\]/u);
     assert.doesNotMatch(markdown, /session=secret/u);
     assert.equal((await readFile(report.wordPath)).subarray(0, 2).toString('ascii'), 'PK', 'DOCXはZIPコンテナで生成する');
+    const technicalAnnexHtml = await readFile(report.technicalAnnexHtmlPath, 'utf8');
+    assert.match(technicalAnnexHtml, /^<!doctype html>/u, '技術証跡別冊はHTMLで生成する');
+    assert.match(technicalAnnexHtml, /position: fixed/u, '技術証跡別冊は固定ナビゲーションを持つ');
+    assert.match(technicalAnnexHtml, /href="#finding-1"/u, '指摘索引から詳細へ移動できる');
+    assert.match(technicalAnnexHtml, /GET \/profile\?id=2 HTTP\/1\.1/u);
+    assert.doesNotMatch(technicalAnnexHtml, /session=secret/u);
+    const manifest = JSON.parse(await readFile(report.manifestPath, 'utf8')) as {
+      modelHash: string;
+      counts: { executiveFindingFamilies: number; technicalFindings: number };
+      artifacts: readonly { role: string; fileName: string; sha256: string }[];
+    };
+    assert.equal(manifest.modelHash, 'model-hash-test');
+    assert.equal(manifest.counts.executiveFindingFamilies, 1);
+    assert.equal(manifest.counts.technicalFindings, 1);
+    assert.deepEqual(manifest.artifacts.map((artifact) => artifact.role), ['executive-report', 'technical-annex', 'technical-markdown', 'structured-report']);
+    assert.match(manifest.artifacts.find((artifact) => artifact.role === 'technical-annex')?.fileName ?? '', /-technical-annex\.html$/u);
+    assert.ok(manifest.artifacts.every((artifact) => /^[0-9a-f]{64}$/u.test(artifact.sha256)));
     const structured = JSON.parse(await readFile(report.structuredJsonPath, 'utf8')) as {
       templateId: string;
       engagement: { systemName: string };

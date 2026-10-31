@@ -145,6 +145,12 @@ export interface BootstrapOptions {
   readonly zapCapabilityVersion?: string;
   /** login 実行器 (design/f09 の runLogin 検証用 fake を渡す)。 */
   readonly loginExecutor?: import('../../../src/ports/engines.ts').LoginExecutorPort;
+  /** 許可済み fixture の OTP inbox (テーマ6 OTP sub-check 検証用 fake)。 */
+  readonly otpInbox?: import('../../../src/ports/engines.ts').OtpInboxPort;
+  /** 隔離試験 IdP/SP の SAML fixture (テーマ6 sub-check 検証用 fake)。 */
+  readonly samlFixture?: import('../../../src/ports/engines.ts').SamlFixturePort;
+  /** 実待機の差替え (期限切れ確認を即時解決にする等)。 */
+  readonly sleep?: (ms: number) => Promise<void>;
   readonly loginProxyServer?: string;
   /** explorer 差替え (session 対応 explorer の検証用)。 */
   readonly explorer?: import('../../../src/ports/engines.ts').ExplorationPort;
@@ -174,7 +180,7 @@ export interface TestFlow {
 
 /** 案件作成前の状態から使える service を組み立てる。 */
 export function createTestService(
-  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'loginProxyServer' | 'explorer' | 'repeaterTransport' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver' | 'interactiveBrowser' | 'nucleiRunner' | 'workflowScanTransportFactory'> & {
+  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'loginProxyServer' | 'explorer' | 'repeaterTransport' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver' | 'interactiveBrowser' | 'nucleiRunner' | 'workflowScanTransportFactory' | 'otpInbox' | 'samlFixture' | 'sleep'> & {
     runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
     caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
   } = {},
@@ -191,6 +197,9 @@ export function createTestService(
     runtimeBundleHash: 'test-runtime-bundle',
     ...(options.loginExecutor === undefined ? {} : { loginExecutor: options.loginExecutor }),
     ...(options.loginProxyServer === undefined ? {} : { loginProxyServer: options.loginProxyServer }),
+    ...(options.otpInbox === undefined ? {} : { otpInbox: options.otpInbox }),
+    ...(options.samlFixture === undefined ? {} : { samlFixture: options.samlFixture }),
+    ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
     ...(options.repeaterTransport === undefined ? {} : { repeaterTransport: options.repeaterTransport }),
     ...(options.fuzzTransport === undefined ? {} : { fuzzTransport: options.fuzzTransport }),
     ...(options.sequencerTransport === undefined ? {} : { sequencerTransport: options.sequencerTransport }),

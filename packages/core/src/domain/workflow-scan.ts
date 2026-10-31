@@ -131,7 +131,60 @@ export interface WorkflowScanOptions {
   readonly password: string;
   readonly maxRequests?: number;
   readonly securityLevels?: readonly string[];
+  /** 空または未指定なら従来互換で全チェックを実行する。 */
+  readonly checkIds?: readonly WorkflowScanCheckId[];
   readonly signal?: AbortSignal;
+}
+
+export const WORKFLOW_SCAN_CHECK_IDS = [
+  'brute-force',
+  'csrf-password',
+  'file-upload',
+  'captcha-bypass',
+  'weak-session',
+  'xss-reflected',
+  'xss-stored',
+  'xss-dom',
+  'csp-bypass',
+  'client-side-token',
+  'authorization-bypass',
+  'bac-open-access',
+  'open-redirect',
+  'crypto-xor',
+  'crypto-ecb',
+  'crypto-cbc-oracle',
+  'api-legacy',
+  'api-mass-assignment',
+  'api-command-injection',
+  'sqli-verify',
+  'lfi',
+] as const;
+
+export type WorkflowScanCheckId = (typeof WORKFLOW_SCAN_CHECK_IDS)[number];
+
+const ALL_WORKFLOW_CHECKS: readonly WorkflowScanCheckId[] = WORKFLOW_SCAN_CHECK_IDS;
+const WEB_TECHNICAL_CHECKS: readonly WorkflowScanCheckId[] = ALL_WORKFLOW_CHECKS;
+const DS221_CHECKS: readonly WorkflowScanCheckId[] = [
+  'csrf-password',
+  'file-upload',
+  'weak-session',
+  'authorization-bypass',
+  'bac-open-access',
+  'api-command-injection',
+  'crypto-xor',
+  'crypto-ecb',
+  'crypto-cbc-oracle',
+];
+
+/** 選択ガイドラインから、この実装が実行可能なワークフローチェックを決める。 */
+export function resolveWorkflowScanCheckIds(guidelines: readonly string[]): readonly WorkflowScanCheckId[] {
+  if (guidelines.length === 0) return ALL_WORKFLOW_CHECKS;
+  const selected = new Set<WorkflowScanCheckId>();
+  for (const guideline of guidelines) {
+    const checks = guideline === 'デジタル庁 DS-221' ? DS221_CHECKS : WEB_TECHNICAL_CHECKS;
+    for (const check of checks) selected.add(check);
+  }
+  return ALL_WORKFLOW_CHECKS.filter((check) => selected.has(check));
 }
 
 export interface WorkflowScanHooks {
@@ -1715,32 +1768,32 @@ function levelSuffix(level: string): string {
 // オーケストレーション
 // ---------------------------------------------------------------------------
 
-const LEVEL_SCOPED_CHECKS: readonly ((ctx: CheckContext, options: WorkflowScanOptions) => Promise<void>)[] = [
-  (ctx, options) => runCsrfCheck(ctx, options.password),
-  runFileUploadCheck,
-  (ctx, options) => runCaptchaBypassCheck(ctx, options.password),
-  runWeakSessionCheck,
-  runXssReflectedCheck,
-  runXssStoredCheck,
-  runCspBypassCheck,
-  runClientSideTokenCheck,
-  runXssDomCheck,
-  runAuthorizationBypassCheck,
-  runBacOpenAccessCheck,
-  runCryptoXorCheck,
-  runCryptoEcbCheck,
-  runCryptoCbcOracleCheck,
-  runSqliVerificationCheck,
-  runLfiCheck,
+const LEVEL_SCOPED_CHECKS: readonly { readonly id: WorkflowScanCheckId; readonly run: (ctx: CheckContext, options: WorkflowScanOptions) => Promise<void> }[] = [
+  { id: 'csrf-password', run: (ctx, options) => runCsrfCheck(ctx, options.password) },
+  { id: 'file-upload', run: runFileUploadCheck },
+  { id: 'captcha-bypass', run: (ctx, options) => runCaptchaBypassCheck(ctx, options.password) },
+  { id: 'weak-session', run: runWeakSessionCheck },
+  { id: 'xss-reflected', run: runXssReflectedCheck },
+  { id: 'xss-stored', run: runXssStoredCheck },
+  { id: 'csp-bypass', run: runCspBypassCheck },
+  { id: 'client-side-token', run: runClientSideTokenCheck },
+  { id: 'xss-dom', run: runXssDomCheck },
+  { id: 'authorization-bypass', run: runAuthorizationBypassCheck },
+  { id: 'bac-open-access', run: runBacOpenAccessCheck },
+  { id: 'crypto-xor', run: runCryptoXorCheck },
+  { id: 'crypto-ecb', run: runCryptoEcbCheck },
+  { id: 'crypto-cbc-oracle', run: runCryptoCbcOracleCheck },
+  { id: 'sqli-verify', run: runSqliVerificationCheck },
+  { id: 'lfi', run: runLfiCheck },
 ];
 
-const ONCE_CHECKS: readonly ((ctx: CheckContext) => Promise<void>)[] = [
-  runBruteForceCheck,
-  runXssDomScriptsCheck,
-  runOpenRedirectCheck,
-  runApiLegacyCheck,
-  runApiMassAssignmentCheck,
-  runApiCommandInjectionCheck,
+const ONCE_CHECKS: readonly { readonly id: WorkflowScanCheckId; readonly run: (ctx: CheckContext) => Promise<void> }[] = [
+  { id: 'brute-force', run: runBruteForceCheck },
+  { id: 'xss-dom', run: runXssDomScriptsCheck },
+  { id: 'open-redirect', run: runOpenRedirectCheck },
+  { id: 'api-legacy', run: runApiLegacyCheck },
+  { id: 'api-mass-assignment', run: runApiMassAssignmentCheck },
+  { id: 'api-command-injection', run: runApiCommandInjectionCheck },
 ];
 
 /**
@@ -1758,6 +1811,7 @@ export async function runWorkflowScan(
   const startedAt = new Date().toISOString();
   const marker = `sp${Array.from({ length: 12 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;
   const levels = options.securityLevels ?? ['low', 'medium', 'high'];
+  const enabledChecks = new Set(options.checkIds === undefined || options.checkIds.length === 0 ? ALL_WORKFLOW_CHECKS : options.checkIds);
   const passwordVerifier =
     hooks.createProbeTransport === undefined
       ? undefined
@@ -1789,11 +1843,12 @@ export async function runWorkflowScan(
         passwordVerifier,
       };
       for (const check of LEVEL_SCOPED_CHECKS) {
+        if (!enabledChecks.has(check.id)) continue;
         throwIfAborted(options.signal);
         if (transport.requestCount >= maxRequests) {
           throw domainError('OutOfScope', `ワークフロー診断のリクエスト上限（${String(maxRequests)}件）に達しました。`);
         }
-        await check(ctx, options);
+        await check.run(ctx, options);
       }
     }
     const once: CheckContext = {
@@ -1807,11 +1862,12 @@ export async function runWorkflowScan(
       passwordVerifier,
     };
     for (const check of ONCE_CHECKS) {
+      if (!enabledChecks.has(check.id)) continue;
       throwIfAborted(options.signal);
       if (transport.requestCount >= maxRequests) {
         throw domainError('OutOfScope', `ワークフロー診断のリクエスト上限（${String(maxRequests)}件）に達しました。`);
       }
-      await check(once);
+      await check.run(once);
     }
   } finally {
     // 対象のセキュリティレベルを元へ戻す。

@@ -46,6 +46,15 @@ export interface ReportCoverage {
     readonly status: 'delegated' | 'executed' | 'needs-input' | 'unavailable';
     readonly detail: string;
   }[];
+  readonly guidelineRoutes?: readonly {
+    readonly routeId: string;
+    readonly themeNo: string;
+    readonly guidelineIds: readonly string[];
+    readonly status: 'delegated' | 'executed' | 'needs-input' | 'unavailable';
+    readonly detail: string;
+    readonly checkId?: string;
+    readonly checkStatus?: 'pass' | 'fail' | 'inconclusive';
+  }[];
   readonly delegatedSteps: readonly {
     readonly stepId: string;
     readonly engineKind: EngineKind;

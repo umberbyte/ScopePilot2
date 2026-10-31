@@ -1,18 +1,46 @@
 {
-  "schemaVersion": "scopepilot2.catalog.v1",
+  "schemaVersion": "scopepilot2.catalog.v2",
   "generator": {
     "tool": "@scopepilot2/guideline-catalog",
-    "version": 1
+    "version": 2
   },
   "source": {
     "workbookPath": "docs/WebAppPentestGuidelines_診断項目_ScopePilot_作業用.xlsx",
     "sha256": "33d32b195f84a36a77dd0eadeecfb490d0034a6dc6b2b41803af5ac8c99b882c",
     "importerVersion": 1
   },
+  "sources": [
+    {
+      "id": "scopepilot-working-workbook",
+      "kind": "workbook",
+      "version": "scopepilot-working-copy-2026-10-18",
+      "sourceUrl": "",
+      "workbookPath": "docs/WebAppPentestGuidelines_診断項目_ScopePilot_作業用.xlsx",
+      "sha256": "33d32b195f84a36a77dd0eadeecfb490d0034a6dc6b2b41803af5ac8c99b882c",
+      "importerVersion": 1,
+      "itemCount": 769
+    },
+    {
+      "id": "webapp-pentest-guidelines-v1.2",
+      "kind": "upstream-link-only",
+      "version": "1.2",
+      "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+      "workbookPath": "WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+      "sha256": "bc25519a2b270e5c244cebdf26a08dd1387de7e08143f3ffbd71f2e8e5306dd8",
+      "importerVersion": 1,
+      "itemCount": 102,
+      "repositoryCommit": "bcc4df46a7371ea0860e0d0900a22f89286ce5b8",
+      "publishedAt": "2022-02-16"
+    }
+  ],
   "guidelines": [
     {
       "sheet": "OWASP Top 10-2025",
       "sourceNote": "出典: OWASP Top 10:2025 (https://top10.owasp.org/2025/)。各カテゴリの説明・Notable CWE・How to prevent を基に診断項目へ分解。Top 10 は網羅的な診断基準ではなくリスク分類であり、項目名だけで脆弱性を判定しない。実際の検証は ZAP 等の診断ツールの範囲で行う。",
+      "sourceId": "scopepilot-working-workbook",
+      "version": "scopepilot-working-copy-2026-10-18",
+      "sourceUrl": "",
+      "linkOnly": false,
       "checks": [
         {
           "sheet": "OWASP Top 10-2025",
@@ -571,6 +599,10 @@
     {
       "sheet": "OWASP ASVS 5.0",
       "sourceNote": "出典: OWASP Application Security Verification Standard 5.0.0 (https://github.com/OWASP/ASVS)。全要件を診断項目へ1:1〜1:Nで対応。レベルは適用開始レベル（L1は全レベルに適用）。『資料で確認』はブラックボックス探索では観測困難で、設計・運用資料やヒアリングが必要な項目。",
+      "sourceId": "scopepilot-working-workbook",
+      "version": "scopepilot-working-copy-2026-10-18",
+      "sourceUrl": "",
+      "linkOnly": false,
       "checks": [
         {
           "sheet": "OWASP ASVS 5.0",
@@ -4717,6 +4749,10 @@
     {
       "sheet": "OWASP WSTG 4.2",
       "sourceNote": "出典: OWASP Web Security Testing Guide v4.2『4. Web Application Security Testing』(https://owasp.org/www-project-web-security-testing-guide/)。各テストケース(WSTG-ID)を診断項目化。ScopePilotはWSTG-INFO-06(入口特定)を軸に候補選定を行う。実際の検証はZAP等の範囲で実施し、攻撃文字列は本資料に記載しない。",
+      "sourceId": "scopepilot-working-workbook",
+      "version": "scopepilot-working-copy-2026-10-18",
+      "sourceUrl": "",
+      "linkOnly": false,
       "checks": [
         {
           "sheet": "OWASP WSTG 4.2",
@@ -5887,6 +5923,10 @@
     {
       "sheet": "OWASP AISVS 1.01",
       "sourceNote": "出典: OWASP AI Security Verification Standard 1.01 (https://github.com/OWASP/AISVS)。実際にAI機能があると確認した場合のみ適用する。URLにAI関連語があるだけでは確定しない。多くはモデル/学習/運用の内部に関わり、外形探索では観測困難なため資料・設計・ヒアリングでの確認が中心。レベル: 1=基本,2=機微/重要判断,3=高保証。",
+      "sourceId": "scopepilot-working-workbook",
+      "version": "scopepilot-working-copy-2026-10-18",
+      "sourceUrl": "",
+      "linkOnly": false,
       "checks": [
         {
           "sheet": "OWASP AISVS 1.01",
@@ -8449,6 +8489,10 @@
     {
       "sheet": "OWASP CNAS Top 10",
       "sourceNote": "出典: OWASP Cloud Native Application Security Top 10 暫定版 (2022, index.md)。各項目ページはテンプレートのみのため、index.md掲載の例から診断項目へ分解。対象がクラウドネイティブ構成(コンテナ/オーケストレーション/クラウド)に該当する場合のみ参考とする。構成確認はWeb外形診断の範囲外が多く、資料・設定レビュー・プラットフォーム診断と連携する。",
+      "sourceId": "scopepilot-working-workbook",
+      "version": "scopepilot-working-copy-2026-10-18",
+      "sourceUrl": "",
+      "linkOnly": false,
       "checks": [
         {
           "sheet": "OWASP CNAS Top 10",
@@ -8767,6 +8811,10 @@
     {
       "sheet": "デジタル庁 DS-221",
       "sourceNote": "出典: デジタル庁『DS-221 政府情報システムにおける脆弱性診断導入ガイドライン』(2024-02-06)。付録A(表4-1 プラットフォーム診断/表4-2 Webアプリ診断)の検出対象脆弱性種別と、3章の実施要件を診断項目化。公共部門向けの参考資料で、案件への適用可否は人が決める。Webアプリ診断の検出基準は IPA/NISC/WebAppPentestGuidelines を網羅する前提。",
+      "sourceId": "scopepilot-working-workbook",
+      "version": "scopepilot-working-copy-2026-10-18",
+      "sourceUrl": "",
+      "linkOnly": false,
       "checks": [
         {
           "sheet": "デジタル庁 DS-221",
@@ -9271,6 +9319,1834 @@
           "method": "影響/DoS項目の事前合意・許可を確認",
           "suspectedBehavior": "無断で高リスク実施",
           "safeState": "事前合意/許可"
+        }
+      ]
+    },
+    {
+      "sheet": "WebAppPentestGuidelines v1.2",
+      "sourceNote": "公式第1.2版（2022-02-16公開、commit bcc4df46a7371ea0860e0d0900a22f89286ce5b8）。license未確認のため本文・payloadは再配布せず、No.1〜102の安定ID、原本行、公式link、ScopePilot coverage routeだけを収録する。",
+      "sourceId": "webapp-pentest-guidelines-v1.2",
+      "version": "1.2",
+      "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+      "linkOnly": true,
+      "checks": [
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 2,
+          "no": "1",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-001",
+          "requirement": "公式ガイドライン No.1（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-001",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:sqli-verify",
+            "zap:sql-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 3,
+          "no": "2",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-002",
+          "requirement": "公式ガイドライン No.2（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-002",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:sqli-verify",
+            "zap:sql-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 4,
+          "no": "3",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-003",
+          "requirement": "公式ガイドライン No.3（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-003",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:sqli-verify",
+            "zap:sql-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 5,
+          "no": "4",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-004",
+          "requirement": "公式ガイドライン No.4（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-004",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:sqli-verify",
+            "zap:sql-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 6,
+          "no": "5",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-005",
+          "requirement": "公式ガイドライン No.5（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-005",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:sqli-verify",
+            "zap:sql-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 7,
+          "no": "6",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-006",
+          "requirement": "公式ガイドライン No.6（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-006",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:sqli-verify",
+            "zap:sql-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 8,
+          "no": "7",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-007",
+          "requirement": "公式ガイドライン No.7（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-007",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:api-command-injection",
+            "zap:command-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 9,
+          "no": "8",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-008",
+          "requirement": "公式ガイドライン No.8（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-008",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:api-command-injection",
+            "zap:command-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 10,
+          "no": "9",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-009",
+          "requirement": "公式ガイドライン No.9（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-009",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:api-command-injection",
+            "zap:command-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 11,
+          "no": "10",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-010",
+          "requirement": "公式ガイドライン No.10（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-010",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:api-command-injection",
+            "zap:command-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 12,
+          "no": "11",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-011",
+          "requirement": "公式ガイドライン No.11（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-011",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:api-command-injection",
+            "zap:command-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 13,
+          "no": "12",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-012",
+          "requirement": "公式ガイドライン No.12（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-012",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:api-command-injection",
+            "zap:command-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 14,
+          "no": "13",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-013",
+          "requirement": "公式ガイドライン No.13（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-013",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:api-command-injection",
+            "zap:command-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 15,
+          "no": "14",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-014",
+          "requirement": "公式ガイドライン No.14（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-014",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:api-command-injection",
+            "zap:command-injection"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 16,
+          "no": "15",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-015",
+          "requirement": "公式ガイドライン No.15（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-015",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:crlf-response-splitting"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 17,
+          "no": "16",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-016",
+          "requirement": "公式ガイドライン No.16（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-016",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:crlf-response-splitting"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 18,
+          "no": "17",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-017",
+          "requirement": "公式ガイドライン No.17（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-017",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:14"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 19,
+          "no": "18",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-018",
+          "requirement": "公式ガイドライン No.18（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-018",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:xss-reflected",
+            "workflow:xss-stored",
+            "workflow:xss-dom",
+            "zap:xss"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 20,
+          "no": "19",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-019",
+          "requirement": "公式ガイドライン No.19（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-019",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:xss-reflected",
+            "workflow:xss-stored",
+            "workflow:xss-dom",
+            "zap:xss"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 21,
+          "no": "20",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-020",
+          "requirement": "公式ガイドライン No.20（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-020",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:xss-reflected",
+            "workflow:xss-stored",
+            "workflow:xss-dom",
+            "zap:xss"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 22,
+          "no": "21",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-021",
+          "requirement": "公式ガイドライン No.21（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-021",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:xss-reflected",
+            "workflow:xss-stored",
+            "workflow:xss-dom",
+            "zap:xss"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 23,
+          "no": "22",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-022",
+          "requirement": "公式ガイドライン No.22（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-022",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:xss-reflected",
+            "workflow:xss-stored",
+            "workflow:xss-dom",
+            "zap:xss"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 24,
+          "no": "23",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-023",
+          "requirement": "公式ガイドライン No.23（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-023",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:xss-reflected",
+            "workflow:xss-stored",
+            "workflow:xss-dom",
+            "zap:xss"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 25,
+          "no": "24",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-024",
+          "requirement": "公式ガイドライン No.24（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-024",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:xss-reflected",
+            "workflow:xss-stored",
+            "workflow:xss-dom",
+            "zap:xss"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 26,
+          "no": "25",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-025",
+          "requirement": "公式ガイドライン No.25（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-025",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:28"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 27,
+          "no": "26",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-026",
+          "requirement": "公式ガイドライン No.26（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-026",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:28"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 28,
+          "no": "27",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-027",
+          "requirement": "公式ガイドライン No.27（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-027",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:15"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 29,
+          "no": "28",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-028",
+          "requirement": "公式ガイドライン No.28（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-028",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:15"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 30,
+          "no": "29",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-029",
+          "requirement": "公式ガイドライン No.29（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-029",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:lfi",
+            "zap:path-traversal"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 31,
+          "no": "30",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-030",
+          "requirement": "公式ガイドライン No.30（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-030",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:lfi",
+            "zap:path-traversal"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 32,
+          "no": "31",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-031",
+          "requirement": "公式ガイドライン No.31（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-031",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:lfi",
+            "zap:path-traversal"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 33,
+          "no": "32",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-032",
+          "requirement": "公式ガイドライン No.32（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-032",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:lfi",
+            "zap:path-traversal"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 34,
+          "no": "33",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-033",
+          "requirement": "公式ガイドライン No.33（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-033",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:lfi",
+            "zap:path-traversal"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 35,
+          "no": "34",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-034",
+          "requirement": "公式ガイドライン No.34（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-034",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:lfi",
+            "zap:path-traversal"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 36,
+          "no": "35",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-035",
+          "requirement": "公式ガイドライン No.35（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-035",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:lfi",
+            "zap:path-traversal"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 37,
+          "no": "36",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-036",
+          "requirement": "公式ガイドライン No.36（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-036",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:file-upload",
+            "zap-unsupported:19"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 38,
+          "no": "37",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-037",
+          "requirement": "公式ガイドライン No.37（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-037",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:file-upload",
+            "zap-unsupported:19"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 39,
+          "no": "38",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-038",
+          "requirement": "公式ガイドライン No.38（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-038",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:file-upload",
+            "zap-unsupported:19"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 40,
+          "no": "39",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-039",
+          "requirement": "公式ガイドライン No.39（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-039",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:file-upload",
+            "zap-unsupported:19"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 41,
+          "no": "40",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-040",
+          "requirement": "公式ガイドライン No.40（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-040",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:file-upload",
+            "zap-unsupported:19"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 42,
+          "no": "41",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-041",
+          "requirement": "公式ガイドライン No.41（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-041",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:file-upload",
+            "zap-unsupported:19"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 43,
+          "no": "42",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-042",
+          "requirement": "公式ガイドライン No.42（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-042",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:file-upload",
+            "zap-unsupported:19"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 44,
+          "no": "43",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-043",
+          "requirement": "公式ガイドライン No.43（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-043",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:file-upload",
+            "zap-unsupported:19"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 45,
+          "no": "44",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-044",
+          "requirement": "公式ガイドライン No.44（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-044",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:file-upload",
+            "zap-unsupported:19"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 46,
+          "no": "45",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-045",
+          "requirement": "公式ガイドライン No.45（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-045",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:file-upload",
+            "zap-unsupported:19"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 47,
+          "no": "46",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-046",
+          "requirement": "公式ガイドライン No.46（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-046",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:file-upload",
+            "zap-unsupported:19"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 48,
+          "no": "47",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-047",
+          "requirement": "公式ガイドライン No.47（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-047",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:xxe"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 49,
+          "no": "48",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-048",
+          "requirement": "公式ガイドライン No.48（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-048",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:xxe"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 50,
+          "no": "49",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-049",
+          "requirement": "公式ガイドライン No.49（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-049",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:xxe"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 51,
+          "no": "50",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-050",
+          "requirement": "公式ガイドライン No.50（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-050",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:xxe"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 52,
+          "no": "51",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-051",
+          "requirement": "公式ガイドライン No.51（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-051",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:xxe"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 53,
+          "no": "52",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-052",
+          "requirement": "公式ガイドライン No.52（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-052",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:xxe"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 54,
+          "no": "53",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-053",
+          "requirement": "公式ガイドライン No.53（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-053",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:open-redirect",
+            "zap:open-redirect"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 55,
+          "no": "54",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-054",
+          "requirement": "公式ガイドライン No.54（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-054",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:open-redirect",
+            "zap:open-redirect"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 56,
+          "no": "55",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-055",
+          "requirement": "公式ガイドライン No.55（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-055",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:open-redirect",
+            "zap:open-redirect"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 57,
+          "no": "56",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-056",
+          "requirement": "公式ガイドライン No.56（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-056",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:18"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 58,
+          "no": "57",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-057",
+          "requirement": "公式ガイドライン No.57（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-057",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:16"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 59,
+          "no": "58",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-058",
+          "requirement": "公式ガイドライン No.58（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-058",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:16"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 60,
+          "no": "59",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-059",
+          "requirement": "公式ガイドライン No.59（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-059",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:16"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 61,
+          "no": "60",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-060",
+          "requirement": "公式ガイドライン No.60（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-060",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:16"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 62,
+          "no": "61",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-061",
+          "requirement": "公式ガイドライン No.61（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-061",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:27"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 63,
+          "no": "62",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-062",
+          "requirement": "公式ガイドライン No.62（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-062",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:clickjacking"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 64,
+          "no": "63",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-063",
+          "requirement": "公式ガイドライン No.63（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-063",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:clickjacking"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 65,
+          "no": "64",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-064",
+          "requirement": "公式ガイドライン No.64（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-064",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:1"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 66,
+          "no": "65",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-065",
+          "requirement": "公式ガイドライン No.65（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-065",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:1"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 67,
+          "no": "66",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-066",
+          "requirement": "公式ガイドライン No.66（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-066",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:8"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 68,
+          "no": "67",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-067",
+          "requirement": "公式ガイドライン No.67（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-067",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:8"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 69,
+          "no": "68",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-068",
+          "requirement": "公式ガイドライン No.68（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-068",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:brute-force",
+            "zap-unsupported:5"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 70,
+          "no": "69",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-069",
+          "requirement": "公式ガイドライン No.69（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-069",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:3"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 71,
+          "no": "70",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-070",
+          "requirement": "公式ガイドライン No.70（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-070",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:3"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 72,
+          "no": "71",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-071",
+          "requirement": "公式ガイドライン No.71（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-071",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:3"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 73,
+          "no": "72",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-072",
+          "requirement": "公式ガイドライン No.72（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-072",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:3"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 74,
+          "no": "73",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-073",
+          "requirement": "公式ガイドライン No.73（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-073",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:3"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 75,
+          "no": "74",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-074",
+          "requirement": "公式ガイドライン No.74（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-074",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:4"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 76,
+          "no": "75",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-075",
+          "requirement": "公式ガイドライン No.75（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-075",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:4"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 77,
+          "no": "76",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-076",
+          "requirement": "公式ガイドライン No.76（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-076",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:weak-session",
+            "zap-unsupported:8"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 78,
+          "no": "77",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-077",
+          "requirement": "公式ガイドライン No.77（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-077",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:weak-session",
+            "zap-unsupported:8"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 79,
+          "no": "78",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-078",
+          "requirement": "公式ガイドライン No.78（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-078",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:weak-session",
+            "zap-unsupported:8"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 80,
+          "no": "79",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-079",
+          "requirement": "公式ガイドライン No.79（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-079",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:authorization-bypass",
+            "workflow:bac-open-access",
+            "zap-unsupported:10"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 81,
+          "no": "80",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-080",
+          "requirement": "公式ガイドライン No.80（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-080",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:authorization-bypass",
+            "workflow:bac-open-access",
+            "zap-unsupported:10"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 82,
+          "no": "81",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-081",
+          "requirement": "公式ガイドライン No.81（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-081",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:authorization-bypass",
+            "workflow:bac-open-access",
+            "zap-unsupported:10"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 83,
+          "no": "82",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-082",
+          "requirement": "公式ガイドライン No.82（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-082",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:csrf-password",
+            "zap-unsupported:12"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 84,
+          "no": "83",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-083",
+          "requirement": "公式ガイドライン No.83（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-083",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:csrf-password",
+            "zap-unsupported:12"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 85,
+          "no": "84",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-084",
+          "requirement": "公式ガイドライン No.84（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-084",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "workflow:csrf-password",
+            "zap-unsupported:12"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 86,
+          "no": "85",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-085",
+          "requirement": "公式ガイドライン No.85（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-085",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 87,
+          "no": "86",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-086",
+          "requirement": "公式ガイドライン No.86（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-086",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 88,
+          "no": "87",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-087",
+          "requirement": "公式ガイドライン No.87（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-087",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 89,
+          "no": "88",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-088",
+          "requirement": "公式ガイドライン No.88（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-088",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 90,
+          "no": "89",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-089",
+          "requirement": "公式ガイドライン No.89（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-089",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 91,
+          "no": "90",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-090",
+          "requirement": "公式ガイドライン No.90（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-090",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 92,
+          "no": "91",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-091",
+          "requirement": "公式ガイドライン No.91（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-091",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 93,
+          "no": "92",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-092",
+          "requirement": "公式ガイドライン No.92（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-092",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 94,
+          "no": "93",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-093",
+          "requirement": "公式ガイドライン No.93（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-093",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 95,
+          "no": "94",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-094",
+          "requirement": "公式ガイドライン No.94（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-094",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 96,
+          "no": "95",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-095",
+          "requirement": "公式ガイドライン No.95（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-095",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 97,
+          "no": "96",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-096",
+          "requirement": "公式ガイドライン No.96（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-096",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 98,
+          "no": "97",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-097",
+          "requirement": "公式ガイドライン No.97（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-097",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:passive-information-disclosure",
+            "zap-unsupported:29"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 99,
+          "no": "98",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-098",
+          "requirement": "公式ガイドライン No.98（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-098",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:directory-listing"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 100,
+          "no": "99",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-099",
+          "requirement": "公式ガイドライン No.99（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-099",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:25"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 101,
+          "no": "100",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-100",
+          "requirement": "公式ガイドライン No.100（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-100",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap-unsupported:25"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 102,
+          "no": "101",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-101",
+          "requirement": "公式ガイドライン No.101（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-101",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "zap:forced-browsing",
+            "manual-review:published-surface"
+          ]
+        },
+        {
+          "sheet": "WebAppPentestGuidelines v1.2",
+          "row": 103,
+          "no": "102",
+          "chapter": "WebAppPentestGuidelines v1.2",
+          "itemId": "WAPG-1.2-102",
+          "requirement": "公式ガイドライン No.102（本文は公式Excel参照）",
+          "checkItem": "WAPG-1.2-102",
+          "method": "公式Excelの該当行を参照し、ScopePilot coverage routeの承認済み検査を実行する",
+          "suspectedBehavior": "公式Excelの「脆弱性があると疑われる挙動」を参照",
+          "safeState": "公式Excelの問題なし判定を参照",
+          "sourceId": "webapp-pentest-guidelines-v1.2",
+          "sourceUrl": "https://github.com/WebAppPentestGuidelines/WebAppPentestGuidelines/blob/bcc4df46a7371ea0860e0d0900a22f89286ce5b8/WebAppPentestGuidelines/WebAppPentestGuidelines.xlsx",
+          "coverageRoutes": [
+            "nuclei:known-vulnerabilities",
+            "zap:technology-detection"
+          ]
         }
       ]
     }
@@ -11312,9 +13188,9 @@
     }
   ],
   "counts": {
-    "guidelineChecks": 769,
+    "guidelineChecks": 871,
     "zapRules": 102,
     "zapUnsupportedThemes": 92
   },
-  "catalogHash": "82905d170559af7b0ca1024df225bc9ae936705adac674f06a026e39a3063435"
+  "catalogHash": "cf38c2b82971e2e1f6dec8ae09f2dc0045c37d9e1ab801531ddc342839461a09"
 }

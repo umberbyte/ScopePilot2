@@ -46,7 +46,7 @@ Markdown/DOCX golden test、DOCX render の視覚 QA、large report 性能、監
 ## 9. 提出用テンプレート v2
 
 `ReportArtifact.model` を正規入力とし、案件設定 `ReportProfile` と証跡索引を統合して
-`AssuranceReportDocument` を構築する。DOCX と JSON はこの同一モデルから生成し、Markdown の
+`AssuranceReportDocument` を構築する。第一部DOCX、第二部HTML、JSONはこの同一モデルから生成し、Markdown の
 再解釈を行わない。S07 では顧客名、文書管理、診断条件、総括、優先対応、主要制約を入力できる。
 保存先と章立て、秘匿化、視覚 QA は `docs/design/29-assurance-report-template.md` に従う。
 
@@ -58,5 +58,6 @@ Markdown/DOCX golden test、DOCX render の視覚 QA、large report 性能、監
 statusを加える。URLはfingerprintから除外し、統合後の `urls` へ重複なく格納する。
 
 代表IDは入力順で最初のfinding IDとし、occurrencesは合計、evidence IDは和集合、first/last seenは最小・
-最大を採用する。各URLのRequest / Responseは `technicalEvidenceByUrl` に残し、MarkdownとDOCXではURLごとに
-通信ブロックを出力する。集計値と証跡索引は代表IDへ対応付けた統合後の指摘を基準にする。
+最大を採用する。各URLのRequest / Responseは `technicalEvidenceByUrl` に残し、Markdownと第二部HTMLではURLごとに
+通信ブロックを出力する。第二部HTMLは固定ナビゲーションと索引・アンカーを持つ。集計値と証跡索引は
+代表IDへ対応付けた統合後の指摘を基準にする。

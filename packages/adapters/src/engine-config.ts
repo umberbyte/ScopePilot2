@@ -24,6 +24,7 @@ import {
 import { PlaywrightExplorerAdapter } from './playwright-explorer.ts';
 import { NucleiRunner } from './nuclei-runner.ts';
 import { NodeWorkflowScanTransport, type NodeWorkflowScanTransportOptions } from './workflow-scan-transport.ts';
+import { createSecurityFixtureAdapters } from './security-fixture.ts';
 
 const DEFAULT_ZAP_BASE_URL = 'http://127.0.0.1:8080';
 
@@ -250,6 +251,8 @@ export interface ComposedEngines {
   readonly advancedTransport: import('@scopepilot2/core').AdvancedTransportPort;
   readonly domObserver: import('@scopepilot2/core').DomObservationPort;
   readonly interactiveBrowser: import('@scopepilot2/core').InteractiveBrowserPort;
+  readonly otpInbox?: import('@scopepilot2/core').OtpInboxPort;
+  readonly samlFixture?: import('@scopepilot2/core').SamlFixturePort;
   readonly capabilities: readonly EngineCapabilitySnapshot[];
   readonly runtimeBundleHash: string;
   readonly recoverHttpExchanges?: (
@@ -280,6 +283,7 @@ export async function composeEngines(
   const advancedTransport = new NodeHttp2Transport();
   const domObserver = new PlaywrightDomObserver();
   const interactiveBrowser = new PlaywrightInteractiveBrowser();
+  const securityFixture = createSecurityFixtureAdapters(env);
   const interactshProvider = selection.oastServerUrl && selection.interactshConfigPath
     ? new InteractshCliProvider({ serverUrl: selection.oastServerUrl, configPath: selection.interactshConfigPath })
     : undefined;
@@ -295,12 +299,13 @@ export async function composeEngines(
     // adapter receives the freshly authenticated cookies explicitly instead.
     repeaterTransport, fuzzTransport,
     sequencerTransport, oastProvider, webSocketTransport, advancedTransport, domObserver, interactiveBrowser,
+    ...(securityFixture === undefined ? {} : { otpInbox: securityFixture.otpInbox, samlFixture: securityFixture.samlFixture }),
     capabilities: capabilitySnapshots({
       zapVersion: zap.engine.engineVersion, zapAvailable: zap.available,
       explorerVersion: explorer.engineVersion, measuredAt: new Date().toISOString(),
       ...(nucleiRunner === undefined ? {} : { nucleiVersion: nucleiRunner.engineVersion }),
     }),
-    runtimeBundleHash: `production-engines:${explorer.engineVersion}:${zap.engine.engineVersion}:${nucleiRunner?.engineVersion ?? 'nuclei-unavailable'}:${nucleiRunner?.templateBundleHash ?? 'templates-unavailable'}`,
+    runtimeBundleHash: `production-engines:${explorer.engineVersion}:${zap.engine.engineVersion}:${nucleiRunner?.engineVersion ?? 'nuclei-unavailable'}:${nucleiRunner?.templateBundleHash ?? 'templates-unavailable'}:${securityFixture === undefined ? 'security-fixture-unavailable' : 'security-fixture-v1'}`,
     ...(zapAdapter === undefined ? {} : {
       recoverHttpExchanges: async (lookups: readonly ZapHttpEvidenceLookup[]) => await zapAdapter.recoverHttpExchanges(lookups),
     }),

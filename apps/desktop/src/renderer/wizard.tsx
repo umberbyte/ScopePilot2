@@ -36,7 +36,7 @@ import {
   type WizardStep,
 } from '@scopepilot2/ui';
 
-/** catalog (`docs/generated/guideline-catalog.json`) のガイドライン 6 sheet 名。 */
+/** catalog のガイドラインと、国内指針を束ねた運用プロファイル。 */
 const GUIDELINES: readonly string[] = [
   'OWASP Top 10-2025',
   'OWASP ASVS 5.0',
@@ -44,6 +44,7 @@ const GUIDELINES: readonly string[] = [
   'OWASP AISVS 1.01',
   'OWASP CNAS Top 10',
   'デジタル庁 DS-221',
+  'IPA/NISC/WebAppPentestGuidelines',
 ];
 
 
@@ -366,6 +367,15 @@ interface ScanRunResultView {
     readonly detail: string;
     readonly findingCount?: number;
   }[];
+  readonly guidelineRoutes?: readonly {
+    readonly routeId: string;
+    readonly themeNo: string;
+    readonly guidelineIds: readonly string[];
+    readonly status: 'delegated' | 'executed' | 'needs-input' | 'unavailable';
+    readonly detail: string;
+    readonly checkId?: string;
+    readonly checkStatus?: 'pass' | 'fail' | 'inconclusive';
+  }[];
   readonly workflow?: {
     readonly status: 'completed' | 'failed';
     readonly payloadSet: string;
@@ -504,7 +514,13 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
   const [interactiveResults, setInteractiveResults] = useState<readonly InteractiveDiagnosticResult[]>([]);
   const [interactiveStatus, setInteractiveStatus] = useState('');
   const [reportContent, setReportContent] = useState('');
-  const [reportFiles, setReportFiles] = useState<{ markdownPath: string; wordPath: string; structuredJsonPath: string } | null>(null);
+  const [reportFiles, setReportFiles] = useState<{
+    markdownPath: string;
+    wordPath: string;
+    technicalAnnexHtmlPath: string;
+    structuredJsonPath: string;
+    manifestPath: string;
+  } | null>(null);
   const [reportProfile, setReportProfile] = useState<ReportProfileState>(INITIAL_RENDERER_REPORT_PROFILE);
   const [analysisStatus, setAnalysisStatus] = useState('');
   const [settingsStatus, setSettingsStatus] = useState('');
@@ -1109,6 +1125,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
         targets: data.selectedTargets,
         enableNuclei: nucleiEnabled,
         enableWorkflowScan: workflowScanEligible,
+        guidelines: data.selectedGuidelines,
       });
       const confirmation = await callApi<{ confirmationId: string }>(apiBase, 'POST', '/api/plan/confirm', { plan: plan.plan });
       setScanPlan(plan);
@@ -1120,7 +1137,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
     } finally {
       setBusy(false);
     }
-  }, [apiBase, data.selectedTargets, nucleiEnabled, workflowScanEligible]);
+  }, [apiBase, data.selectedGuidelines, data.selectedTargets, nucleiEnabled, workflowScanEligible]);
 
   const planInteractiveDiagnostics = useCallback(async () => {
     const bridge = window.scopepilotDesktop;
@@ -1991,6 +2008,21 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
                   ))}
                 </div>
               )}
+              {(scanExecution?.result?.guidelineRoutes?.length ?? 0) > 0 && (
+                <div className={styles.pathCard}>
+                  <Text weight="semibold">{t('wizard.s06.guidelineRoutes')}</Text>
+                  {scanExecution?.result?.guidelineRoutes?.map((route) => (
+                    <Text key={route.routeId} className={styles.hint}>
+                      {t('wizard.s06.guidelineRoute', {
+                        route: route.routeId,
+                        status: route.status,
+                        guidelines: route.guidelineIds.join(', '),
+                        detail: route.detail,
+                      })}
+                    </Text>
+                  ))}
+                </div>
+              )}
               {interactiveStatus !== '' && <Text role="status">{interactiveStatus}</Text>}
               {interactiveResults.map((result) => (
                 <Text key={result.itemId} className={styles.hint}>
@@ -2115,8 +2147,10 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
               {reportFiles !== null && (
                 <div className={styles.inlineActions}>
                   <Button onClick={() => void openSelectedPath(reportFiles.wordPath)}>{t('wizard.s07.openWord')}</Button>
+                  <Button onClick={() => void openSelectedPath(reportFiles.technicalAnnexHtmlPath)}>{t('wizard.s07.openTechnicalAnnex')}</Button>
                   <Button onClick={() => void openSelectedPath(reportFiles.markdownPath)}>{t('wizard.s07.openMarkdown')}</Button>
                   <Button onClick={() => void openSelectedPath(reportFiles.structuredJsonPath)}>{t('wizard.s07.openStructuredJson')}</Button>
+                  <Button onClick={() => void openSelectedPath(reportFiles.manifestPath)}>{t('wizard.s07.openManifest')}</Button>
                 </div>
               )}
               <pre className={styles.report}>{reportContent}</pre>

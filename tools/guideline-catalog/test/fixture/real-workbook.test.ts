@@ -20,14 +20,15 @@ describe('診断項目 workbook からの catalog 生成 (design/27)', () => {
     assert.equal(sheets.length, 14);
 
     const catalog = buildCatalog(sheets, { workbookPath: 'docs/WebAppPentestGuidelines_診断項目_ScopePilot_作業用.xlsx', sha256 });
-    assert.equal(catalog.counts.guidelineChecks, 769);
+    assert.equal(catalog.schemaVersion, 'scopepilot2.catalog.v2');
+    assert.equal(catalog.counts.guidelineChecks, 871);
     assert.equal(catalog.counts.zapRules, 102);
     // 末尾の注記行 (※…) はデータ行に数えない。
     assert.equal(catalog.counts.zapUnsupportedThemes, 92);
     assert.equal(catalog.source.importerVersion, 1);
 
     // ガイドライン 6 sheet すべてに出典 note と項目がいる。
-    assert.equal(catalog.guidelines.length, 6);
+    assert.equal(catalog.guidelines.length, 7);
     for (const guideline of catalog.guidelines) {
       assert.ok(guideline.sourceNote.length > 0);
       assert.ok(guideline.checks.length > 0);
@@ -39,6 +40,24 @@ describe('診断項目 workbook からの catalog 生成 (design/27)', () => {
     const first = catalog.guidelines[0]?.checks[0];
     assert.equal(first?.sheet, 'OWASP Top 10-2025');
     assert.equal(first?.itemId, 'A01');
+
+    const webAppPentest = catalog.guidelines.find((candidate) => candidate.sheet === 'WebAppPentestGuidelines v1.2');
+    assert.equal(webAppPentest?.checks.length, 102);
+    assert.equal(webAppPentest?.linkOnly, true);
+    assert.equal(webAppPentest?.checks[0]?.itemId, 'WAPG-1.2-001');
+    assert.equal(webAppPentest?.checks[101]?.itemId, 'WAPG-1.2-102');
+    assert.equal(webAppPentest?.checks[0]?.row, 2);
+    assert.equal(webAppPentest?.checks[101]?.row, 103);
+    for (const check of webAppPentest?.checks ?? []) {
+      assert.ok((check.coverageRoutes ?? []).length > 0, `${check.itemId} must have a coverage route`);
+      assert.match(check.sourceUrl ?? '', /^https:\/\/github\.com\/WebAppPentestGuidelines\//u);
+      assert.ok(!('payload' in check) && !('procedure' in check), 'upstream text/payload is not redistributed');
+    }
+    const upstreamSource = catalog.sources.find((candidate) => candidate.id === 'webapp-pentest-guidelines-v1.2');
+    assert.equal(upstreamSource?.version, '1.2');
+    assert.equal(upstreamSource?.itemCount, 102);
+    assert.equal(upstreamSource?.sha256, 'bc25519a2b270e5c244cebdf26a08dd1387de7e08143f3ffbd71f2e8e5306dd8');
+    assert.equal(upstreamSource?.repositoryCommit, 'bcc4df46a7371ea0860e0d0900a22f89286ce5b8');
 
     // ZAP rule は識別列と座標を持ち、ペイロード・手順の長文列は複写しない。
     const rule = catalog.zapRules[0];

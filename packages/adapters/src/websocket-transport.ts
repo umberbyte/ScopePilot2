@@ -54,11 +54,16 @@ export class NodeWebSocketTransport implements WebSocketTransportPort {
       : input.sessionCookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
     const socket = new NodeWebSocket(
       websocketUrl(input.targetUrl),
-      input.subprotocols === undefined && cookieHeader === undefined
+      input.subprotocols === undefined && cookieHeader === undefined && input.origin === undefined
         ? undefined
         : {
             ...(input.subprotocols === undefined ? {} : { protocols: [...input.subprotocols] }),
-            ...(cookieHeader === undefined ? {} : { headers: { Cookie: cookieHeader } }),
+            ...((cookieHeader === undefined && input.origin === undefined) ? {} : {
+              headers: {
+                ...(cookieHeader === undefined ? {} : { Cookie: cookieHeader }),
+                ...(input.origin === undefined ? {} : { Origin: input.origin }),
+              },
+            }),
           },
     );
     let connectionError: Error | null = null;

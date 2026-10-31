@@ -7,8 +7,9 @@
  * POST /api/auth-bypass/checks で実行する。
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Checkbox, Field, Input, makeStyles, MessageBar, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { Button, Checkbox, Field, Input, Link, makeStyles, MessageBar, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 import { t, type StringKey } from './resources.ts';
+import { FIELD_LABEL_KEYS, IMPLEMENTED_THEME_NOS, missingRequiredInputs, partitionThemeFieldValues, THEME_SCHEMA, WORKFLOW_THEME_NOS } from './theme-schema.ts';
 import catalogJson from '../../../../docs/generated/guideline-catalog.json';
 
 interface CatalogCheck {
@@ -20,6 +21,8 @@ interface CatalogCheck {
   readonly method: string;
   readonly suspectedBehavior: string;
   readonly safeState: string;
+  readonly sourceUrl?: string;
+  readonly coverageRoutes?: readonly string[];
 }
 
 interface CatalogRule {
@@ -44,16 +47,14 @@ interface GuidelineCatalog {
   readonly schemaVersion: string;
   readonly catalogHash: string;
   readonly source: { readonly workbookPath: string; readonly sha256: string };
+  readonly sources: readonly { readonly id: string; readonly version: string; readonly sourceUrl: string; readonly sha256: string; readonly itemCount: number }[];
   readonly counts: { readonly guidelineChecks: number; readonly zapRules: number; readonly zapUnsupportedThemes: number };
-  readonly guidelines: readonly { readonly sheet: string; readonly sourceNote: string; readonly checks: readonly CatalogCheck[] }[];
+  readonly guidelines: readonly { readonly sheet: string; readonly sourceNote: string; readonly version: string; readonly sourceUrl: string; readonly linkOnly: boolean; readonly checks: readonly CatalogCheck[] }[];
   readonly zapRules: readonly CatalogRule[];
   readonly zapUnsupportedThemes: readonly CatalogTheme[];
 }
 
 const CATALOG = catalogJson as unknown as GuidelineCatalog;
-
-/** 実装済みテーマ (packages/core/src/domain/zap-unsupported.ts の一覧と同期)。 */
-const IMPLEMENTED_THEME_NOS: readonly string[] = ['1', '2', '3', '4', '5', '7', '10', '11', '13', '18', '20', '21', '22', '23', '29'];
 
 const useStyles = makeStyles({
   section: { display: 'flex', flexDirection: 'column', gap: '4px' },
@@ -268,67 +269,7 @@ function AuthBypassRunner({ apiBase }: { apiBase: string }): React.ReactElement 
   );
 }
 
-/** テーマ2以降の入力 schema (role 要否・対象 URL 要否・テーマ別 parameter)。 */
-interface ThemeFieldDef {
-  readonly key: string;
-  readonly multiline?: boolean;
-}
-
-interface ThemeSchema {
-  readonly roleMode: 'required' | 'optional' | 'none';
-  readonly needsTargets: boolean;
-  readonly fields: readonly ThemeFieldDef[];
-}
-
-const THEME_SCHEMA: Readonly<Record<string, ThemeSchema>> = {
-  '2': { roleMode: 'required', needsTargets: false, fields: [{ key: 'defaultPairs', multiline: true }, { key: 'expectedUrlPrefix' }] },
-  '3': { roleMode: 'none', needsTargets: true, fields: [{ key: 'steps', multiline: true }, { key: 'fieldReference' }, { key: 'usernameReference' }] },
-  '4': { roleMode: 'none', needsTargets: true, fields: [{ key: 'steps', multiline: true }, { key: 'fieldReference' }] },
-  '5': { roleMode: 'required', needsTargets: false, fields: [{ key: 'failureCount' }, { key: 'baseUrl' }] },
-  '7': { roleMode: 'required', needsTargets: false, fields: [{ key: 'nonexistentUsername' }, { key: 'baseUrl' }, { key: 'sampleCount' }, { key: 'timingThresholdMs' }] },
-  '10': { roleMode: 'required', needsTargets: true, fields: [{ key: 'otherRole' }, { key: 'objectParam' }, { key: 'ownValue' }, { key: 'otherValues' }] },
-  '11': { roleMode: 'optional', needsTargets: true, fields: [{ key: 'method' }, { key: 'jsonBody', multiline: true }, { key: 'extraFieldsJson' }, { key: 'successMarker' }] },
-  '13': { roleMode: 'optional', needsTargets: true, fields: [{ key: 'evilOrigins' }, { key: 'requestMethod' }] },
-  '18': { roleMode: 'none', needsTargets: false, fields: [{ key: 'requestSamples', multiline: true }] },
-  '20': { roleMode: 'optional', needsTargets: true, fields: [{ key: 'method' }, { key: 'body', multiline: true }, { key: 'repeatCount' }, { key: 'successMarker' }] },
-  '21': { roleMode: 'optional', needsTargets: true, fields: [{ key: 'paramName' }] },
-  '22': { roleMode: 'none', needsTargets: true, fields: [{ key: 'templateIds' }] },
-  '23': { roleMode: 'optional', needsTargets: true, fields: [] },
-  '29': { roleMode: 'optional', needsTargets: true, fields: [] },
-};
-
-const FIELD_LABEL_KEYS: Readonly<Record<string, StringKey>> = {
-  '2.defaultPairs': 'a03.theme.f.2.defaultPairs',
-  '2.expectedUrlPrefix': 'a03.theme.f.2.expectedUrlPrefix',
-  '3.steps': 'a03.theme.f.3.steps',
-  '3.fieldReference': 'a03.theme.f.3.fieldReference',
-  '3.usernameReference': 'a03.theme.f.3.usernameReference',
-  '4.steps': 'a03.theme.f.4.steps',
-  '4.fieldReference': 'a03.theme.f.4.fieldReference',
-  '5.failureCount': 'a03.theme.f.5.failureCount',
-  '5.baseUrl': 'a03.theme.f.5.baseUrl',
-  '7.nonexistentUsername': 'a03.theme.f.7.nonexistentUsername',
-  '7.baseUrl': 'a03.theme.f.7.baseUrl',
-  '7.sampleCount': 'a03.theme.f.7.sampleCount',
-  '7.timingThresholdMs': 'a03.theme.f.7.timingThresholdMs',
-  '10.otherRole': 'a03.theme.f.10.otherRole',
-  '10.objectParam': 'a03.theme.f.10.objectParam',
-  '10.ownValue': 'a03.theme.f.10.ownValue',
-  '10.otherValues': 'a03.theme.f.10.otherValues',
-  '11.method': 'a03.theme.f.11.method',
-  '11.jsonBody': 'a03.theme.f.11.jsonBody',
-  '11.extraFieldsJson': 'a03.theme.f.11.extraFieldsJson',
-  '11.successMarker': 'a03.theme.f.11.successMarker',
-  '13.evilOrigins': 'a03.theme.f.13.evilOrigins',
-  '13.requestMethod': 'a03.theme.f.13.requestMethod',
-  '18.requestSamples': 'a03.theme.f.18.requestSamples',
-  '20.method': 'a03.theme.f.20.method',
-  '20.body': 'a03.theme.f.20.body',
-  '20.repeatCount': 'a03.theme.f.20.repeatCount',
-  '20.successMarker': 'a03.theme.f.20.successMarker',
-  '21.paramName': 'a03.theme.f.21.paramName',
-  '22.templateIds': 'a03.theme.f.22.templateIds',
-};
+/** テーマ2以降の入力 schema は theme-schema.ts (Core 側実装テーマ一覧と test で同期)。 */
 
 interface ThemeSummaryView {
   readonly checkId: string;
@@ -348,12 +289,15 @@ function ThemeRunner({ apiBase, themeNo }: { apiBase: string; themeNo: string })
   const [sessions, setSessions] = useState<readonly SessionView[]>([]);
   const [role, setRole] = useState('');
   const [targets, setTargets] = useState('');
+  const [namedTargetValues, setNamedTargetValues] = useState<Readonly<Record<string, string>>>({});
   const [values, setValues] = useState<Readonly<Record<string, string>>>({});
   const [secretsText, setSecretsText] = useState('');
   const [summary, setSummary] = useState<ThemeSummaryView | null>(null);
   const [history, setHistory] = useState<readonly { checkId: string; themeNo: string; role: string | null; status: string; totalRequests: number; executedAt: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  /** select 欄は未選択状態を持たず、常に先頭候補 (Core 既定値) を表示する。 */
+  const selectValue = (field: { readonly key: string; readonly options?: readonly string[] }): string => values[field.key] ?? field.options?.[0] ?? '';
 
   useEffect(() => {
     void (async () => {
@@ -363,7 +307,7 @@ function ThemeRunner({ apiBase, themeNo }: { apiBase: string; themeNo: string })
         if (sessionBody.sessions[0] !== undefined) {
           setRole(sessionBody.sessions[0].role);
         }
-        const historyBody = await callJson<{ checks: readonly { checkId: string; themeNo: string; role: string | null; status: string; totalRequests: number; executedAt: string }[] }>(apiBase, 'GET', '/api/zap-unsupported/checks');
+        const historyBody = await callJson<{ checks: { checkId: string; themeNo: string; role: string | null; status: string; totalRequests: number; executedAt: string }[] }>(apiBase, 'GET', '/api/zap-unsupported/checks');
         setHistory(historyBody.checks.filter((item) => item.themeNo === themeNo));
       } catch (cause) {
         setError(String(cause));
@@ -376,42 +320,43 @@ function ThemeRunner({ apiBase, themeNo }: { apiBase: string; themeNo: string })
     setError('');
     setSummary(null);
     try {
-      const params: Record<string, string> = {};
-      for (const field of schema?.fields ?? []) {
-        const value = values[field.key] ?? '';
-        if (value.trim() !== '') {
-          params[field.key] = value;
-        }
-      }
-      const secretValues: Record<string, string> = {};
+      if (schema === undefined) return;
+      const partitioned = partitionThemeFieldValues(schema, values);
+      const params = { ...partitioned.params };
+      const secretValues = { ...partitioned.secretValues };
       for (const line of secretsText.split('\n')) {
         const separator = line.indexOf('=');
         if (separator > 0) {
           secretValues[line.slice(0, separator).trim()] = line.slice(separator + 1);
         }
       }
+      const targetUrls = (schema?.namedTargets ?? []).length > 0
+        ? (schema?.namedTargets ?? []).flatMap((target) => {
+          const url = (namedTargetValues[target.key] ?? '').trim();
+          return url === '' ? [] : [url];
+        })
+        : targets.split('\n').map((line) => line.trim()).filter((line) => line !== '');
       const result = await callJson<ThemeSummaryView>(apiBase, 'POST', '/api/zap-unsupported/checks', {
         themeNo,
         ...(role === '' || schema?.roleMode === 'none' ? {} : { role }),
-        ...(schema?.needsTargets === true
-          ? { targetUrls: targets.split('\n').map((line) => line.trim()).filter((line) => line !== '') }
-          : {}),
+        ...(schema?.needsTargets === true ? { targetUrls } : {}),
         ...(Object.keys(params).length === 0 ? {} : { params }),
         ...(Object.keys(secretValues).length === 0 ? {} : { secretValues }),
       });
       setSummary(result);
-      const historyBody = await callJson<{ checks: readonly { checkId: string; themeNo: string; role: string | null; status: string; totalRequests: number; executedAt: string }[] }>(apiBase, 'GET', '/api/zap-unsupported/checks');
+      const historyBody = await callJson<{ checks: { checkId: string; themeNo: string; role: string | null; status: string; totalRequests: number; executedAt: string }[] }>(apiBase, 'GET', '/api/zap-unsupported/checks');
       setHistory(historyBody.checks.filter((item) => item.themeNo === themeNo));
     } catch (cause) {
       setError(String(cause));
     } finally {
       setBusy(false);
     }
-  }, [apiBase, role, schema, secretsText, targets, themeNo, values]);
+  }, [apiBase, namedTargetValues, role, schema, secretsText, selectValue, targets, themeNo, values]);
 
   if (schema === undefined) {
     return null;
   }
+  const missing = missingRequiredInputs(themeNo, schema, values, namedTargetValues);
 
   return (
     <div className={styles.section}>
@@ -426,23 +371,53 @@ function ThemeRunner({ apiBase, themeNo }: { apiBase: string; themeNo: string })
             </select>
           </Field>
         )}
-        {schema.needsTargets && (
+        {(schema.namedTargets ?? []).map((target) => (
+          <Field key={target.key} label={t(target.labelKey)}>
+            <Input value={namedTargetValues[target.key] ?? ''} onChange={(_, data) => setNamedTargetValues((current) => ({ ...current, [target.key]: data.value }))} />
+          </Field>
+        ))}
+        {schema.needsTargets && (schema.namedTargets ?? []).length === 0 && (
           <Field label={t('a03.theme1.targets')}>
             <Textarea value={targets} onChange={(_, data) => setTargets(data.value)} rows={3} />
           </Field>
         )}
-        {schema.fields.map((field) => (
-          <Field key={field.key} label={t(FIELD_LABEL_KEYS[`${themeNo}.${field.key}`] ?? 'a03.theme1.col.pattern')}>
-            {field.multiline === true
-              ? <Textarea rows={4} value={values[field.key] ?? ''} onChange={(_, data) => setValues((current) => ({ ...current, [field.key]: data.value }))} />
-              : <Input value={values[field.key] ?? ''} onChange={(_, data) => setValues((current) => ({ ...current, [field.key]: data.value }))} />}
-          </Field>
-        ))}
+        {schema.fields.map((field) => {
+          const labelKey = FIELD_LABEL_KEYS[`${themeNo}.${field.key}`] ?? 'a03.theme1.col.pattern';
+          if (field.kind === 'boolean') {
+            return (
+              <Checkbox
+                key={field.key}
+                label={t(labelKey)}
+                checked={values[field.key] === 'true'}
+                onChange={(_, data) => setValues((current) => ({ ...current, [field.key]: data.checked === true ? 'true' : '' }))}
+              />
+            );
+          }
+          if (field.kind === 'select') {
+            return (
+              <Field key={field.key} label={t(labelKey)}>
+                <select value={selectValue(field)} onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}>
+                  {(field.options ?? []).map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </Field>
+            );
+          }
+          return (
+            <Field key={field.key} label={t(labelKey)}>
+              {field.multiline === true
+                ? <Textarea rows={4} value={values[field.key] ?? ''} onChange={(_, data) => setValues((current) => ({ ...current, [field.key]: data.value }))} />
+                : <Input type={field.secret === true ? 'password' : 'text'} value={values[field.key] ?? ''} onChange={(_, data) => setValues((current) => ({ ...current, [field.key]: data.value }))} />}
+            </Field>
+          );
+        })}
         <Field label={t('a03.theme.secretsHint')}>
           <Textarea rows={2} value={secretsText} onChange={(_, data) => setSecretsText(data.value)} />
         </Field>
         <div>
-          <Button appearance="primary" disabled={busy} onClick={() => void run()}>{t('a03.theme.run')}</Button>
+          <Button appearance="primary" disabled={busy || missing.length > 0} onClick={() => void run()}>{t('a03.theme.run')}</Button>
+          {missing.length > 0 && <Text className={styles.muted}>{t('a03.theme.missingRequired', { labels: missing.map((key) => t(key)).join(', ') })}</Text>}
         </div>
       </div>
       {error !== '' && <MessageBar intent="error">{error}</MessageBar>}
@@ -510,6 +485,7 @@ export function GuidelinesCatalogScreen({ apiBase }: { apiBase: string }): React
       <Text className={styles.muted}>
         {t('a03.meta', { catalogHash: CATALOG.catalogHash.slice(0, 16), workbookPath: CATALOG.source.workbookPath, sha256: CATALOG.source.sha256.slice(0, 12), checks: CATALOG.counts.guidelineChecks, rules: CATALOG.counts.zapRules, themes: CATALOG.counts.zapUnsupportedThemes })}
       </Text>
+      <Text className={styles.muted}>{t('a03.sources', { count: CATALOG.sources.length })}</Text>
       <div className={styles.section}>
         {(['checks', 'rules', 'themes'] as const).map((candidate) => (
           <Button key={candidate} appearance={tab === candidate ? 'primary' : 'secondary'} onClick={() => setTab(candidate)}>
@@ -535,6 +511,9 @@ export function GuidelinesCatalogScreen({ apiBase }: { apiBase: string }): React
             ))}
           </div>
           <Text className={styles.muted}>{guideline.sourceNote}</Text>
+          {guideline.sourceUrl !== '' && (
+            <Link href={guideline.sourceUrl} target="_blank" rel="noreferrer">{t('a03.openOfficialSource', { version: guideline.version })}</Link>
+          )}
           <Text>{t('a03.checksCount', { sheet: guideline.sheet, shown: checks.length, total: guideline.checks.length })}</Text>
           <div className={styles.scroll}>
             <Table size="small" aria-label={t('a03.table.aria')}>
@@ -569,6 +548,12 @@ export function GuidelinesCatalogScreen({ apiBase }: { apiBase: string }): React
               <Text>{t('a03.detail.method', { method: selectedCheck.method })}</Text>
               <Text>{t('a03.detail.suspected', { suspectedBehavior: selectedCheck.suspectedBehavior })}</Text>
               <Text>{t('a03.detail.safeState', { safeState: selectedCheck.safeState })}</Text>
+              {(selectedCheck.coverageRoutes ?? []).length > 0 && (
+                <Text>{t('a03.detail.coverageRoutes', { routes: (selectedCheck.coverageRoutes ?? []).join(', ') })}</Text>
+              )}
+              {selectedCheck.sourceUrl !== undefined && (
+                <Link href={selectedCheck.sourceUrl} target="_blank" rel="noreferrer">{t('a03.detail.officialSource')}</Link>
+              )}
             </div>
           )}
         </>
@@ -625,6 +610,7 @@ export function GuidelinesCatalogScreen({ apiBase }: { apiBase: string }): React
                           {t('a03.theme.run')}
                         </Button>
                       )}
+                      {WORKFLOW_THEME_NOS.includes(theme.no) && <Text size={200}>{t('a03.theme.workflowAutomatic')}</Text>}
                     </TableCell>
                   </TableRow>
                 ))}

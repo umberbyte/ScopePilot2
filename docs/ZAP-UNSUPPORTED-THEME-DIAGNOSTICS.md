@@ -2,7 +2,7 @@
 
 ## 1. 本書の対象
 
-本書は、ScopePilot2 の Advanced モードにある A03「ZAP非対応テーマ」で実行できる15テーマについて、何が実装され、どのような入力と通信で診断し、どの条件で結果を判定するかを説明する。対象はテーマ1、2、3、4、5、7、10、11、13、18、20、21、22、23、29である。テーマ1は認証回避専用API、テーマ2以降は共通のテーマ診断APIから実行される。
+本書は、ScopePilot2 の Advanced モードにある A03「ZAP非対応テーマ」で実行できる25テーマについて、何が実装され、どのような入力と通信で診断し、どの条件で結果を判定するかを説明する。対象はテーマ1、2、3、4、5、6、7、9、10、11、13、14、15、16、18、20、21、22、23、24、25、26、27、29、30である。テーマ1は認証回避専用API、テーマ2以降は共通のテーマ診断APIから実行される。テーマ8、12、19、28は既存の診断workflowから実行される。テーマ17（request smuggling / parser差異）は、隔離した複数parserと専用transportを用意できず検査境界を実証できないため、利用者の指示に従い「検査不能・スキップ」として記録し、合否を推測しない。
 
 すべての送信処理は、案件でActiveScanが許可されていること、対象URLが許可スコープ内であること、予定リクエスト数が案件上限を超えないことを実行前に確認する。判定は、脆弱性の成立を確認した `fail`、十分な拒否を確認した `pass`、観測不足・一部未実施・安全とも脆弱とも断定できない `inconclusive` の3種類である。Cookie値、パスワード、トークン、応答本文などの秘密情報は証跡へ保存せず、URL、HTTPステータス、本文ハッシュ、判定、非機密の集計値だけを記録する。
 
@@ -28,9 +28,40 @@
 
 ログイン失敗を繰り返したとき、アカウントロックや試行制限が作動するかを少数試行で観測する。利用者は事前に許可された失敗回数を1～20回の範囲で指定し、診断用アカウントの正しい資格情報と登録済みログインフローを使用する。ScopePilot2は正しいパスワードの末尾へ1文字追加した誤資格を指定回数送信し、その直後に正しい資格情報でログインする。連続失敗後も正しいログインが成功する場合は、指定回数ではロックが作動していない疑いとして `fail`、正しいログインも拒否された場合はロック作動を確認したものとして個別には安全側と判定する。通信・ブラウザーエラーで成否を確認できない場合は `inconclusive` である。実行回数は案件のリクエスト上限とも照合し、ロック解除や管理者復旧が可能な診断専用アカウントで行う前提とする。JMeter等を使う大量・高速試行、IP単位や端末単位の制限測定、解除時間の精密測定は負荷や可用性に影響するため実装していない。このため、少数試行で問題が見つからなくてもテーマ全体は `inconclusive` になる。
 
+### テーマ6：MFA・OTP・SAML
+
+テーマ6は複数のsub-checkで構成し、必要な入力と許可済みfixtureが揃ったsub-checkだけを実行する。未実施のsub-checkが1つでも残る場合、テーマ全体は `pass` にならない。 OTP・SAML値は実行中のメモリだけに保持し、probe結果・証跡・API応答へ出さない。
+
+- **mfa-stage-skip (既定)**: 一次認証直後の未検証sessionでMFA保護APIへ直接到達できないかを確認する。一次認証URL、保護URL、診断用資格情報を受け取り、一次認証で発行されたCookieだけを保護URLへ送る。2xxで保護データへ到達すれば段階スキップとして `fail`、401/403なら当該probeは拒否と判定する。
+- **otp-reuse / otp-expiry / otp-attempt-limit**: OTP発行endpoint、OTP検証endpoint、受理marker、許可済みfixture inboxの参照 (`mailboxRef`)、および `OtpInboxPort` を実装したadapterの構成が必要。最初に新規OTPを期限内に1回だけ提出して正常対照を作り、対照が受理されて初めて各sub-checkを判定する。再利用は使用済みOTPの再送、寿命はfixture宣言の有効期限 (待機上限120秒) 経過後の未使用OTP提出、試行制限は事前合意した1～5回の誤OTP後の正規OTP提出を観察する。受理markerが応答に現れない場合はHTTP 2xxでも受理としない。OTP値は結果へ出ない。
+- **otp-destination-change**: 認証済みロールsessionで、再認証なしの宛先変更要求 (`otpDestinationChangeUrl`、変更body、受理marker) が受理されるかを確認する。変更通知の送信だけでは安全とみなさない。変更bodyに再認証情報を含めないことが前提。
+- **saml-assertion-replay**: 隔離された試験IdP/SP fixture adapter (`SamlFixturePort`) とSSO開始URL、ACS URLが必要。試験IdPが正規発行した同一assertionを、session reset後に同一条件で再送し (生成・改ざんはしない)、新しいsessionとして受理された場合だけ `fail` とする。対照ログイン不成立、既存session継続との区別不能は `inconclusive`。assertion本文・署名・NameIDは保存せずhashのみ記録する。
+
+いずれのsub-checkも、段階スキップの結果から他のsub-checkの結果を推測しない。fixture未構成のsub-checkは理由付きでskipし、テーマ全体を `pass` にしない。
+
+#### OTP/SAML fixture controller の実行時接続
+
+Desktop版は `SCOPEPILOT_SECURITY_FIXTURE_BASE_URL` が明示された場合だけ、OTP/SAML adapterを
+`runZapUnsupportedCheck()` へ注入する。接続先は `http(s)://127.0.0.1`、`localhost`、`[::1]` の
+loopbackに限定し、redirectを許可しない。必要な場合は
+`SCOPEPILOT_SECURITY_FIXTURE_TOKEN` をBearer tokenとして設定する。
+
+- `GET {base}/v1/otp?mailboxRef=...&issuedAfter=...`: 未着は204、着信済みは
+  `{"otp":"...","receivedAt":"ISO-8601"}`。OTPはメモリ内だけで利用する。
+- `POST {base}/v1/saml/issue-and-replay`: `idpStartUrl`、`acsUrl`、`role` を渡す。応答には
+  `fixtureIsolated: true`、正常対照・再送の成否/status、64桁のSHA-256 `assertionHash` だけを返し、
+  assertion本文・署名・NameIDを返さない。
+
+このcontrollerは許可済みの隔離fixtureを操作する境界であり、ScopePilot2自身が任意のmailboxや
+一般のIdPへ直接接続するための設定ではない。未設定時は該当sub-checkを理由付きでskipする。
+
 ### テーマ7：ユーザー列挙
 
 ログイン失敗時の応答差から、第三者が登録済みユーザー名を推測できないかを確認する。最初に既存ユーザーと正しいパスワードでログインし、登録フローと資格情報が有効であることを対照確認する。その後、既存ユーザー＋誤パスワードと、確実に存在しないユーザー＋同じ誤パスワードを、それぞれ2～5回ずつ実行する。比較対象はHTTPステータス、最終URL、正規化後の本文ハッシュ、平均応答時間である。CSRF値、nonce、request ID、UUID、長い16進トークンなど、実行ごとに変わる値は本文から正規化して誤検出を抑える。ステータス、遷移先、意味のある本文のいずれかが異なる、または平均時間差が既定250ms以上の場合は列挙可能性ありとして `fail` とする。差がなければ `pass`、正常系ログイン自体を確認できない場合は比較の前提が成立しないため `inconclusive` とする。存在しないユーザー名は既存名と同一でないことを検証し、パスワードは両群で同じ誤値を使う。しきい値は50～5000msの範囲で調整でき、各試行時間と両群の平均値を非機密の詳細情報として残す。
+
+### テーマ9：OAuth・OIDC・JWT
+
+権限のある診断用アカウントから取得した正常JWTを対照に、同じclaimsのままheaderを `alg=none` へ変更したtokenを保護APIへ再送する。正常JWTが2xxで、未署名JWTも2xxなら `fail`、未署名JWTが拒否されれば当該probeは安全側と判定する。`exp` の欠落または24時間を超える過大な期限も別probeで検出する。正常JWT自体が通らない場合は比較不能である。OAuth/OIDCのstate、nonce、PKCE、issuer検証は登録済み認可フローが必要なため、このJWT検査だけでは診断済みにしない。
 
 ### テーマ10：機能・オブジェクト単位の認可（IDOR）
 
@@ -43,6 +74,18 @@ APIがクライアントから送られた権限外フィールドを、その�
 ### テーマ13：CORS設定
 
 認証済みAPIの応答を、許可していない外部Webサイトから資格情報付きで読み取れる設定になっていないかを確認する。利用者は対象URL、実際のHTTPメソッド、1～3件の外部Originを指定できる。ScopePilot2は対象自身のOriginを基準として、指定した外部Originと特殊値 `null` を `Origin` ヘッダーに設定し、通常要求とOPTIONSプリフライトをそれぞれ送信する。ロール指定時は対象に適用できる認証Cookieを通常要求へ付与する。外部の具体的Originが `Access-Control-Allow-Origin` にそのまま反射され、`Access-Control-Allow-Credentials: true` も返り、実際に資格情報が送られている場合にだけ資格情報付き読取り成立として `fail` にする。ACAOがない、またはOriginが一致しなければ拒否と判定する。`*` とcredentialsの併用はブラウザーが資格情報付き応答を公開しないため、それだけではfailにせず `inconclusive` とする。プリフライト許可だけでも実データ読取りの証明にならないため、単独では脆弱確定しない。
+
+### テーマ14：メールヘッダー注入
+
+正常な件名を対照に、CRLFと追加headerを含む件名をJSONで送信する。正常値が受理され、CRLF値も2xxで受理されれば `fail`、明示的に拒否されれば当該probeは安全側と判定する。外部メールは送らず、実配信headerの確認には対象が提供する閉域mail fixtureを用いる。
+
+### テーマ15：ZAP対象外の注入
+
+利用者がレビューした正常JSONと変異JSONを同じ認証条件で送信し、LDAP、CSV数式、正規表現、Host関連など対象固有の解釈差を確認する。成立根拠は、対象固有の成功marker、または100～10000msの範囲で明示した応答時間しきい値である。単なる2xxを注入成立とせず、変異は1回の代表値に限定する。他の解釈系は別probeとして残るため、検出なしをテーマ全体の安全性へ拡張しない。
+
+### テーマ16：SSRF
+
+正常な公開URLを含むJSONを対照に、許可済みの内部fixtureまたはOAST URLへ差し替えたJSONを送る。応答内の到達markerを確認できた場合だけ `fail` とし、400/401/403/422またはmarker不在なら当該probeは拒否側と判定する。markerを用意できない場合、HTTP受付だけでは成立とせず、既存のOAST attempt/callback相関経路を使用する。代替表記、redirect、DNS rebinding、各アドレスファミリは個別にレビューしたprobeが必要である。
 
 ### テーマ18：デシリアライゼーション
 
@@ -64,14 +107,35 @@ TLSや証明書に関する特定の既知問題を、Nucleiの審査済みテ�
 
 HTTPSで提供されるページがHTTPでも平文取得できないか、またHTTPSページがHTTP資源を読み込んでいないかを確認する。診断対象は `https://` のURLで、必要なら認証済みセッションを使って実ブラウザーでページを開く。取得したHTML本文から、`src`、`action`、`poster` 属性が `http://` を参照する箇所を検索し、画像、スクリプト、フォーム送信先など実際に読み込み・送信される資源を対象とする。通常の外部リンクである `href` は混在コンテンツと誤認しない。次に同じURLのschemeをHTTPへ変え、スコープ内であることを再確認して直接GETする。HTTPで400未満の応答が同じHTTP URLのまま取得できれば平文提供として `fail`、4xx以上で拒否される、またはHTTPS等へリダイレクトされれば安全側と判定する。混在参照が1件でも見つかった場合も `fail` である。HSTSの有無だけで代用せず、実際のHTTP到達性と最終URLを観測し、HTTPS基準応答、混在判定、HTTP到達性を別々の証跡として残す。
 
+### テーマ24：追加のブラウザー保護
+
+Referrer-Policy、COOP、CORP、Permissions-Policy、`__Host-` Cookie属性、Sec-Fetchのcross-site応答を確認する。機微ページであることを明示しない場合、header欠落だけでは `fail` にせず `inconclusive` とする。
+
+### テーマ25：HTTPメソッド
+
+OPTIONS/AllowとTRACE/TRACKを対照に、危険なメソッドの広告や要求markerのechoを確認する。PUT/DELETE/PATCHは副作用があるため、明示した許可なしでは送信しない。
+
+### テーマ26：GraphQL
+
+正常queryを対照に、introspectionと対象schemaに適合する深いqueryを送信する。introspection結果や制限されない深い実行を `fail` とし、depth・complexity・costの明示的拒否を安全側と判定する。schemaに適合しないqueryの拒否は制限の証拠にしない。
+
+### テーマ27：WebSocket
+
+Cookie付きhandshakeをsame-originとcross-originのOriginで比較する。same-originが成立し、任意Originでも接続・送信できればCSWSH候補として `fail` とする。メッセージ単位認可やtoken replayは、対象固有のメッセージと期待結果を別途指定する。
+
 ### テーマ29：データ保護・機微露出
 
 認証後画面や代表ページに、URL、キャッシュ、DOM表示の観点で機微情報が不適切に露出していないかを確認する。利用者は最大5件のURLと、必要に応じて認証ロールを指定する。ScopePilot2は実ブラウザーで各ページを開き、まずURLのquery parameter名からpassword、secret、token、session、API key、カード、PIN、マイナンバー等を示す名称を検出する。値そのものは保存せず、該当パラメーター名だけを証跡化する。次に機微画面の `Cache-Control` に `no-store` があるかを確認し、欠落時は `fail` とする。DOM解析はブラウザー内で行い、生の個人情報を外へ返さず分類済みカテゴリだけを取得する。未マスクのカード番号、マイナンバー、PINが確認されれば `fail`、氏名・メール等の一般的PII候補は本人への正当表示と漏えいを自動判別できないため `inconclusive` とする。APIの過剰取得・所有者確認、第三者送信、画像ファイルのExif確認は対象外である。
 
+### テーマ30：公開情報・構成情報
+
+利用者がレビュー済みの代表URLを最大5件指定し、GET応答からHTTPで観測できる公開情報と構成情報を確認する。ScopePilot2は `Server`、`X-Powered-By`、`X-AspNet-Version`、`X-AspNetMvc-Version` などの版情報を含むheader、`Content-Type` の欠落、directory listing、source map参照、JSONP callback、`.git`、`.svn`、`.env`、`server-status`、`phpinfo`、backupファイル等の公開署名を判定する。応答本文そのものは保存せず、URL、ステータス、header名、非機密の分類結果、本文hashだけを証跡化する。未レビューの共通pathを自動推測・列挙せず、指定URLだけを送信する。選択したASVS、WSTG、WebAppPentestGuidelines等の実行profileでは、request budgetに余裕がある場合にこのテーマを自動実行し、ほかの対象固有テーマは必要入力を明示した `needs-input` routeとして残す。
+
 ## 3. 実装上の参照先
 
 - テーマ1の計画・判定: `packages/core/src/domain/auth-bypass.ts`
-- テーマ2～29の計画・判定: `packages/core/src/domain/zap-unsupported.ts`
+- テーマ2～30の計画・判定: `packages/core/src/domain/zap-unsupported.ts`
+- ガイドライン別の実行profile: `packages/core/src/domain/guideline-execution.ts`
 - テーマ別の実行処理: `packages/core/src/application/baseline-flow.ts`
 - 機微情報のDOM分類: `packages/adapters/src/dom-observer.ts`
 - A03の表示と入力フォーム: `apps/desktop/src/renderer/guidelines-catalog.tsx`

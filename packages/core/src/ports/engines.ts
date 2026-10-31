@@ -90,6 +90,47 @@ export interface LoginExecutorPort {
   execute(input: LoginExecutionInput): Promise<LoginExecutionResult>;
 }
 
+/**
+ * 許可済み fixture の OTP inbox (テーマ6 OTP sub-check 用)。
+ * mailboxRef は秘密値ではなく、事前審査済み fixture 設定の参照。実 adapter は
+ * 許可された fixture だけを接続先とし、任意の外部 mailbox へ接続しない。
+ * OTP 値は Core と adapter の呼び出し中だけ保持し、probe 結果・証跡へ保存しない。
+ */
+export interface OtpInboxPort {
+  readonly engineVersion: string;
+  waitForOtp(input: {
+    readonly mailboxRef: string;
+    readonly issuedAfter: string;
+    readonly timeoutMs: number;
+    readonly signal?: AbortSignal;
+  }): Promise<{ readonly otp: string; readonly receivedAt: string } | null>;
+}
+
+/**
+ * 隔離された試験 IdP / SP を使う SAML assertion replay (テーマ6 sub-check 用)。
+ * Core は直接送信せず、事前審査済み fixture adapter が全体を駆動する
+ * (IdP / SP の両方が隔離 fixture であることを adapter 側で保証する)。
+ * assertion 本文・署名・NameID は adapter の呼び出し中だけ保持し、
+ * 返り値には hash だけを載せる。新しい assertion の生成・改ざんは行わない。
+ * replayAccepted は「同一 assertion の再送が新しい session として受理された」
+ * 観測 (単なる既存 session 継続とは区別)。区別できなければ null。
+ */
+export interface SamlFixturePort {
+  readonly engineVersion: string;
+  issueAndReplay(input: {
+    readonly idpStartUrl: string;
+    readonly acsUrl: string;
+    readonly role: string;
+    readonly signal?: AbortSignal;
+  }): Promise<{
+    readonly controlAccepted: boolean;
+    readonly replayAccepted: boolean | null;
+    readonly controlStatus: number | null;
+    readonly replayStatus: number | null;
+    readonly assertionHash: string;
+  }>;
+}
+
 /** proxy listener が傍受した通信の観測 (design/f02)。値は core へ渡す素材のみ。 */
 export interface ObservedProxyMessage {
   readonly messageReference: string;
@@ -179,6 +220,8 @@ export interface WebSocketTransportPort {
     /** 案件 scope と同じ http(s) URL。adapter 内で ws(s) へ写像する。 */
     readonly targetUrl: string;
     readonly messages: readonly string[];
+    /** Handshake Origin. Omitted for normal product traffic; CSWSH checks set this explicitly. */
+    readonly origin?: string;
     /** Ordered client offer for Sec-WebSocket-Protocol. */
     readonly subprotocols?: readonly string[];
     /** Core-filtered role cookies for the handshake target. Values must stay inside the transport. */

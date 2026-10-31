@@ -47,6 +47,7 @@ export function planHashOf(plan: ExecutionPlan): string {
     authorizationId: plan.authorizationId,
     operatorId: plan.operatorId,
     targetRole: plan.targetRole,
+    guidelineIds: plan.guidelineIds,
     steps: plan.steps.map((step) => ({
       kind: step.kind,
       operationClass: step.operationClass,
@@ -140,6 +141,7 @@ export interface BuildPlanInput {
   readonly authorizationId: string;
   readonly operatorId: string;
   readonly targetRole: string;
+  readonly guidelineIds?: readonly string[];
   readonly steps: readonly {
     readonly kind: PlanStepKind;
     readonly operationClass: OperationClass;
@@ -173,6 +175,7 @@ export function buildPlan(input: BuildPlanInput): ExecutionPlan {
     authorizationId: input.authorizationId,
     operatorId: input.operatorId,
     targetRole: input.targetRole,
+    guidelineIds: [...new Set(input.guidelineIds ?? [])].sort(),
     steps,
     limits: input.limits,
     runtimeBundleHash: input.runtimeBundleHash,
@@ -189,6 +192,7 @@ export function confirmedViewOf(plan: ExecutionPlan): PlanConfirmation['confirme
 export function confirmationMatches(plan: ExecutionPlan, confirmation: PlanConfirmation): boolean {
   return (
     confirmation.planHash === planHashOf(plan) &&
+    canonicalJson(confirmation.guidelineIds) === canonicalJson(plan.guidelineIds) &&
     canonicalJson(confirmation.confirmedView) === canonicalJson(confirmedViewOf(plan))
   );
 }

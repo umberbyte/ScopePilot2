@@ -3,7 +3,7 @@
 ## 1. 目的
 
 ScopePilot2 の診断結果を、意思決定者・開発担当者・再診断担当者が同じ事実モデルから読める
-日本語の DOCX / JSON / Markdown として出力する。
+日本語の第一部 DOCX、第二部 HTML、JSON、Markdown として出力する。
 
 他社報告書は、必要な情報の種類と粒度を把握するための参考資料に限定する。章順、文言、配色、
 表組み、見出し体系、図版は転用せず、ScopePilot2 独自の情報設計と視覚設計を採用する。
@@ -71,10 +71,12 @@ HTTP 証跡の掲載方法は案件ごとに次から選択する。既定は `r
 
 - `diagnostic-report-<timestamp>.md`: 既存の決定論的 Markdown
 - `diagnostic-report-<timestamp>.json`: `AssuranceReportDocument` の構造化データ
-- `diagnostic-report-<timestamp>.docx`: 構造化データから直接生成した提出用文書
+- `diagnostic-report-<timestamp>.docx`: 構造化データから直接生成した第一部（意思決定・対応用サマリー）
+- `diagnostic-report-<timestamp>-technical-annex.html`: 第二部（技術証跡別冊）。固定ナビゲーション、
+  指摘索引、指摘・HTTP証跡・証拠原本間のアンカーを持つ単一HTML
 
-DOCX は Markdown の変換結果ではない。TypeScript の `docx` ライブラリだけで生成し、Word COM を
-実行時依存にしない。
+DOCX と HTML は Markdown の変換結果ではない。第一部は TypeScript の `docx` ライブラリだけで生成し、
+Word COM を実行時依存にしない。第二部は外部CSS・JavaScript・画像へ依存しない単一HTMLとする。
 
 ## 5. 視覚仕様
 
@@ -90,6 +92,8 @@ DOCX は Markdown の変換結果ではない。TypeScript の `docx` ライブ�
   継続できる構造とする。
 - Request / Response の着目語と、その根拠を要約した「着目箇所」を黄色で強調する。本文に着目語が
   見つからない場合は、通信の開始行を代替の視線誘導として強調する。
+- 第二部のナビゲーションは画面左に固定し、本文をスクロールしても常に表示する。指摘ID・指摘名の
+  絞り込み、章・指摘・証拠への直接移動、索引へ戻るリンクを提供する。印刷時はナビゲーションを除外する。
 
 ## 6. 診断証跡の取扱い
 
@@ -122,16 +126,17 @@ DOCX は Markdown の変換結果ではない。TypeScript の `docx` ライブ�
 - 構造化 JSON の指摘詳細に実際の対象 URL と再現用 query が保持されることの単体テスト。
 - ZAPの警告とmessage APIの通信が同じ原本証跡へ保存され、指摘ごとに対応付くことの単体テスト。
 - Nuclei 実行が Request / Response 同梱オプションを必ず使用することの単体テスト。
-- 構造化 JSON / DOCX に指摘ごとの Request / Response が入り、診断時の Cookie・tokenを含む
+- 構造化 JSON / 第二部 HTML に指摘ごとの Request / Response が入り、診断時の Cookie・tokenを含む
   再現情報が欠落しないことの単体テスト。
 - レスポンスヘッダ欠落の指摘では、不足したヘッダ名が確認結果へ明記されることの単体テスト。
 - URLだけが異なる同一のヘッダ欠落4件が1指摘へ統合され、全URLと4組のHTTP証跡をJSON・Markdown・
-  DOCXへ保持すること、およびparameter・攻撃入力が異なる入力系指摘を統合しないことの単体テスト。
-- 全指摘の構造化JSON・Markdown・DOCXに原因があり、観測事実と推定原因が区別され、脆弱性種別に
+  第二部HTMLへ保持すること、およびparameter・攻撃入力が異なる入力系指摘を統合しないことの単体テスト。
+- 全指摘の構造化JSON・Markdown・第二部HTMLに原因があり、観測事実と推定原因が区別され、脆弱性種別に
   応じた実装・設定上の不備候補を含むことの単体テスト。
 - AI文章案が所見ごとに反映され、形式不良・一般論のみ・未知URLを含む案では安全な既定文章へ戻ることの単体テスト。
 - Request / Response の一方でも欠落した指摘を含む場合、部分的な報告書ファイルを作らず生成に失敗する
   ことの単体テスト。
-- DOCX が有効な ZIP/OOXML として生成され、必要章を含むことの単体テスト。
+- 第一部DOCXが有効なZIP/OOXMLとして生成され、第二部HTMLが固定ナビゲーション、指摘索引、
+  指摘・HTTP証跡・証拠原本のアンカーを含むことの単体テスト。
 - A4 レンダリング後に全ページを画像確認し、欠け、重なり、文字化け、表切れ、空白ページを確認する。
 - Windows Word でヘッダー、フッター、ページ番号、表組みを確認する。
