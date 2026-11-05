@@ -717,7 +717,7 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
     const fresh = current.filter((alert) => !run.baselineAlertIds.has(alert.id) && !run.emittedAlertIds.has(alert.id));
     for (const alert of fresh) run.emittedAlertIds.add(alert.id);
     const alerts: EngineAlert[] = [];
-    // ZAP may return a large alert delta (DVWA commonly produces more than one
+      // ZAP may return a large alert delta (a single target commonly produces more than one
     // hundred findings). Fetching every backing message with Promise.all sends
     // the same number of simultaneous API calls and can make ZAP abort a
     // connection. Read them serially so report evidence collection remains

@@ -197,6 +197,10 @@ export interface AssuranceReportDocument {
       readonly observedEvidence: string;
       readonly focusSummary: string;
       readonly highlightTerms: readonly string[];
+      /** Requestに実在する診断入力・パラメータだけを強調する。 */
+      readonly requestHighlightTerms?: readonly string[];
+      /** Responseに実在する診断入力・観測根拠だけを強調する。 */
+      readonly responseHighlightTerms?: readonly string[];
       readonly bodyMode: ReportProfile['evidenceBodyMode'];
       readonly requestBodyOmittedChars: number;
       readonly responseBodyOmittedChars: number;
@@ -542,23 +546,41 @@ function presentHttpEvidence(
   };
 }
 
-function evidenceHighlightTerms(finding: Finding, evidence: RawTechnicalEvidence): readonly string[] {
-  const candidates: string[] = [];
-  const add = (value: string): void => {
+type HighlightEvidenceSource = Pick<RawTechnicalEvidence, 'request' | 'response' | 'attackInput' | 'observedEvidence'>;
+
+function evidenceHighlightTerms(
+  parameter: string | undefined,
+  evidence: HighlightEvidenceSource,
+): { readonly request: readonly string[]; readonly response: readonly string[]; readonly all: readonly string[] } {
+  const requestCandidates: string[] = [];
+  const responseCandidates: string[] = [];
+  const add = (target: string[], value: string): void => {
     const normalized = value.trim().replace(/[\r\n]+/gu, ' ');
     if (normalized.length < 2 || normalized.length > 256 || /^\[(?:伏せ字|Body省略)/u.test(normalized)) return;
-    candidates.push(normalized);
+    target.push(normalized);
   };
-  add(evidence.attackInput);
-  if (evidence.observedEvidence.length <= 256) add(evidence.observedEvidence);
-  for (const match of evidence.observedEvidence.matchAll(/["'`]([^"'`\r\n]{2,128})["'`]/gu)) add(match[1] ?? '');
-  if (finding.param !== undefined) add(finding.param);
-  for (const token of finding.title.match(/\b[A-Za-z][A-Za-z0-9-]{2,}\b/gu) ?? []) {
-    if (token.includes('-') || token === token.toUpperCase()) add(token);
+  add(requestCandidates, evidence.attackInput);
+  add(responseCandidates, evidence.attackInput);
+  if (evidence.observedEvidence.length <= 256) add(responseCandidates, evidence.observedEvidence);
+  for (const match of evidence.observedEvidence.matchAll(/["'`]([^"'`\r\n]{2,128})["'`]/gu)) {
+    add(responseCandidates, match[1] ?? '');
   }
-  return [...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values()]
+  if (parameter !== undefined && parameter !== '' && parameter !== '未入力') {
+    add(requestCandidates, parameter);
+    for (const token of parameter.split(/[\s/,|]+/gu)) add(requestCandidates, token);
+  }
+  const finalize = (candidates: readonly string[], text: string): readonly string[] => [...new Map(
+    candidates.map((value) => [value.toLocaleLowerCase(), value]),
+  ).values()]
+    .filter((value) => matchingSpans(text, [value]).length > 0)
     .sort((left, right) => right.length - left.length)
     .slice(0, MAX_HIGHLIGHT_TERMS);
+  const request = finalize(requestCandidates, evidence.request);
+  const response = finalize(responseCandidates, evidence.response);
+  const all = [...new Map([...request, ...response].map((value) => [value.toLocaleLowerCase(), value])).values()]
+    .sort((left, right) => right.length - left.length)
+    .slice(0, MAX_HIGHLIGHT_TERMS);
+  return { request, response, all };
 }
 
 function focusSummary(finding: Finding, evidence: RawTechnicalEvidence): string {
@@ -619,9 +641,9 @@ function presentTechnicalEvidence(
   evidence: RawTechnicalEvidence,
   profile: ReportProfile,
 ): AssuranceReportDocument['findings'][number]['technicalEvidence'] {
-  const highlightTerms = evidenceHighlightTerms(finding, evidence);
-  const request = presentHttpEvidence(evidence.request, profile.evidenceBodyMode, highlightTerms);
-  const response = presentHttpEvidence(evidence.response, profile.evidenceBodyMode, highlightTerms);
+  const highlightTerms = evidenceHighlightTerms(finding.param, evidence);
+  const request = presentHttpEvidence(evidence.request, profile.evidenceBodyMode, highlightTerms.request);
+  const response = presentHttpEvidence(evidence.response, profile.evidenceBodyMode, highlightTerms.response);
   const deficiencies = responseDeficiencies(finding, evidence);
   const responseHeader = splitHttpEvidence(response.text).header;
   const rawResponseBody = splitHttpEvidence(evidence.response).body;
@@ -648,7 +670,9 @@ function presentTechnicalEvidence(
     request: request.text,
     response: response.text,
     focusSummary: focusSummary(finding, evidence),
-    highlightTerms,
+    highlightTerms: highlightTerms.all,
+    requestHighlightTerms: highlightTerms.request,
+    responseHighlightTerms: highlightTerms.response,
     bodyMode: profile.evidenceBodyMode,
     requestBodyOmittedChars: request.omittedBodyChars,
     responseBodyOmittedChars: response.omittedBodyChars,
@@ -1929,14 +1953,28 @@ function htmlTable(headers: readonly string[], rows: readonly (readonly string[]
 
 function highlightedEvidenceHtml(value: string, terms: readonly string[], enabled: boolean): string {
   if (!enabled) return escapeHtml(value);
-  const normalizedTerms = [...new Set(terms.map((term) => term.trim()).filter((term) => term.length > 0))]
-    .sort((left, right) => right.length - left.length);
-  if (normalizedTerms.length === 0) return escapeHtml(value);
-  const escapedTerms = normalizedTerms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'));
-  const pattern = new RegExp(`(${escapedTerms.join('|')})`, 'giu');
-  return value.split(pattern).map((part, index) => index % 2 === 1
-    ? `<mark>${escapeHtml(part)}</mark>`
-    : escapeHtml(part)).join('');
+  const spans = matchingSpans(value, terms);
+  if (spans.length === 0) return escapeHtml(value);
+  const fragments: string[] = [];
+  let cursor = 0;
+  for (const span of spans) {
+    if (span.start > cursor) fragments.push(escapeHtml(value.slice(cursor, span.start)));
+    fragments.push(`<mark>${escapeHtml(value.slice(span.start, span.end))}</mark>`);
+    cursor = span.end;
+  }
+  if (cursor < value.length) fragments.push(escapeHtml(value.slice(cursor)));
+  return fragments.join('');
+}
+
+function resolvedHighlightTerms(
+  evidence: AssuranceReportDocument['findings'][number]['technicalEvidence'],
+  parameter: string,
+): { readonly request: readonly string[]; readonly response: readonly string[] } {
+  if (evidence.requestHighlightTerms !== undefined && evidence.responseHighlightTerms !== undefined) {
+    return { request: evidence.requestHighlightTerms, response: evidence.responseHighlightTerms };
+  }
+  const derived = evidenceHighlightTerms(parameter === '未入力' ? undefined : parameter, evidence);
+  return { request: derived.request, response: derived.response };
 }
 
 /**
@@ -1982,6 +2020,7 @@ export function renderTechnicalAnnexHtml(report: AssuranceReportDocument): Buffe
     : report.findings.map((finding, findingIndex) => {
         const exchanges = finding.technicalEvidenceByUrl.map((entry, exchangeIndex) => {
           const anchor = `${findingAnchor(findingIndex)}-http-${String(exchangeIndex + 1)}`;
+          const highlightTerms = resolvedHighlightTerms(entry.technicalEvidence, entry.parameter);
           return `<section class="http-exchange" id="${anchor}" data-nav-target>
             <h4>診断時HTTP証跡 ${String(exchangeIndex + 1)} / ${String(finding.technicalEvidenceByUrl.length)}</h4>
             <p class="url">${escapeHtml(entry.url)}</p>
@@ -1995,9 +2034,9 @@ export function renderTechnicalAnnexHtml(report: AssuranceReportDocument): Buffe
             ])}
             <p><strong>証拠ID:</strong> ${evidenceLinks(entry.evidenceIds)}</p>
             <h5>Request</h5>
-            <pre>${highlightedEvidenceHtml(entry.technicalEvidence.request, entry.technicalEvidence.highlightTerms, entry.technicalEvidence.highlightEnabled)}</pre>
+            <pre>${highlightedEvidenceHtml(entry.technicalEvidence.request, highlightTerms.request, entry.technicalEvidence.highlightEnabled)}</pre>
             <h5>Response</h5>
-            <pre>${highlightedEvidenceHtml(entry.technicalEvidence.response, entry.technicalEvidence.highlightTerms, entry.technicalEvidence.highlightEnabled)}</pre>
+            <pre>${highlightedEvidenceHtml(entry.technicalEvidence.response, highlightTerms.response, entry.technicalEvidence.highlightEnabled)}</pre>
             ${entry.technicalEvidence.responseDeficiencies.map((deficiency) => `<p class="focus"><strong>確認結果:</strong> ${htmlLines(deficiency)}</p>`).join('')}
             ${entry.technicalEvidence.attackInput !== '' || entry.technicalEvidence.observedEvidence !== '' ? htmlKeyValues([
               ['診断入力・攻撃文字列', entry.technicalEvidence.attackInput || '未入力'],
@@ -2309,6 +2348,7 @@ export async function renderAssuranceReport(report: AssuranceReportDocument): Pr
     children.push(heading('原因', 3), body(finding.cause));
     children.push(heading('再現手順', 3), body(finding.reproduction.prerequisites), ...finding.reproduction.steps.map((step, stepIndex) => body(`${String(stepIndex + 1)}. ${step}`)));
     for (const [evidenceIndex, entry] of finding.technicalEvidenceByUrl.entries()) {
+      const highlightTerms = resolvedHighlightTerms(entry.technicalEvidence, entry.parameter);
       children.push(body(entry.url, { boldLead: `診断時HTTP証跡 ${String(evidenceIndex + 1)} / ${String(finding.technicalEvidenceByUrl.length)}  ` }));
       children.push(evidenceFocusParagraph(entry.technicalEvidence.focusSummary, entry.technicalEvidence.highlightEnabled));
       children.push(keyValue([
@@ -2322,13 +2362,13 @@ export async function renderAssuranceReport(report: AssuranceReportDocument): Pr
       children.push(...httpEvidenceBlock(
         'Request',
         entry.technicalEvidence.request,
-        entry.technicalEvidence.highlightTerms,
+        highlightTerms.request,
         entry.technicalEvidence.highlightEnabled,
       ));
       children.push(...httpEvidenceBlock(
         'Response',
         entry.technicalEvidence.response,
-        entry.technicalEvidence.highlightTerms,
+        highlightTerms.response,
         entry.technicalEvidence.highlightEnabled,
       ));
       for (const deficiency of entry.technicalEvidence.responseDeficiencies) {

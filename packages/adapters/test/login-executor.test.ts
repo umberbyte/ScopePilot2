@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import type { LoginSessionCookie } from '@scopepilot2/core';
+import type { BrowserSessionState, LoginSessionCookie } from '@scopepilot2/core';
 import { PlaywrightLoginExecutor, type StubLoginBrowser, type StubLoginPage } from '../src/login-executor.ts';
 
 /**
@@ -53,7 +53,24 @@ class StubLoginPageImpl implements StubLoginPage {
     return this.cookiesValue;
   }
 
+  async browserState(): Promise<BrowserSessionState> {
+    return {
+      cookies: this.cookiesValue,
+      origins: [{
+        origin: 'http://target.test',
+        localStorage: [{ name: 'access_token', value: 'bearer-secret' }],
+        sessionStorage: [{ name: 'csrf', value: 'csrf-secret' }],
+      }],
+    };
+  }
+
   async close(): Promise<void> {}
+
+  observedRequestsValue: readonly import('@scopepilot2/contracts').ObservedHttpRequest[] = [];
+
+  observedRequests(): readonly import('@scopepilot2/contracts').ObservedHttpRequest[] {
+    return this.observedRequestsValue;
+  }
 }
 
 function createStubBrowser(): { browser: StubLoginBrowser; page: StubLoginPageImpl; proxyOptions: (string | undefined)[] } {
@@ -93,6 +110,53 @@ describe('login executor (stub browser 契約検証)', () => {
     ]);
     assert.deepEqual(stub.page.clicked, ['input[type=submit]']);
     assert.deepEqual(result.cookies.map((cookie) => cookie.name), ['PHPSESSID']);
+    assert.deepEqual(result.browserState?.origins.map((entry) => ({
+      origin: entry.origin,
+      localNames: entry.localStorage.map((item) => item.name),
+      sessionNames: entry.sessionStorage.map((item) => item.name),
+    })), [{ origin: 'http://target.test', localNames: ['access_token'], sessionNames: ['csrf'] }]);
+  });
+
+  test('login 実行中の同一Originリクエストを入力点のみで観測し候補化できる形で返す', async () => {
+    const stub = createStubBrowser();
+    stub.page.observedRequestsValue = [
+      {
+        requestId: 'login-000001',
+        url: 'http://target.test/api/login',
+        method: 'POST',
+        resourceType: 'xhr',
+        contentType: 'application/json',
+        inputPoints: [
+          { name: 'email', location: 'body', type: 'json' },
+          { name: 'password', location: 'body', type: 'json' },
+        ],
+        sourceUrl: 'http://target.test/login.php',
+      },
+      {
+        requestId: 'login-000002',
+        url: 'https://analytics.example/collect',
+        method: 'POST',
+        resourceType: 'xhr',
+        contentType: 'application/json',
+        inputPoints: [{ name: 'event', location: 'body', type: 'json' }],
+        sourceUrl: 'http://target.test/login.php',
+      },
+    ];
+    const executor = new PlaywrightLoginExecutor({ launcher: async () => stub.browser });
+    const result = await executor.execute({
+      baseUrl: 'http://target.test',
+      steps: [
+        { kind: 'navigate', target: '/login.php' },
+        { kind: 'assert', target: 'Welcome back' },
+      ],
+      secretValues: {},
+      expectedUrlPrefix: 'http://target.test/',
+    });
+
+    assert.equal(result.authenticated, true);
+    // 同一Originだけを返し、第三者 (analytics) は含まない。値は元々含まれない。
+    assert.deepEqual(result.observedRequests?.map((request) => request.url), ['http://target.test/api/login']);
+    assert.deepEqual(result.observedRequests?.[0]?.inputPoints.map((point) => point.name), ['email', 'password']);
   });
 
   test('URL が一致しても assert が失敗すれば未認証 (F09-UT-002)', async () => {

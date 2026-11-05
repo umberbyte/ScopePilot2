@@ -10,6 +10,9 @@ import catalogJson from '../catalog/workflow-v2.json' with { type: 'json' };
 export const PAYLOAD_CAPABILITIES = [
   'authentication-throttling',
   'sql-injection',
+  'cross-site-scripting',
+  'open-redirect',
+  'path-traversal',
   'command-injection',
   'csrf-control',
   'workflow-state',

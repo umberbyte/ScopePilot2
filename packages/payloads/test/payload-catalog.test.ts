@@ -50,11 +50,11 @@ function payloadsOf(document: Record<string, unknown>): Record<string, unknown>[
 
 test('built-in catalog has a stable versioned reference and valid pairs', () => {
   assert.equal(WORKFLOW_PAYLOAD_CATALOG.catalog.id, 'scopepilot-workflow-payloads');
-  assert.equal(WORKFLOW_PAYLOAD_CATALOG.catalog.version, '2.0.0');
+  assert.equal(WORKFLOW_PAYLOAD_CATALOG.catalog.version, '2.1.0');
   assert.match(WORKFLOW_PAYLOAD_CATALOG_SHA256, /^[a-f0-9]{64}$/);
   assert.equal(
     WORKFLOW_PAYLOAD_CATALOG_REFERENCE,
-    `scopepilot-workflow-payloads/v2.0.0 sha256:${WORKFLOW_PAYLOAD_CATALOG_SHA256}`,
+    `scopepilot-workflow-payloads/v2.1.0 sha256:${WORKFLOW_PAYLOAD_CATALOG_SHA256}`,
   );
   assert.equal(Object.isFrozen(WORKFLOW_PAYLOAD_CATALOG), true);
   assert.equal(Object.isFrozen(WORKFLOW_PAYLOAD_CATALOG.payloads), true);

@@ -1,11 +1,30 @@
 /** 外部 engine への port。adapters が実装し、simulation は固定 fixture で実装する。 */
-import type { ActiveScanRequest, EngineAlert, EngineProgress, PageObservation, RequestInputPoint } from '@scopepilot2/contracts';
+import type { ActiveScanRequest, EngineAlert, EngineProgress, ObservedHttpRequest, PageObservation, RequestInputPoint } from '@scopepilot2/contracts';
 import type { LoginFlowStep } from '../domain/authentication-session.ts';
+
+/** payload 実行検証の結果 (browser で攻撃コードが実際に実行されたか)。 */
+export interface PayloadExecutionVerification {
+  /** dialog (alert/confirm/prompt) の発火など、コード実行の根拠が得られたか。 */
+  readonly executed: boolean;
+  /** 実行の根拠となった信号 (dialog 種別と先頭のみ。長文は切り詰める)。 */
+  readonly signals: readonly string[];
+}
 
 /** 探索 (Playwright 相当)。実 adapter は browser context の request interception で scope を強制する。 */
 export interface ExplorationPort {
   readonly engineVersion: string;
   observe(url: string): Promise<PageObservation | null>;
+  /**
+   * Observe with an authenticated browser state. Implementations must keep
+   * storage values in memory only and must not place them in observations,
+   * events, evidence, or API responses.
+   */
+  observeWithSession?(url: string, session: BrowserSessionState): Promise<PageObservation | null>;
+  /**
+   * 検証用 URL (payload 付き) を実 browser で開き、攻撃コードの実行 (dialog 発火等)
+   * を観測する (design/f08: 反射の所見と実行確認を区別する)。未実装は省略可能。
+   */
+  verifyPayloadExecution?(url: string, session?: BrowserSessionState): Promise<PayloadExecutionVerification>;
 }
 
 /** 認証済み session の cookie (探索・診断へ一時的に渡す。永続層へ置かない)。 */
@@ -14,6 +33,32 @@ export interface LoginSessionCookie {
   readonly value: string;
   readonly domain: string;
   readonly path: string;
+  readonly expires?: number;
+  readonly httpOnly?: boolean;
+  readonly secure?: boolean;
+  readonly sameSite?: 'Strict' | 'Lax' | 'None';
+}
+
+/** A browser storage value. The value is secret-bearing and memory-only. */
+export interface BrowserStorageEntry {
+  readonly name: string;
+  readonly value: string;
+}
+
+/** Origin-scoped storage captured from an authenticated browser context. */
+export interface BrowserOriginStorage {
+  readonly origin: string;
+  readonly localStorage: readonly BrowserStorageEntry[];
+  readonly sessionStorage: readonly BrowserStorageEntry[];
+}
+
+/**
+ * Authenticated browser state used only between Core and browser adapters.
+ * It is deliberately absent from contracts and persistence repositories.
+ */
+export interface BrowserSessionState {
+  readonly cookies: readonly LoginSessionCookie[];
+  readonly origins: readonly BrowserOriginStorage[];
 }
 
 /** 能動診断 engine (ZAP 相当、Delegated)。停止は冪等とする (F11-UT-005)。 */
@@ -82,6 +127,14 @@ export interface LoginExecutionResult {
   readonly authenticated: boolean;
   readonly finalUrl: string;
   readonly cookies: readonly LoginSessionCookie[];
+  /** Full browser state for cookie-, localStorage-, and sessionStorage-based applications. */
+  readonly browserState?: BrowserSessionState;
+  /**
+   * login 実行中に観測した同一Originリクエスト (入力点の名前・種類のみ。値は含まない)。
+   * SPA の XHR 裏付け認証 API (POST /login 相当) は探索では観測できないため、
+   * 診断候補の根拠として使う。秘密値が観測結果へ露出しないことは契約で保証する。
+   */
+  readonly observedRequests?: readonly ObservedHttpRequest[];
 }
 
 /** login 実行 (browser 駆動・f09 相当)。実 adapter は Playwright、UT は fake で差し替える。 */

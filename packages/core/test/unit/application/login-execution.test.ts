@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import type { LoginExecutionInput, LoginExecutorPort, LoginSessionCookie, ExplorationPort } from '@scopepilot2/core';
+import type { BrowserSessionState, LoginExecutionInput, LoginExecutorPort, LoginSessionCookie, ExplorationPort } from '@scopepilot2/core';
 import type { PageObservation } from '@scopepilot2/contracts';
 import { bootstrapFlow } from '../support/test-flow.ts';
 
@@ -11,13 +11,21 @@ import { bootstrapFlow } from '../support/test-flow.ts';
 class FakeLoginExecutor implements LoginExecutorPort {
   readonly engineVersion = 'fake-login-1';
   readonly inputs: readonly LoginExecutionInput[] = [];
-  nextResult: { authenticated: boolean; finalUrl: string; cookies: readonly LoginSessionCookie[] } = {
+  nextResult: { authenticated: boolean; finalUrl: string; cookies: readonly LoginSessionCookie[]; browserState?: BrowserSessionState } = {
     authenticated: true,
     finalUrl: 'http://fixture.target.test/index.php',
     cookies: [{ name: 'PHPSESSID', value: 'session-secret-value', domain: 'fixture.target.test', path: '/' }],
+    browserState: {
+      cookies: [{ name: 'PHPSESSID', value: 'session-secret-value', domain: 'fixture.target.test', path: '/' }],
+      origins: [{
+        origin: 'http://fixture.target.test',
+        localStorage: [{ name: 'access_token', value: 'browser-local-secret' }],
+        sessionStorage: [{ name: 'csrf', value: 'browser-session-secret' }],
+      }],
+    },
   };
 
-  async execute(input: LoginExecutionInput): Promise<{ authenticated: boolean; finalUrl: string; cookies: readonly LoginSessionCookie[] }> {
+  async execute(input: LoginExecutionInput): Promise<{ authenticated: boolean; finalUrl: string; cookies: readonly LoginSessionCookie[]; browserState?: BrowserSessionState }> {
     (this.inputs as LoginExecutionInput[]).push(input);
     return this.nextResult;
   }
@@ -26,7 +34,7 @@ class FakeLoginExecutor implements LoginExecutorPort {
 /** observeWithSession を持つ explorer (cookie 受取を記録)。 */
 class SessionRecordingExplorer implements ExplorationPort {
   readonly engineVersion = 'session-explorer-1';
-  readonly sessionCookiesPerCall: (readonly LoginSessionCookie[])[] = [];
+  readonly sessionStatesPerCall: BrowserSessionState[] = [];
   observeCalls = 0;
   links: readonly string[] = [];
 
@@ -36,10 +44,10 @@ class SessionRecordingExplorer implements ExplorationPort {
 
   async observeWithSession(
     url: string,
-    session: { readonly cookies: readonly LoginSessionCookie[] },
+    session: BrowserSessionState,
   ): Promise<PageObservation | null> {
     this.observeCalls += 1;
-    this.sessionCookiesPerCall.push(session.cookies);
+    this.sessionStatesPerCall.push(session);
     return {
       url,
       status: 200,
@@ -93,7 +101,9 @@ describe('runLogin (service・design/f09)', () => {
     const run = await service.runExploration(operator, plan, confirmation, { maxDepth: 1, role: 'admin' });
     assert.equal(run.runRecord.state, 'Completed');
     assert.equal(explorer.observeCalls, 1);
-    assert.deepEqual(explorer.sessionCookiesPerCall[0]?.map((cookie) => cookie.name), ['PHPSESSID']);
+    assert.deepEqual(explorer.sessionStatesPerCall[0]?.cookies.map((cookie) => cookie.name), ['PHPSESSID']);
+    assert.deepEqual(explorer.sessionStatesPerCall[0]?.origins[0]?.localStorage.map((entry) => entry.name), ['access_token']);
+    assert.deepEqual(explorer.sessionStatesPerCall[0]?.origins[0]?.sessionStorage.map((entry) => entry.name), ['csrf']);
 
     // 監査 event は参照のみで、秘密値を含まない (F09-UT-006)。
     const eventsText = JSON.stringify(service.events());
@@ -101,6 +111,8 @@ describe('runLogin (service・design/f09)', () => {
     assert.ok(eventsText.includes('vault://admin-user'));
     assert.ok(!eventsText.includes('password123'));
     assert.ok(!eventsText.includes('session-secret-value'));
+    assert.ok(!eventsText.includes('browser-local-secret'));
+    assert.ok(!eventsText.includes('browser-session-secret'));
   });
 
   test('authenticated exploration rejects logout and setup URLs before browser navigation', async () => {

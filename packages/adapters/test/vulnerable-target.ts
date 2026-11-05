@@ -22,6 +22,8 @@ export interface VulnerableTarget {
   readonly loginUrl: string;
   readonly authenticatedUrl: string;
   readonly domUrl: string;
+  /** innerHTML 反射による DOM XSS (payload 実行検証の結合試験用)。 */
+  xssUrl(payload: string): string;
 }
 
 const INDEX_HTML = [
@@ -62,6 +64,13 @@ export function startVulnerableTarget(): Promise<VulnerableTarget> {
     if (url.pathname === '/echo') {
       const x = url.searchParams.get('x') ?? '';
       send(`<!doctype html><html><body>reflected: ${x}</body></html>`);
+      return;
+    }
+    if (url.pathname === '/xss') {
+      // q を一度 text node へ反射し、script がそれを innerHTML へ素の文字列として
+      // 書き戻す DOM XSS (payload 実行検証・dialog 検出の結合試験用)。
+      const q = (url.searchParams.get('q') ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+      send(`<!doctype html><html><body><div id="src">${q}</div><div id="out"></div><script>document.getElementById('out').innerHTML = document.getElementById('src').textContent;</script></body></html>`);
       return;
     }
     if (url.pathname === '/plain') {
@@ -141,6 +150,7 @@ export function startVulnerableTarget(): Promise<VulnerableTarget> {
         loginUrl: `${base}/login`,
         authenticatedUrl: `${base}/authenticated/page`,
         domUrl: `${base}/dom-flow?marker=scopepilot-dom-marker`,
+        xssUrl: (payload: string) => `${base}/xss?q=${encodeURIComponent(payload)}`,
       });
     });
   });

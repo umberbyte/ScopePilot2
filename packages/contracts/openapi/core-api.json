@@ -5780,7 +5780,7 @@
           "enableWorkflowScan": {
             "type": "boolean",
             "default": false,
-            "description": "Add the 21-check DVWA workflow scan to the confirmed plan."
+            "description": "Add target-aware generic HTTP diagnostics to the confirmed plan."
           },
           "limits": {
             "type": "object",
@@ -6002,6 +6002,10 @@
             "type": "string",
             "description": "canonical URL"
           },
+          "finalUrl": {
+            "type": "string",
+            "description": "Final main-frame URL after redirects or client-side routing"
+          },
           "status": {
             "type": "integer"
           },
@@ -6044,6 +6048,59 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ObservedHttpRequest"
+            }
+          },
+          "routeTemplates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "読込済みスクリプトで観測した SPA ルートテンプレート (絶対・同一Origin・:param セグメント持ち)。テンプレート自体は巡回せず、観測済みリソースIDでのみ具体化する。"
+          },
+          "observedResourceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "同一Originの API JSON 応答とリクエストURLパス要素から観測した識別子様の値 (短い数値・UUID)。応答本文は保存しない。"
+          },
+          "javascriptSignals": {
+            "type": "object",
+            "description": "DOMから実測したクライアント側実行要素。値やスクリプト本文は保存しない。",
+            "properties": {
+              "scriptElements": {
+                "type": "integer"
+              },
+              "inlineEventHandlers": {
+                "type": "integer"
+              },
+              "javascriptUrls": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "scriptElements",
+              "inlineEventHandlers",
+              "javascriptUrls"
+            ]
+          },
+          "scriptApiCalls": {
+            "type": "array",
+            "description": "読込済みスクリプトから抽出した同一Originの HTTP API 呼び出し定義 (メソッド付き)。書き込み API は操作でしか発火しないため client コード内の定義が観測根拠になる。スクリプト本文は保存しない。",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "method": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url",
+                "method"
+              ]
             }
           }
         }
@@ -6411,6 +6468,46 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Finding"
+            }
+          },
+          "payloadVerifications": {
+            "type": "array",
+            "description": "取込所見のうち反射系 XSS について browser で payload 実行を確認した結果 (design/30 30.1)。dialog 発火等の実行根拠と証跡参照を含む。",
+            "items": {
+              "type": "object",
+              "properties": {
+                "findingId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "executed": {
+                  "type": "boolean"
+                },
+                "signals": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "evidenceRef": {
+                  "type": "string"
+                },
+                "error": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "findingId",
+                "title",
+                "url",
+                "executed",
+                "signals"
+              ]
             }
           }
         }
@@ -7803,13 +7900,34 @@
           },
           "reproduction": {
             "type": "string",
-            "enum": ["reproduced", "not-reproduced"]
+            "enum": [
+              "reproduced",
+              "not-reproduced"
+            ]
           },
-          "notes": { "type": "string", "minLength": 1 },
-          "severityRationale": { "type": "string", "minLength": 1 },
-          "cvssVersion": { "type": "string", "enum": ["3.1", "4.0"] },
-          "cvssVector": { "type": "string" },
-          "cvssScore": { "type": "number", "minimum": 0, "maximum": 10 }
+          "notes": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severityRationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cvssVersion": {
+            "type": "string",
+            "enum": [
+              "3.1",
+              "4.0"
+            ]
+          },
+          "cvssVector": {
+            "type": "string"
+          },
+          "cvssScore": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10
+          }
         },
         "additionalProperties": false
       },

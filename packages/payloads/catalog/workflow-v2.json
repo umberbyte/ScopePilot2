@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "catalog": {
     "id": "scopepilot-workflow-payloads",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "source": "ScopePilot curated payload set",
     "publishedAt": "2026-10-26",
     "generated": false,
-    "description": "Context-aware, paired and bounded diagnostic inputs for stateful web application assessment."
+    "description": "Context-aware, paired and bounded diagnostic inputs for generic HTTP and stateful web application assessment."
   },
   "payloads": [
     {
@@ -19,6 +19,50 @@
       "oracle": "rate-limit-profile",
       "tags": ["credential", "negative-control"],
       "safety": { "risk": "state-changing", "maxAttempts": 12, "requiresConfirmation": true, "requiresTestAccount": true, "requiresRollback": true, "leavesResidue": false, "cleanupStrategy": "Verify the supplied test account remains usable and stop immediately on lockout." }
+    },
+    {
+      "id": "xss.reflection.marker",
+      "capability": "cross-site-scripting",
+      "contexts": ["query", "html"],
+      "platforms": ["any", "browser"],
+      "template": "{{marker}}<>'\"",
+      "variables": ["marker"],
+      "oracle": "marker-in-response",
+      "tags": ["reflection", "marker", "html-meta-characters"],
+      "safety": { "risk": "read-only", "maxAttempts": 1, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "sqli.error.single-quote",
+      "capability": "sql-injection",
+      "contexts": ["query", "form", "json"],
+      "platforms": ["sql"],
+      "template": "'",
+      "variables": [],
+      "oracle": "response-differential",
+      "tags": ["error", "quoted"],
+      "safety": { "risk": "read-only", "maxAttempts": 1, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "redirect.external-origin.marker",
+      "capability": "open-redirect",
+      "contexts": ["query"],
+      "platforms": ["any"],
+      "template": "https://scopepilot-check.invalid/{{marker}}",
+      "variables": ["marker"],
+      "oracle": "response-differential",
+      "tags": ["external-origin", "marker"],
+      "safety": { "risk": "read-only", "maxAttempts": 1, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
+    },
+    {
+      "id": "path.posix.passwd",
+      "capability": "path-traversal",
+      "contexts": ["query"],
+      "platforms": ["posix"],
+      "template": "../../../../../../etc/passwd",
+      "variables": [],
+      "oracle": "marker-in-response",
+      "tags": ["local-file", "posix"],
+      "safety": { "risk": "read-only", "maxAttempts": 1, "requiresConfirmation": false, "requiresTestAccount": false, "requiresRollback": false, "leavesResidue": false }
     },
     {
       "id": "sqli.boolean.quoted.true",

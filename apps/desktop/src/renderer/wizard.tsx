@@ -390,6 +390,15 @@ interface ScanRunResultView {
     readonly error?: string;
   };
   readonly nuclei?: { status: 'completed' | 'failed'; engineVersion: string; templateBundleHash?: string; importedCount: number; duplicateCount: number; quarantinedCount: number; excludedOutOfScope: number; error?: string };
+  readonly payloadVerifications?: readonly {
+    readonly findingId: string;
+    readonly title: string;
+    readonly url: string;
+    readonly executed: boolean;
+    readonly signals: readonly string[];
+    readonly evidenceRef?: string;
+    readonly error?: string;
+  }[];
 }
 
 interface ScanExecutionView {
@@ -569,13 +578,13 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
     const deferred = new Set(['workflow-state', 'session-analysis', 'authorization-differential', 'upload-workflow', 'api-schema', 'cryptography-review']);
     return adoptedCandidates.filter((candidate) => candidate.diagnosticTracks?.some((track) => deferred.has(track)) === true);
   }, [adoptedCandidates]);
-  const workflowScanEligible = useMemo(() => authenticatedRole !== '' && adoptedCandidates.some((candidate) => {
+  const workflowScanEligible = useMemo(() => adoptedCandidates.some((candidate) => {
     try {
-      return new URL(candidate.url).pathname.toLowerCase().includes('/vulnerabilities/');
+      return ['http:', 'https:'].includes(new URL(candidate.url).protocol);
     } catch {
       return false;
     }
-  }), [adoptedCandidates, authenticatedRole]);
+  }), [adoptedCandidates]);
   const workflowPlanStep = useMemo(
     () => scanPlan?.plan.steps.find((candidate) => candidate.kind === 'workflow-scan') ?? null,
     [scanPlan],
@@ -1260,7 +1269,13 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
               requests: run.workflow.requestCount,
               payloadSet: run.workflow.payloadSet,
             });
-      setRunSummary(`${t('wizard.s06.done', { engineVersion: run.engineVersion, overshoot: run.overshootReservation, findings: run.findings.length })} ${workflowStatus} ${nucleiStatus}`);
+      const verificationStatus = (run.payloadVerifications ?? []).length === 0
+        ? ''
+        : ` ${t('wizard.s06.payloadVerificationDone', {
+            verified: run.payloadVerifications?.length ?? 0,
+            executed: (run.payloadVerifications ?? []).filter((verification) => verification.executed).length,
+          })}`;
+      setRunSummary(`${t('wizard.s06.done', { engineVersion: run.engineVersion, overshoot: run.overshootReservation, findings: run.findings.length })} ${workflowStatus} ${nucleiStatus}${verificationStatus}`);
       setData((current) => ({ ...current, runFinished: true }));
       if (interactivePlan !== null && interactivePlanConfirmed) {
         await executeInteractiveDiagnostics();

@@ -7,12 +7,14 @@
  * 解決する (extract で変数化した値も同じ key 空間で参照できる)。
  *
  * CSRF token 等の hidden 項目は form submit 時に browser が現在値を自動送付する
- * (実測: DVWA login は token の再取得不要)。認証後の cookie は scan adapter へ
+ * 対象ごとのlogin flowを実行する。認証後の cookie は scan adapter へ
  * 明示的に渡す。proxyServer は高度な画面から明示指定された場合のみ利用する。
  */
-import type { LoginExecutionInput, LoginExecutionResult, LoginExecutorPort, LoginSessionCookie } from '@scopepilot2/core';
+import type { BrowserSessionState, LoginExecutionInput, LoginExecutionResult, LoginExecutorPort, LoginSessionCookie } from '@scopepilot2/core';
+import type { ObservedHttpRequest } from '@scopepilot2/contracts';
 import { detectAuthState } from '@scopepilot2/core';
 import type { LoginFlowStep } from '@scopepilot2/core';
+import { requestInputPoints } from './playwright-explorer.ts';
 
 /** テスト差替え用の最小 browser 面 (playwright の該当部分に対応)。 */
 export interface StubLoginPage {
@@ -25,6 +27,9 @@ export interface StubLoginPage {
   content(): Promise<string>;
   url(): string;
   cookies(): Promise<readonly LoginSessionCookie[]>;
+  browserState?(): Promise<BrowserSessionState>;
+  /** login 実行中に観測したリクエスト (入力点の名前のみ。値は含まない)。 */
+  observedRequests?(): readonly ObservedHttpRequest[];
   close(): Promise<void>;
 }
 
@@ -44,6 +49,20 @@ const defaultLauncher: LoginBrowserLauncher = async () => {
         proxyServer === undefined ? {} : { proxy: { server: proxyServer } },
       );
       const page = await context.newPage();
+      // login 実行中の通信観測 (診断候補の根拠。値は inputPoints の名前だけ)。
+      const requests: ObservedHttpRequest[] = [];
+      const captureRequest = (request: import('playwright').Request): void => {
+        requests.push({
+          requestId: `login-${String(requests.length + 1).padStart(6, '0')}`,
+          url: request.url(),
+          method: request.method().toUpperCase(),
+          resourceType: request.resourceType(),
+          ...(request.headers()['content-type'] === undefined ? {} : { contentType: request.headers()['content-type'] }),
+          inputPoints: requestInputPoints(request),
+          sourceUrl: page.url() || request.url(),
+        });
+      };
+      page.on('request', captureRequest);
       return {
         goto: async (url: string) => {
           await page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -55,7 +74,7 @@ const defaultLauncher: LoginBrowserLauncher = async () => {
           await page.selectOption(selector, value);
         },
         click: async (selector: string) => {
-          // Register the navigation waiter before clicking. DVWA can update the
+          // Register the navigation waiter before clicking. A target can update the
           // URL before the new document body is ready, which otherwise makes
           // the following authentication assertion race the response render.
           const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10_000 }).catch(() => null);
@@ -68,15 +87,55 @@ const defaultLauncher: LoginBrowserLauncher = async () => {
         inputValue: async (selector: string) => await page.inputValue(selector),
         content: async () => await page.content(),
         url: () => page.url(),
+        observedRequests: () => [...requests],
         cookies: async () =>
           (await context.cookies()).map((cookie) => ({
             name: cookie.name,
             value: cookie.value,
             domain: cookie.domain,
             path: cookie.path,
+            expires: cookie.expires,
+            httpOnly: cookie.httpOnly,
+            secure: cookie.secure,
+            sameSite: cookie.sameSite,
           })),
+        browserState: async () => {
+          const stored = await context.storageState();
+          const currentUrl = new URL(page.url());
+          const currentStorage = await page.evaluate(() => ({
+            localStorage: Array.from({ length: globalThis.localStorage.length }, (_, index) => {
+              const name = globalThis.localStorage.key(index) ?? '';
+              return { name, value: globalThis.localStorage.getItem(name) ?? '' };
+            }).filter((entry) => entry.name !== ''),
+            sessionStorage: Array.from({ length: globalThis.sessionStorage.length }, (_, index) => {
+              const name = globalThis.sessionStorage.key(index) ?? '';
+              return { name, value: globalThis.sessionStorage.getItem(name) ?? '' };
+            }).filter((entry) => entry.name !== ''),
+          }));
+          const origins = stored.origins.map((origin) => ({
+            origin: origin.origin,
+            localStorage: origin.origin === currentUrl.origin ? currentStorage.localStorage : origin.localStorage,
+            sessionStorage: origin.origin === currentUrl.origin ? currentStorage.sessionStorage : [],
+          }));
+          if (!origins.some((origin) => origin.origin === currentUrl.origin)) {
+            origins.push({ origin: currentUrl.origin, ...currentStorage });
+          }
+          return {
+            cookies: stored.cookies.map((cookie) => ({
+              name: cookie.name,
+              value: cookie.value,
+              domain: cookie.domain,
+              path: cookie.path,
+              expires: cookie.expires,
+              httpOnly: cookie.httpOnly,
+              secure: cookie.secure,
+              sameSite: cookie.sameSite,
+            })),
+            origins,
+          };
+        },
         close: async () => {
-          await page.close();
+          await context.close();
         },
       } satisfies StubLoginPage;
     },
@@ -113,7 +172,7 @@ export class PlaywrightLoginExecutor implements LoginExecutorPort {
     const browser = await this.ensureBrowser();
     const page = await browser.newPage(
       // Chromium は既定で localhost を proxy bypass する。loopback の所有ターゲットも
-      // proxy 経由にするため bypass 除外の特殊規則 <-loopback> を渡す (DVWA 等
+      // proxy 経由にするため bypass 除外の特殊規則 <-loopback> を渡す (loopback上の
       // 非 loopback 対象では影響しない)。
       input.proxyServer === undefined ? {} : { proxyServer: input.proxyServer, bypass: '<-loopback>' },
     );
@@ -152,10 +211,23 @@ export class PlaywrightLoginExecutor implements LoginExecutorPort {
           // assert step が無い場合は marker 検査で判断しない (F09-UT-002: URL 一致だけでは認証済みとしない)。
           assertResult: sawAssert ? assertResult : false,
         }) === 'authenticated';
+      const browserState = await page.browserState?.() ?? { cookies: [...(await page.cookies())], origins: [] };
+      // 観測は対象の base URL と同一 Origin に限定する (第三者通信を候補化しない)。
+      const baseOrigin = new URL(input.baseUrl).origin;
+      const observedRequests = (page.observedRequests?.() ?? [])
+        .filter((request) => {
+          try {
+            return new URL(request.url).origin === baseOrigin;
+          } catch {
+            return false;
+          }
+        });
       return {
         authenticated,
         finalUrl,
-        cookies: [...(await page.cookies())],
+        cookies: browserState.cookies,
+        browserState,
+        ...(observedRequests.length === 0 ? {} : { observedRequests }),
       };
     } finally {
       await page.close();

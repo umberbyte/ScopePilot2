@@ -15,6 +15,8 @@ export interface NodeWorkflowScanTransportOptions {
   readonly baseUrl: string;
   readonly maxRequests?: number;
   readonly requestTimeoutMs?: number;
+  /** 既存の認証済み role session。値はログへ出さず、この origin の通信だけに適用する。 */
+  readonly sessionCookies?: readonly { readonly name: string; readonly value: string }[];
   /** 証跡ログへ出してはならない値（パスワード・一時パスワード等）。 */
   readonly redactionValues?: readonly string[];
   readonly signal?: AbortSignal;
@@ -41,6 +43,9 @@ export class NodeWorkflowScanTransport implements WorkflowScanTransport {
       .filter((value) => value.trim() !== '')
       .sort((a, b) => b.length - a.length);
     this.signal = options.signal;
+    for (const cookie of options.sessionCookies ?? []) {
+      if (cookie.name.trim() !== '') this.cookies.set(cookie.name, cookie.value);
+    }
   }
 
   get requestCount(): number {
@@ -76,14 +81,21 @@ export class NodeWorkflowScanTransport implements WorkflowScanTransport {
       contentType = built.contentType;
     }
     const headers: Record<string, string> = {};
+    for (const [name, value] of Object.entries(spec.headers ?? {})) {
+      const normalized = name.trim().toLowerCase();
+      if (['host', 'cookie', 'authorization', 'proxy-authorization', 'content-length'].includes(normalized)) {
+        throw new Error(`workflow scan header is managed by the transport: ${normalized}`);
+      }
+      headers[normalized] = value;
+    }
     if (contentType !== undefined) {
       headers['content-type'] = contentType;
     }
     if (this.cookies.size > 0) {
       headers['cookie'] = [...this.cookies.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
     }
-    headers['referer'] = `${this.baseUrl}/index.php`;
-    headers['user-agent'] = 'ScopePilot2-WorkflowScan/1.0';
+    headers['referer'] = `${this.baseUrl}/`;
+    headers['user-agent'] = 'ScopePilot2-HttpDiagnostic/1.0';
     const timeout = AbortSignal.timeout(this.requestTimeoutMs);
     const signals = this.signal === undefined ? [timeout] : [timeout, this.signal];
     const response = await fetch(target, {
@@ -101,13 +113,20 @@ export class NodeWorkflowScanTransport implements WorkflowScanTransport {
         this.cookies.set(pair.slice(0, separator).trim(), pair.slice(separator + 1).trim());
       }
     }
+    const responseHeaders: Record<string, string> = {};
+    response.headers.forEach((value, name) => {
+      responseHeaders[name.toLowerCase()] = value;
+    });
+    const setCookieHeaders = response.headers.getSetCookie();
     const result: WorkflowScanHttpResponse = {
       status: response.status,
       body: bodyText,
       location: response.headers.get('location') ?? '',
       contentType: response.headers.get('content-type') ?? '',
       contentSecurityPolicy: response.headers.get('content-security-policy') ?? '',
-      setCookies: response.headers.getSetCookie().map((value) => (value.split(';', 2)[0] ?? '').trim()),
+      setCookies: setCookieHeaders.map((value) => (value.split(';', 2)[0] ?? '').trim()),
+      headers: responseHeaders,
+      setCookieHeaders,
     };
     this.log.push({
       method: spec.method,

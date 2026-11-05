@@ -4,6 +4,7 @@
  */
 import { existsSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createServer } from 'node:net';
 import { dirname } from 'node:path';
 import type { ActiveScanEnginePort, ExplorationPort, LoginExecutorPort, NucleiScanPort } from '@scopepilot2/core';
 import type { ActiveScanRequest, EngineAlert, EngineCapabilitySnapshot, EngineProgress } from '@scopepilot2/contracts';
@@ -180,33 +181,61 @@ async function waitForZap(baseUrl: string, attempts: number): Promise<ZapEngineA
   return null;
 }
 
+/**
+ * Pick an ephemeral loopback port for a ZAP daemon owned by ScopePilot.
+ * Port 8080 is also a common target application port (for example a local
+ * a fast local test application), so the result must not depend on which process starts first.
+ */
+export async function resolveOwnedZapBaseUrl(preferredBaseUrl: string): Promise<string> {
+  const preferred = new URL(preferredBaseUrl);
+  const bind = async (port: number): Promise<number> => await new Promise<number>((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.once('error', reject);
+    server.listen(port, preferred.hostname, () => {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        server.close();
+        reject(new Error('failed to resolve the local ZAP listener address'));
+        return;
+      }
+      server.close((cause) => cause === undefined ? resolve(address.port) : reject(cause));
+    });
+  });
+  const availablePort = await bind(0);
+  return `${preferred.protocol}//${preferred.hostname}:${String(availablePort)}`;
+}
+
 async function resolveZap(selection: EngineSelection): Promise<{
   readonly engine: ActiveScanEnginePort;
   readonly available: boolean;
+  readonly baseUrl: string;
   readonly ownedProcess?: ChildProcess;
 }> {
   const existing = await waitForZap(selection.zapBaseUrl, 1);
-  if (existing !== null) return { engine: existing, available: true };
+  if (existing !== null) return { engine: existing, available: true, baseUrl: selection.zapBaseUrl };
   if (selection.zapBaseUrlWasExplicit) {
-    return { engine: new UnavailableActiveScanEngine(`configured endpoint ${selection.zapBaseUrl} did not respond`), available: false };
+    return { engine: new UnavailableActiveScanEngine(`configured endpoint ${selection.zapBaseUrl} did not respond`), available: false, baseUrl: selection.zapBaseUrl };
   }
   const executable = zapCandidates(selection).find((candidate) => existsSync(candidate));
   if (executable === undefined) {
-    return { engine: new UnavailableActiveScanEngine('install ZAP or set SCOPEPILOT_ZAP_BASE_URL'), available: false };
+    return { engine: new UnavailableActiveScanEngine('install ZAP or set SCOPEPILOT_ZAP_BASE_URL'), available: false, baseUrl: selection.zapBaseUrl };
   }
-  const endpoint = new URL(selection.zapBaseUrl);
+  const ownedBaseUrl = await resolveOwnedZapBaseUrl(selection.zapBaseUrl);
+  const endpoint = new URL(ownedBaseUrl);
   const child = spawn(executable, [
     '-daemon', '-host', endpoint.hostname, '-port', endpoint.port || '8080',
     '-config', 'api.disablekey=true',
     '-config', `api.addrs.addr.name=${endpoint.hostname}`,
     '-config', 'api.addrs.addr.regex=false',
   ], { cwd: dirname(executable), windowsHide: true, stdio: 'ignore' });
-  // Keep desktop startup bounded. A configured-but-unhealthy local installation must not hold
-  // the UI for several minutes; the user can correct the path in Settings and restart.
-  const started = await waitForZap(selection.zapBaseUrl, 35);
-  if (started !== null) return { engine: started, available: true, ownedProcess: child };
+  // Keep desktop startup bounded while allowing a cold ZAP 2.17 installation to load its
+  // add-ons.  The previous ~17.5 second window was shorter than the ~22 seconds measured on
+  // Windows, so a healthy daemon was marked Unsupported immediately before it began listening.
+  const started = await waitForZap(ownedBaseUrl, 120);
+  if (started !== null) return { engine: started, available: true, baseUrl: ownedBaseUrl, ownedProcess: child };
   child.kill();
-  return { engine: new UnavailableActiveScanEngine(`daemon did not become ready at ${selection.zapBaseUrl}`), available: false };
+  return { engine: new UnavailableActiveScanEngine(`daemon did not become ready at ${ownedBaseUrl}`), available: false, baseUrl: ownedBaseUrl };
 }
 
 async function resolveNuclei(selection: EngineSelection): Promise<NucleiScanPort | undefined> {
@@ -271,7 +300,7 @@ export async function composeEngines(
   const zapAdapter = zap.available && zap.engine instanceof ZapEngineAdapter ? zap.engine : undefined;
   const explorer = createExplorerEngine(
     selection,
-    zap.available ? selection.zapBaseUrl : undefined,
+    zap.available ? zap.baseUrl : undefined,
     zapAdapter === undefined ? undefined : async (url) => await zapAdapter.unsetActiveHttpSession(url),
   );
   const nucleiRunner = await resolveNuclei(selection);
@@ -315,7 +344,7 @@ export async function composeEngines(
       await loginExecutor.close();
       await interactshProvider?.close();
       if (zap.ownedProcess !== undefined) {
-        await fetch(`${selection.zapBaseUrl}/JSON/core/action/shutdown/`).catch(() => undefined);
+        await fetch(`${zap.baseUrl}/JSON/core/action/shutdown/`).catch(() => undefined);
         zap.ownedProcess.kill();
       }
     },

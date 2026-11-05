@@ -1,0 +1,1662 @@
+[
+ {
+  "key": "passwordHashLeakChallenge",
+  "name": "Password Hash Leak",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/currentUser.ts"
+  ],
+  "endpoints": [
+   "/rest/user/whoami"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "restfulXssChallenge",
+  "name": "API-only XSS",
+  "category": "XSS",
+  "disabled": false,
+  "solveFiles": [
+   "models/product.ts"
+  ],
+  "endpoints": [
+   "/api/Products",
+   "/rest/products"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "accessLogDisclosureChallenge",
+  "name": "Access Log",
+  "category": "Observability Failures",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "registerAdminChallenge",
+  "name": "Admin Registration",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "adminSectionChallenge",
+  "name": "Admin Section",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "fileWriteChallenge",
+  "name": "Arbitrary File Write",
+  "category": "Vulnerable Components",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileUpload.ts"
+  ],
+  "endpoints": [
+   "/file-upload",
+   "/profile/image/file",
+   "/rest/memories"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "resetPasswordBjoernOwaspChallenge",
+  "name": "Bjoern''s Favorite Pet",
+  "category": "Broken Authentication",
+  "disabled": false,
+  "solveFiles": [
+   "routes/resetPassword.ts"
+  ],
+  "endpoints": [
+   "/rest/user/reset-password"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "tokenSaleChallenge",
+  "name": "Blockchain Hype",
+  "category": "Security through Obscurity",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "nftUnlockChallenge",
+  "name": "NFT Takeover",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/checkKeys.ts"
+  ],
+  "endpoints": [
+   "/rest/web3/nftUnlocked",
+   "/rest/web3/submitKey"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "nftMintChallenge",
+  "name": "Mint the Honey Pot",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/nftMint.ts"
+  ],
+  "endpoints": [
+   "/rest/web3/nftMintListen",
+   "/rest/web3/walletNFTVerify"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "web3WalletChallenge",
+  "name": "Wallet Depletion",
+  "category": "Miscellaneous",
+  "disabled": false,
+  "solveFiles": [
+   "routes/web3Wallet.ts"
+  ],
+  "endpoints": [
+   "/rest/web3/walletExploitAddress"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "web3SandboxChallenge",
+  "name": "Web3 Sandbox",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "rceChallenge",
+  "name": "Blocked RCE DoS",
+  "category": "Insecure Deserialization",
+  "disabled": false,
+  "solveFiles": [
+   "routes/b2bOrder.ts"
+  ],
+  "endpoints": [
+   "/b2b/v2/orders"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "captchaBypassChallenge",
+  "name": "CAPTCHA Bypass",
+  "category": "Broken Anti Automation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "changePasswordBenderChallenge",
+  "name": "Change Bender''s Password",
+  "category": "Broken Authentication",
+  "disabled": false,
+  "solveFiles": [
+   "routes/changePassword.ts"
+  ],
+  "endpoints": [
+   "/rest/user/change-password"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "christmasSpecialChallenge",
+  "name": "Christmas Special",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/order.ts"
+  ],
+  "endpoints": [
+   "/rest/basket/:id/checkout"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "usernameXssChallenge",
+  "name": "CSP Bypass",
+  "category": "XSS",
+  "disabled": false,
+  "solveFiles": [
+   "routes/userProfile.ts"
+  ],
+  "endpoints": [
+   "/profile"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "persistedXssUserChallenge",
+  "name": "Client-side XSS Protection",
+  "category": "XSS",
+  "disabled": false,
+  "solveFiles": [
+   "models/user.ts"
+  ],
+  "endpoints": [
+   "/api/Users",
+   "/rest/user"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "directoryListingChallenge",
+  "name": "Confidential Document",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileServer.ts"
+  ],
+  "endpoints": [
+   "/ftp(?!/quarantine)/:file"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "localXssChallenge",
+  "name": "DOM XSS",
+  "category": "XSS",
+  "disabled": false,
+  "solveFiles": [
+   "lib/startup/registerWebsocketEvents.ts"
+  ],
+  "endpoints": [
+   "/socket.io/ (websocket)"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "dbSchemaChallenge",
+  "name": "Database Schema",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/search.ts"
+  ],
+  "endpoints": [
+   "/rest/products/search"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "deprecatedInterfaceChallenge",
+  "name": "Deprecated Interface",
+  "category": "Security Misconfiguration",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileUpload.ts"
+  ],
+  "endpoints": [
+   "/file-upload",
+   "/profile/image/file",
+   "/rest/memories"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "easterEggLevelOneChallenge",
+  "name": "Easter Egg",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileServer.ts"
+  ],
+  "endpoints": [
+   "/ftp(?!/quarantine)/:file"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "emailLeakChallenge",
+  "name": "Email Leak",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/currentUser.ts"
+  ],
+  "endpoints": [
+   "/rest/user/whoami"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "emptyUserRegistration",
+  "name": "Empty User Registration",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "ephemeralAccountantChallenge",
+  "name": "Ephemeral Accountant",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "errorHandlingChallenge",
+  "name": "Error Handling",
+  "category": "Security Misconfiguration",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts",
+   "test/api/repeat-notification.test.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "manipulateClockChallenge",
+  "name": "Expired Coupon",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/order.ts"
+  ],
+  "endpoints": [
+   "/rest/basket/:id/checkout"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "extraLanguageChallenge",
+  "name": "Extra Language",
+  "category": "Broken Anti Automation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "feedbackChallenge",
+  "name": "Five-Star Feedback",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "forgedCouponChallenge",
+  "name": "Forged Coupon",
+  "category": "Cryptographic Issues",
+  "disabled": false,
+  "solveFiles": [
+   "routes/order.ts"
+  ],
+  "endpoints": [
+   "/rest/basket/:id/checkout"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "forgedFeedbackChallenge",
+  "name": "Forged Feedback",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "forgedReviewChallenge",
+  "name": "Forged Review",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/createProductReviews.ts",
+   "routes/updateProductReviews.ts"
+  ],
+  "endpoints": [
+   "/rest/products/:id/reviews",
+   "/rest/products/reviews"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "jwtForgedChallenge",
+  "name": "Forged Signed JWT",
+  "category": "Vulnerable Components",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "forgottenDevBackupChallenge",
+  "name": "Forgotten Developer Backup",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileServer.ts"
+  ],
+  "endpoints": [
+   "/ftp(?!/quarantine)/:file"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "forgottenBackupChallenge",
+  "name": "Forgotten Sales Backup",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileServer.ts"
+  ],
+  "endpoints": [
+   "/ftp(?!/quarantine)/:file"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "typosquattingAngularChallenge",
+  "name": "Frontend Typosquatting",
+  "category": "Vulnerable Components",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "ghostLoginChallenge",
+  "name": "GDPR Data Erasure",
+  "category": "Broken Authentication",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "dataExportChallenge",
+  "name": "GDPR Data Theft",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/dataExport.ts"
+  ],
+  "endpoints": [
+   "/rest/user/data-export"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "httpHeaderXssChallenge",
+  "name": "HTTP-Header XSS",
+  "category": "XSS",
+  "disabled": false,
+  "solveFiles": [
+   "routes/saveLoginIp.ts"
+  ],
+  "endpoints": [
+   "/rest/saveLoginIp"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "continueCodeChallenge",
+  "name": "Imaginary Challenge",
+  "category": "Cryptographic Issues",
+  "disabled": false,
+  "solveFiles": [
+   "routes/restoreProgress.ts"
+  ],
+  "endpoints": [
+   "/rest/continue-code-findIt/apply/:continueCode",
+   "/rest/continue-code-fixIt/apply/:continueCode",
+   "/rest/continue-code/apply/:continueCode"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "dlpPasswordSprayingChallenge",
+  "name": "Leaked Access Logs",
+  "category": "Observability Failures",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "dlpPastebinDataLeakChallenge",
+  "name": "Leaked Unsafe Product",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "typosquattingNpmChallenge",
+  "name": "Legacy Typosquatting",
+  "category": "Vulnerable Components",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "loginAdminChallenge",
+  "name": "Login Admin",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "loginAmyChallenge",
+  "name": "Login Amy",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "loginBenderChallenge",
+  "name": "Login Bender",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "oauthUserPasswordChallenge",
+  "name": "Login Bjoern",
+  "category": "Broken Authentication",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "loginJimChallenge",
+  "name": "Login Jim",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "loginRapperChallenge",
+  "name": "Login MC SafeSearch",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "loginSupportChallenge",
+  "name": "Login Support Team",
+  "category": "Security Misconfiguration",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "basketManipulateChallenge",
+  "name": "Manipulate Basket",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/basketItems.ts"
+  ],
+  "endpoints": [
+   "/api/BasketItems",
+   "/api/BasketItems/:id"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "misplacedSignatureFileChallenge",
+  "name": "Misplaced Signature File",
+  "category": "Observability Failures",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileServer.ts"
+  ],
+  "endpoints": [
+   "/ftp(?!/quarantine)/:file"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "timingAttackChallenge",
+  "name": "Multiple Likes",
+  "category": "Broken Anti Automation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/likeProductReviews.ts"
+  ],
+  "endpoints": [
+   "/rest/products/reviews"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "easterEggLevelTwoChallenge",
+  "name": "Nested Easter Egg",
+  "category": "Cryptographic Issues",
+  "disabled": false,
+  "solveFiles": [
+   "routes/easterEgg.ts"
+  ],
+  "endpoints": [
+   "/the/devs/are/so/funny/they/hid/an/easter/egg/within/the/easter/egg"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "noSqlCommandChallenge",
+  "name": "NoSQL DoS",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/showProductReviews.ts"
+  ],
+  "endpoints": [
+   "/rest/products/:id/reviews"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "noSqlOrdersChallenge",
+  "name": "NoSQL Exfiltration",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/trackOrder.ts"
+  ],
+  "endpoints": [
+   "/rest/track-order/:id"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "noSqlReviewsChallenge",
+  "name": "NoSQL Manipulation",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/updateProductReviews.ts"
+  ],
+  "endpoints": [
+   "/rest/products/reviews"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "redirectCryptoCurrencyChallenge",
+  "name": "Outdated Allowlist",
+  "category": "Unvalidated Redirects",
+  "disabled": false,
+  "solveFiles": [
+   "routes/redirect.ts"
+  ],
+  "endpoints": [
+   "/redirect"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "weakPasswordChallenge",
+  "name": "Password Strength",
+  "category": "Broken Authentication",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "negativeOrderChallenge",
+  "name": "Payback Time",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/order.ts"
+  ],
+  "endpoints": [
+   "/rest/basket/:id/checkout"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "premiumPaywallChallenge",
+  "name": "Premium Paywall",
+  "category": "Cryptographic Issues",
+  "disabled": false,
+  "solveFiles": [
+   "routes/premiumReward.ts"
+  ],
+  "endpoints": [
+   "/this/page/is/hidden/behind/an/incredibly/high/paywall/that/could/only/be/unlocked/by/sending/1btc/to/us"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "privacyPolicyChallenge",
+  "name": "Privacy Policy",
+  "category": "Miscellaneous",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "privacyPolicyProofChallenge",
+  "name": "Privacy Policy Inspection",
+  "category": "Security through Obscurity",
+  "disabled": false,
+  "solveFiles": [
+   "routes/privacyPolicyProof.ts"
+  ],
+  "endpoints": [
+   "/we/may/also/instruct/you/to/refuse/all/reasonably/necessary/responsibility"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "changeProductChallenge",
+  "name": "Product Tampering",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "reflectedXssChallenge",
+  "name": "Reflected XSS",
+  "category": "XSS",
+  "disabled": false,
+  "solveFiles": [
+   "routes/trackOrder.ts"
+  ],
+  "endpoints": [
+   "/rest/track-order/:id"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "passwordRepeatChallenge",
+  "name": "Repetitive Registration",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "resetPasswordBenderChallenge",
+  "name": "Reset Bender''s Password",
+  "category": "Broken Authentication",
+  "disabled": false,
+  "solveFiles": [
+   "routes/resetPassword.ts"
+  ],
+  "endpoints": [
+   "/rest/user/reset-password"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "resetPasswordBjoernChallenge",
+  "name": "Reset Bjoern''s Password",
+  "category": "Broken Authentication",
+  "disabled": false,
+  "solveFiles": [
+   "routes/resetPassword.ts"
+  ],
+  "endpoints": [
+   "/rest/user/reset-password"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "resetPasswordJimChallenge",
+  "name": "Reset Jim''s Password",
+  "category": "Broken Authentication",
+  "disabled": false,
+  "solveFiles": [
+   "routes/resetPassword.ts"
+  ],
+  "endpoints": [
+   "/rest/user/reset-password"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "resetPasswordMortyChallenge",
+  "name": "Reset Morty''s Password",
+  "category": "Broken Anti Automation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/resetPassword.ts"
+  ],
+  "endpoints": [
+   "/rest/user/reset-password"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "retrieveBlueprintChallenge",
+  "name": "Retrieve Blueprint",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "ssrfChallenge",
+  "name": "SSRF",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "sstiChallenge",
+  "name": "SSTi",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "scoreBoardChallenge",
+  "name": "Score Board",
+  "category": "Miscellaneous",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "securityPolicyChallenge",
+  "name": "Security Policy",
+  "category": "Miscellaneous",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "persistedXssFeedbackChallenge",
+  "name": "Server-side XSS Protection",
+  "category": "XSS",
+  "disabled": false,
+  "solveFiles": [
+   "models/feedback.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "hiddenImageChallenge",
+  "name": "Steganography",
+  "category": "Security through Obscurity",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "rceOccupyChallenge",
+  "name": "Successful RCE DoS",
+  "category": "Insecure Deserialization",
+  "disabled": false,
+  "solveFiles": [
+   "routes/b2bOrder.ts"
+  ],
+  "endpoints": [
+   "/b2b/v2/orders"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "supplyChainAttackChallenge",
+  "name": "Supply Chain Attack",
+  "category": "Vulnerable Components",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "twoFactorAuthUnsafeSecretStorageChallenge",
+  "name": "Two Factor Authentication",
+  "category": "Broken Authentication",
+  "disabled": false,
+  "solveFiles": [
+   "routes/2fa.ts"
+  ],
+  "endpoints": [
+   "/rest/2fa/status"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "jwtUnsignedChallenge",
+  "name": "Unsigned JWT",
+  "category": "Vulnerable Components",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "uploadSizeChallenge",
+  "name": "Upload Size",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileUpload.ts"
+  ],
+  "endpoints": [
+   "/file-upload",
+   "/profile/image/file",
+   "/rest/memories"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "uploadTypeChallenge",
+  "name": "Upload Type",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileUpload.ts"
+  ],
+  "endpoints": [
+   "/file-upload",
+   "/profile/image/file",
+   "/rest/memories"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "unionSqlInjectionChallenge",
+  "name": "User Credentials",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/search.ts"
+  ],
+  "endpoints": [
+   "/rest/products/search"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "videoXssChallenge",
+  "name": "Video XSS",
+  "category": "XSS",
+  "disabled": false,
+  "solveFiles": [
+   "routes/videoHandler.ts"
+  ],
+  "endpoints": [
+   "/promotion",
+   "/video"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "basketAccessChallenge",
+  "name": "View Basket",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/basket.ts"
+  ],
+  "endpoints": [
+   "/rest/basket/:id"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "knownVulnerableComponentChallenge",
+  "name": "Vulnerable Library",
+  "category": "Vulnerable Components",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "weirdCryptoChallenge",
+  "name": "Weird Crypto",
+  "category": "Cryptographic Issues",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "redirectChallenge",
+  "name": "Allowlist Bypass",
+  "category": "Unvalidated Redirects",
+  "disabled": false,
+  "solveFiles": [
+   "routes/redirect.ts"
+  ],
+  "endpoints": [
+   "/redirect"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "xxeFileDisclosureChallenge",
+  "name": "XXE Data Access",
+  "category": "XXE",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileUpload.ts"
+  ],
+  "endpoints": [
+   "/file-upload",
+   "/profile/image/file",
+   "/rest/memories"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "xxeDosChallenge",
+  "name": "XXE DoS",
+  "category": "XXE",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileUpload.ts"
+  ],
+  "endpoints": [
+   "/file-upload",
+   "/profile/image/file",
+   "/rest/memories"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "yamlBombChallenge",
+  "name": "Memory Bomb",
+  "category": "Insecure Deserialization",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileUpload.ts"
+  ],
+  "endpoints": [
+   "/file-upload",
+   "/profile/image/file",
+   "/rest/memories"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "zeroStarsChallenge",
+  "name": "Zero Stars",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "models/feedback.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "missingEncodingChallenge",
+  "name": "Missing Encoding",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "svgInjectionChallenge",
+  "name": "Cross-Site Imaging",
+  "category": "Security Misconfiguration",
+  "disabled": false,
+  "solveFiles": [
+   "lib/startup/registerWebsocketEvents.ts"
+  ],
+  "endpoints": [
+   "/socket.io/ (websocket)"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "exposedMetricsChallenge",
+  "name": "Exposed Metrics",
+  "category": "Observability Failures",
+  "disabled": false,
+  "solveFiles": [
+   "routes/metrics.ts"
+  ],
+  "endpoints": [
+   "/file-upload",
+   "/metrics",
+   "/profile/image/file",
+   "/rest/memories"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "misplacedIacFiles",
+  "name": "Misplaced IaC Files",
+  "category": "Security Misconfiguration",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "freeDeluxeChallenge",
+  "name": "Deluxe Fraud",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/deluxe.ts"
+  ],
+  "endpoints": [
+   "/rest/deluxe-membership"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "csrfChallenge",
+  "name": "CSRF' # FIXME No e2e test automation! No longer works in Chrome >=80 and Firefox >=100 or other latest browsers!",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/updateUserProfile.ts"
+  ],
+  "endpoints": [
+   "/profile"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "xssBonusChallenge",
+  "name": "Bonus Payload",
+  "category": "XSS",
+  "disabled": false,
+  "solveFiles": [
+   "lib/startup/registerWebsocketEvents.ts"
+  ],
+  "endpoints": [
+   "/socket.io/ (websocket)"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "resetPasswordUvoginChallenge",
+  "name": "Reset Uvogin''s Password",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/resetPassword.ts"
+  ],
+  "endpoints": [
+   "/rest/user/reset-password"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "geoStalkingMetaChallenge",
+  "name": "Meta Geo Stalking",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/resetPassword.ts"
+  ],
+  "endpoints": [
+   "/rest/user/reset-password"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "geoStalkingVisualChallenge",
+  "name": "Visual Geo Stalking",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/resetPassword.ts"
+  ],
+  "endpoints": [
+   "/rest/user/reset-password"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "nullByteChallenge",
+  "name": "Poison Null Byte",
+  "category": "Improper Input Validation",
+  "disabled": false,
+  "solveFiles": [
+   "routes/fileServer.ts"
+  ],
+  "endpoints": [
+   "/ftp(?!/quarantine)/:file"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "lfrChallenge",
+  "name": "Local File Read",
+  "category": "Vulnerable Components",
+  "disabled": false,
+  "solveFiles": [
+   "routes/dataErasure.ts"
+  ],
+  "endpoints": [
+   "/dataerasure"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "closeNotificationsChallenge",
+  "name": "Mass Dispel",
+  "category": "Miscellaneous",
+  "disabled": false,
+  "solveFiles": [
+   "lib/startup/registerWebsocketEvents.ts"
+  ],
+  "endpoints": [
+   "/socket.io/ (websocket)"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "csafChallenge",
+  "name": "Security Advisory",
+  "category": "Miscellaneous",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "exposedCredentialsChallenge",
+  "name": "Exposed Credentials",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [
+   "routes/login.ts"
+  ],
+  "endpoints": [
+   "/rest/user/login"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "leakedApiKeyChallenge",
+  "name": "Leaked API Key",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "chatbotPromptInjectionChallenge",
+  "name": "Chatbot Prompt Injection",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/chat.ts"
+  ],
+  "endpoints": [
+   "/rest/chat"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "chatbotGreedyInjectionChallenge",
+  "name": "Greedy Chatbot Manipulation",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/chat.ts"
+  ],
+  "endpoints": [
+   "/rest/chat"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "aiDebuggingChallenge",
+  "name": "AI Debugging",
+  "category": "Broken Access Control",
+  "disabled": false,
+  "solveFiles": [
+   "routes/chat.ts"
+  ],
+  "endpoints": [
+   "/rest/chat"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "systemPromptExtractionChallenge",
+  "name": "System Prompt Extraction",
+  "category": "Injection",
+  "disabled": false,
+  "solveFiles": [
+   "routes/verify.ts"
+  ],
+  "endpoints": [
+   "/api/Feedbacks",
+   "/api/Users",
+   "/assets/i18n",
+   "/assets/public/images/padding",
+   "/assets/public/images/products",
+   "/assets/public/images/uploads",
+   "/infrastructure",
+   "/solve/challenges/server-side",
+   "/support/logs"
+  ],
+  "clientSide": false
+ },
+ {
+  "key": "iacLeakedKeyChallenge",
+  "name": "Login Cloud Admin",
+  "category": "Sensitive Data Exposure",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ },
+ {
+  "key": "vulnerableDockerImageChallenge",
+  "name": "Vulnerable Infrastructure",
+  "category": "Vulnerable Components",
+  "disabled": false,
+  "solveFiles": [],
+  "endpoints": [],
+  "clientSide": true
+ }
+]

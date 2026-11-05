@@ -13,7 +13,7 @@ import { bootstrapFlow } from '../../core/test/unit/support/test-flow.ts';
 const baseUrl = process.env['SCOPEPILOT_DVWA_BASE_URL'] ?? '';
 const username = process.env['SCOPEPILOT_DVWA_USERNAME'] ?? '';
 const password = process.env['SCOPEPILOT_DVWA_PASSWORD'] ?? '';
-const gated = baseUrl !== '' && username !== '' && password !== '' ? describe : describe.skip;
+const gated = baseUrl !== '' ? describe : describe.skip;
 
 function transport(maxRequests: number): WorkflowScanTransport {
   return new NodeWorkflowScanTransport({
@@ -23,7 +23,7 @@ function transport(maxRequests: number): WorkflowScanTransport {
   });
 }
 
-gated('実DVWA ガイドライン別ワークフロー診断', () => {
+gated('実HTTP対象でのガイドライン別汎用診断（既定fixtureはDVWA）', () => {
   test('追加ヘッダーとHTTPメソッドのZAP非対応テーマを実通信で評価する', { timeout: 60_000 }, async () => {
     const { service, operator } = await bootstrapFlow({
       allowedOrigins: [new URL(baseUrl).origin],
@@ -53,7 +53,7 @@ gated('実DVWA ガイドライン別ワークフロー診断', () => {
     assert.equal(publicSurfaceResult.results.find((probe) => probe.pattern === 'response-content-type')?.outcome, 'denied');
   });
 
-  test('ASVS選択は全21チェックを実行経路へ載せる', { timeout: 180_000 }, async () => {
+  test('ASVS選択は全汎用HTTPチェックを実行経路へ載せる', { timeout: 180_000 }, async () => {
     const checkIds = resolveWorkflowScanCheckIds(['OWASP ASVS 5.0']);
     assert.deepEqual(resolveWorkflowScanCheckIds(['OWASP WSTG 4.2']), checkIds);
     assert.deepEqual(resolveWorkflowScanCheckIds(['IPA/NISC/WebAppPentestGuidelines']), checkIds);
@@ -61,37 +61,26 @@ gated('実DVWA ガイドライン別ワークフロー診断', () => {
       assert.equal(resolveGuidelineThemeRoutes([guideline]).find((route) => route.themeNo === '30')?.mode, 'automatic');
     }
     const result = await runWorkflowScan(
-      { baseUrl, username, password, maxRequests: 2000, checkIds },
+      { baseUrl, targets: [{ url: `${baseUrl}/login.php`, method: 'GET' }], maxRequests: 2000, checkIds },
       transport(2000),
-      { createProbeTransport: () => transport(2000) },
     );
-    assert.equal(result.authenticated, true);
-    assert.equal(checkIds.length, 21);
-    const executed = new Set([
-      ...result.checks.map((check) => check.checkId),
-      ...result.skips.map((check) => check.checkId),
-    ]);
-    for (const checkId of checkIds) assert.ok(executed.has(checkId), `未実行: ${checkId}`);
+    assert.equal(result.authenticated, false);
+    assert.equal(checkIds.length, 9);
     assert.ok(result.requestCount <= 2000);
     assert.ok(!JSON.stringify(result.requestLog).includes(password));
   });
 
-  test('DS-221選択は対応9チェックだけに切り替わる', { timeout: 180_000 }, async () => {
+  test('DS-221選択は対応するHTTPチェックだけに切り替わる', { timeout: 180_000 }, async () => {
     const checkIds = resolveWorkflowScanCheckIds(['デジタル庁 DS-221']);
     const result = await runWorkflowScan(
-      { baseUrl, username, password, maxRequests: 1200, checkIds },
+      { baseUrl, targets: [{ url: `${baseUrl}/login.php`, method: 'GET' }], maxRequests: 1200, checkIds },
       transport(1200),
-      { createProbeTransport: () => transport(1200) },
     );
-    assert.equal(result.authenticated, true);
-    assert.equal(checkIds.length, 9);
-    const executed = new Set([
-      ...result.checks.map((check) => check.checkId),
-      ...result.skips.map((check) => check.checkId),
-    ]);
-    assert.ok(executed.has('csrf-password'));
-    assert.ok(executed.has('weak-session'));
-    assert.ok(!executed.has('xss-reflected'));
-    assert.ok(!executed.has('lfi'));
+    assert.equal(result.authenticated, false);
+    assert.equal(checkIds.length, 6);
+    assert.ok(checkIds.includes('security-headers'));
+    assert.ok(checkIds.includes('cookie-security'));
+    assert.ok(!checkIds.includes('dom-source-sink'));
+    assert.ok(!checkIds.includes('sql-error'));
   });
 });

@@ -154,6 +154,8 @@ export interface BootstrapOptions {
   readonly loginProxyServer?: string;
   /** explorer 差替え (session 対応 explorer の検証用)。 */
   readonly explorer?: import('../../../src/ports/engines.ts').ExplorationPort;
+  /** 診断 engine 差替え (alert を返す fake 等)。未指定は FakeScanEngine。 */
+  readonly scanEngine?: ActiveScanEnginePort;
   /** Repeater 実 transport 経路の検証用 fake。 */
   readonly repeaterTransport?: import('../../../src/ports/engines.ts').RepeaterTransportPort;
   /** Fuzzer 実 transport 経路の検証用 fake。 */
@@ -180,13 +182,13 @@ export interface TestFlow {
 
 /** 案件作成前の状態から使える service を組み立てる。 */
 export function createTestService(
-  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'loginProxyServer' | 'explorer' | 'repeaterTransport' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver' | 'interactiveBrowser' | 'nucleiRunner' | 'workflowScanTransportFactory' | 'otpInbox' | 'samlFixture' | 'sleep'> & {
+  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'loginProxyServer' | 'explorer' | 'scanEngine' | 'repeaterTransport' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver' | 'interactiveBrowser' | 'nucleiRunner' | 'workflowScanTransportFactory' | 'otpInbox' | 'samlFixture' | 'sleep'> & {
     runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
     caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
   } = {},
 ): TestFlow {
   const explorer = options.explorer ?? new FakeExplorer();
-  const scanEngine = new FakeScanEngine();
+  const scanEngine = options.scanEngine ?? new FakeScanEngine();
   const service = new BaselineFlowService({
     clock: new FixedClock([TEST_NOW]),
     ids: new SequentialIdGenerator(),
@@ -218,7 +220,7 @@ export function createTestService(
     ...(options.operatorPermissions === undefined ? {} : { permissions: options.operatorPermissions }),
   };
   // options.explorer 差替え時は FakeExplorer ではないため cast (TestFlow 型は既定構成の便宜)。
-  return { service, explorer: explorer as FakeExplorer, scanEngine, operator };
+  return { service, explorer: explorer as FakeExplorer, scanEngine: scanEngine as FakeScanEngine, operator };
 }
 
 /** 案件作成と認可付与まで済ませた flow を組み立てる。 */

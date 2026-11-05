@@ -100,6 +100,8 @@ describe('ScopePilot2 assurance report', () => {
     assert.equal(report.findings[0]?.technicalEvidence.bodyMode, 'relevant');
     assert.equal(report.findings[0]?.technicalEvidence.highlightEnabled, true);
     assert.ok(report.findings[0]?.technicalEvidence.highlightTerms.includes('102'));
+    assert.ok(report.findings[0]?.technicalEvidence.requestHighlightTerms?.includes('id'));
+    assert.equal(report.findings[0]?.technicalEvidence.responseHighlightTerms?.includes('id'), false);
     assert.match(report.findings[0]?.technicalEvidence.request ?? '', /Cookie: session=\[redacted\]/u);
     assert.match(report.findings[0]?.technicalEvidence.request ?? '', /Authorization: \[redacted\]/u);
     assert.match(report.findings[0]?.technicalEvidence.response ?? '', /Set-Cookie: session=\[redacted\]/u);
@@ -163,6 +165,8 @@ describe('ScopePilot2 assurance report', () => {
     assert.match(technicalAnnexHtml, /HTTP\/1\.1 200 OK/u);
     assert.doesNotMatch(technicalAnnexHtml, /COOKIE_SECRET|AUTH_SECRET|RESPONSE_SECRET/u);
     assert.match(technicalAnnexHtml, /<mark>102<\/mark>/u, '着目語を強調する');
+    assert.match(technicalAnnexHtml, /&quot;id&quot;:&quot;<mark>102<\/mark>/u, 'Responseでは観測値だけを強調する');
+    assert.doesNotMatch(technicalAnnexHtml, /&quot;<mark>id<\/mark>&quot;/u, 'Requestのパラメータ名をResponse本文へ誤適用しない');
 
     const emptyProfileReport = buildAssuranceReport({
       ...input,
@@ -217,6 +221,34 @@ describe('ScopePilot2 assurance report', () => {
       await writeFile(join(qaDirectory, 'ScopePilot2-report-v2-technical-annex-QA.html'), renderTechnicalAnnexHtml(report));
       await writeFile(join(qaDirectory, 'ScopePilot2-report-v2-QA.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
     }
+  });
+
+  test('所見名のDOMやXSSをHTTP上の観測根拠として誤強調しない', () => {
+    const report = buildAssuranceReport({
+      reportId: 'report-highlight-context', modelHash: '7'.repeat(64), startUrl: 'https://shop.example.test/', forbiddenActions: [], profile: DEFAULT_REPORT_PROFILE,
+      model: {
+        caseId: 'highlight-context', generatedAt: '2026-10-24T00:00:00.000Z', guidelines: [],
+        assessmentScope: { caseName: '強調範囲テスト', allowedOrigins: ['https://shop.example.test'], deniedOrigins: [], limits: { maxRequests: 10, maxPages: 10, maxDurationMinutes: 10 } },
+        coverage: { exploredUrlCount: 1, scannedUrlCount: 1, delegatedSteps: [], limitations: [] },
+        findings: [{
+          findingId: 'F-DOM-1', title: 'DOM Based Cross Site Scripting (XSS)',
+          source: { kind: 'observation', engineVersion: 'workflow-scan-v1', unverified: true },
+          url: 'https://shop.example.test/vulnerabilities/xss_d/', method: 'GET', severity: 'high', status: 'candidate',
+          evidenceRefs: ['e-dom-1'], firstSeenAt: '2026-10-24T00:00:00.000Z', lastSeenAt: '2026-10-24T00:00:00.000Z', occurrences: 1,
+        }],
+      },
+      evidence: [{ evidenceId: 'e-dom-1', label: 'workflow:dom', sha256: '3'.repeat(64), savedAt: '2026-10-24T00:00:00.000Z', metadata: { mediaType: 'application/json' } }],
+      evidenceContents: {
+        'e-dom-1': JSON.stringify({
+          request: 'GET /vulnerabilities/xss_d/ HTTP/1.1\r\nHost: shop.example.test',
+          response: 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<title>DOM Based Cross Site Scripting (XSS)</title>',
+          observedEvidence: 'document.write("<option>") を確認',
+        }),
+      },
+    });
+    const html = renderTechnicalAnnexHtml(report).toString('utf8');
+    assert.doesNotMatch(html, /<mark>(?:DOM|XSS)<\/mark>/u);
+    assert.doesNotMatch(html, /xss_<mark>d<\/mark>/u);
   });
 
 

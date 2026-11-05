@@ -182,10 +182,26 @@ import { resolveGuidelineThemeRoutes } from '../domain/guideline-execution.ts';
 import { checkCompatibility, respondToSecretRead, verifyExtensionManifest, type ExtensionManifest } from '../domain/product-api.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
-import type { ActiveScanEnginePort, ExplorationPort, InteractiveBrowserFile, InteractiveBrowserPort, InteractiveBrowserStep, LoginExecutorPort, LoginSessionCookie, NucleiScanPort, OastProviderEvent } from '../ports/engines.ts';
+import type { ActiveScanEnginePort, BrowserSessionState, ExplorationPort, InteractiveBrowserFile, InteractiveBrowserPort, InteractiveBrowserStep, LoginExecutorPort, LoginSessionCookie, NucleiScanPort, OastProviderEvent } from '../ports/engines.ts';
 
 /** 計画の並列度・rate が超えられない安全上天井 (UI 指定でも引き上げ不可)。 */
 const PLAN_SAFETY_CEILING = { maxConcurrency: 2, requestsPerSecond: 2 } as const;
+
+/**
+ * 動的ルート具体化の上限。テンプレートも識別子も対象自身の観測事実だが、
+ * 組合せで frontier が膨らまないよう探索 1 回あたりの上限を切る。
+ */
+const ROUTE_INSTANTIATION_LIMITS = {
+  maxTemplates: 64,
+  maxResourceIds: 128,
+  maxPerTemplate: 8,
+  maxTotalInstantiations: 64,
+} as const;
+
+/** payload 実行検証の対象選択と上限 (design/30 30.1)。 */
+const PAYLOAD_EXECUTION_FINDING_PATTERN = /xss|cross[\s-]?site[\s-]?scripting/i;
+const PAYLOAD_URL_MARKER_PATTERN = /(?:%3C|<script|javascript:|onerror\s*=|onload\s*=|alert\s*\(|<img|<svg|<iframe)/i;
+const PAYLOAD_VERIFICATION_MAX = 5;
 
 export interface BaselineFlowDeps {
   readonly clock: Clock;
@@ -193,11 +209,12 @@ export interface BaselineFlowDeps {
   readonly evidence: EvidenceStorePort;
   readonly explorer: ExplorationPort;
   readonly scanEngine: ActiveScanEnginePort;
-  /** Creates an origin-bound, secret-redacting HTTP transport for the DVWA workflow suite. */
+  /** Creates an origin-bound, secret-redacting transport for generic HTTP diagnostics. */
   readonly workflowScanTransportFactory?: (options: {
     readonly baseUrl: string;
     readonly maxRequests: number;
     readonly redactionValues: readonly string[];
+    readonly sessionCookies?: readonly { readonly name: string; readonly value: string }[];
     readonly signal?: AbortSignal;
   }) => WorkflowScanTransport;
   /** 設定済みの実Nuclei CLI。未設定時はscan planにNuclei stepを含めない。 */
@@ -388,6 +405,19 @@ export interface ActiveScanRunResult {
     readonly excludedOutOfScope: number;
     readonly error?: string;
   };
+  /** 取込所見のうち反射系 XSS について browser で実行確認した結果 (design/30 30.1)。 */
+  readonly payloadVerifications?: readonly ActiveScanPayloadVerification[];
+}
+
+export interface ActiveScanPayloadVerification {
+  readonly findingId: string;
+  readonly title: string;
+  readonly url: string;
+  /** dialog 発火等、payload が実行された根拠が得られたか。 */
+  readonly executed: boolean;
+  readonly signals: readonly string[];
+  readonly evidenceRef?: string;
+  readonly error?: string;
 }
 
 export interface DiagnosticRouteResult {
@@ -532,13 +562,17 @@ export class BaselineFlowService {
   /** runLogin で得た role session (cookie 値は service 内部のみ。API・監査へ出さない)。 */
   private readonly roleSessionCookies = new Map<string, {
     readonly cookies: readonly LoginSessionCookie[];
+    readonly browserState: BrowserSessionState;
     readonly createdAt: string;
     readonly expectedUrlPrefix?: string;
     readonly verificationUrl?: string;
     readonly verificationMarkers?: readonly string[];
   }>();
-  /** Simple-mode workflow credentials. Values remain in memory and are never projected to APIs or evidence. */
-  private readonly roleWorkflowCredentials = new Map<string, { readonly username: string; readonly password: string }>();
+  /**
+   * login 実行時の観測 (role ごと・最新 1 件)。SPA の XHR 裏付け認証 API は
+   * 探索では観測できないため、ここから診断候補を補完する (design/f09)。
+   */
+  private readonly loginObservations = new Map<string, PageObservation>();
   private exploredUrlCount = 0;
   private scannedUrlCount = 0;
   private latestCandidates: readonly ScanCandidate[] = [];
@@ -2524,22 +2558,27 @@ export class BaselineFlowService {
     if (result.authenticated) {
       this.roleSessionCookies.set(input.role, {
         cookies: result.cookies,
+        browserState: result.browserState ?? { cookies: result.cookies, origins: [] },
         createdAt: this.deps.clock.now().toISOString(),
         expectedUrlPrefix: input.expectedUrlPrefix,
         verificationUrl: result.finalUrl,
         verificationMarkers: flow.steps.flatMap((step) => step.kind === 'assert' && step.target !== undefined ? [step.target] : []),
       });
-      const usernameReference = flow.secretReferences.find((reference) => reference === 'username' || reference.endsWith(':username'));
-      const passwordReference = flow.secretReferences.find((reference) => reference === 'password' || reference.endsWith(':password'));
-      const username = usernameReference === undefined ? undefined : input.secretValues[usernameReference];
-      const password = passwordReference === undefined ? undefined : input.secretValues[passwordReference];
-      if (username !== undefined && password !== undefined) {
-        this.roleWorkflowCredentials.set(input.role, { username, password });
-      } else {
-        this.roleWorkflowCredentials.delete(input.role);
-      }
-    } else {
-      this.roleWorkflowCredentials.delete(input.role);
+    }
+    // login 実行時の観測を候補の根拠として保持する (探索結果へ合成する)。
+    // 観測には値が含まれず、scope は探索の合成時に改めて判定する。
+    if ((result.observedRequests?.length ?? 0) > 0) {
+      this.loginObservations.set(input.role, {
+        url: result.finalUrl,
+        status: result.authenticated ? 200 : 401,
+        contentType: 'text/html',
+        discoveredFrom: null,
+        depth: 0,
+        originType: 'crawl',
+        links: [],
+        forms: [],
+        requests: result.observedRequests!,
+      });
     }
     const cookieNames = result.cookies.map((cookie) => cookie.name);
     const jar = this.roleRegistry.assignJar(input.role, cookieNames);
@@ -3776,6 +3815,43 @@ export class BaselineFlowService {
     return { plan, planHash: planHashOf(plan) };
   }
 
+  /**
+   * payload 実行検証 (design/f08: 反射の所見と実行確認を区別する)。
+   * 検証 URL (payload 付き) を browser で開き、dialog 発火等のコード実行根拠を
+   * 観測する。scope 強制はこの入口で行い (Enforced: 送信前拒否)、結果は証跡へ
+   * 保存する (信号の文言は先頭のみ・秘密値は出ない)。
+   */
+  async verifyFindingExecution(
+    operator: OperatorProfile,
+    input: { readonly url: string; readonly role?: string; readonly findingId?: string },
+  ): Promise<{ executed: boolean; signals: readonly string[]; evidenceRef: string }> {
+    this.requirePermission(operator, 'run.manage');
+    const caseRecord = this.currentCase();
+    const decision = ScopePolicy.decide(caseRecord.scope, input.url);
+    if (!decision.allowed) {
+      throw domainError('OutOfScope', `payload execution verification target is out of scope: ${decision.reason}`);
+    }
+    let session: BrowserSessionState | undefined;
+    if (input.role !== undefined) {
+      const roleSession = this.roleSessionCookies.get(input.role);
+      if (roleSession === undefined) {
+        throw domainError('ValidationFailed', `no session for role '${input.role}'; run login first`);
+      }
+      session = roleSession.browserState;
+    }
+    if (typeof this.deps.explorer.verifyPayloadExecution !== 'function') {
+      throw domainError('CapabilityUnavailable', 'configured explorer does not support payload execution verification');
+    }
+    const startedAt = this.deps.clock.now().toISOString();
+    const verification = await this.deps.explorer.verifyPayloadExecution(input.url, session);
+    const evidence = await this.deps.evidence.saveText(
+      `payload-verification:${input.findingId ?? startedAt}`,
+      canonicalJson({ url: input.url, role: input.role ?? null, findingId: input.findingId ?? null, executed: verification.executed, signals: verification.signals, verifiedAt: startedAt }),
+      { kind: 'payload-verification' },
+    );
+    return { executed: verification.executed, signals: verification.signals, evidenceRef: evidence.evidenceId };
+  }
+
   /** 能動診断計画。対象は採用済み候補の canonical URL の固定 snapshot。 */
   buildActiveScanPlan(
     operator: OperatorProfile,
@@ -3813,7 +3889,7 @@ export class BaselineFlowService {
     const nucleiMaxRequests = includeNuclei ? Math.floor(remainingRequests / 2) : 0;
     const zapMaxRequests = remainingRequests - nucleiMaxRequests;
     const withRequestLimit = (maxRequests: number): PlanLimits => ({ ...limits, maxRequests });
-    const workflowTargets = [...new Set(targets.map((url) => new URL(ScopePolicy.canonicalUrl(url)).origin))];
+    const workflowTargets = [...new Set(targets.map((url) => ScopePolicy.canonicalUrl(url)))];
     const plan = buildPlan({
       planId: this.deps.ids.next('plan'),
       caseId: caseRecord.caseId,
@@ -3929,19 +4005,16 @@ export class BaselineFlowService {
     }
     // role 指定探索 (design/f09): runLogin 済み session のみ。cookie は探索の間だけ
     // explorer へ渡し、記録・応答へは出さない。
-    let sessionCookies: readonly LoginSessionCookie[] | undefined;
+    let browserSessionState: BrowserSessionState | undefined;
     if (input.role !== undefined) {
       const session = this.roleSessionCookies.get(input.role);
       if (session === undefined) {
         throw domainError('ValidationFailed', `no session for role '${input.role}'; run login first`);
       }
-      const sessionAware = this.deps.explorer as ExplorationPort & {
-        observeWithSession?: (url: string, session: { cookies: readonly LoginSessionCookie[] }) => Promise<PageObservation | null>;
-      };
-      if (typeof sessionAware.observeWithSession !== 'function') {
+      if (typeof this.deps.explorer.observeWithSession !== 'function') {
         throw domainError('ValidationFailed', 'configured explorer does not support session observation');
       }
-      sessionCookies = session.cookies;
+      browserSessionState = session.browserState;
     }
 
     const runId = this.deps.ids.next('run');
@@ -3964,6 +4037,14 @@ export class BaselineFlowService {
       // 文書由来の優先付け規則 (pii・payment) に一致する URL は先に処理する。
       priority: this.isPrioritizedUrl(url) ? 'high' : 'normal',
     }));
+    // 動的ルートの具体化 (design/22 の安全制御の内側): スクリプト由来の :param 付き
+    // テンプレートは観測済み識別子 (API 応答・URL セグメント) だけで具体化する。
+    // テンプレート自体は巡回しない。値を推測して送信しない。
+    const routeTemplates = new Map<string, number>();
+    const observedResourceIdCounts = new Map<string, number>();
+    const instantiatedUrls = new Set<string>();
+    const instantiatedPerTemplate = new Map<string, number>();
+    let instantiationCount = 0;
 
     let stopReason: StopReason = 'completed';
     let requests = 0;
@@ -3978,7 +4059,7 @@ export class BaselineFlowService {
       if (entry === undefined) {
         break;
       }
-      const canonical = ScopePolicy.canonicalUrl(entry.url);
+      const canonical = ScopePolicy.canonicalBrowserUrl(entry.url);
       if (visited.has(canonical)) {
         continue;
       }
@@ -4007,25 +4088,73 @@ export class BaselineFlowService {
 
       requests += 1;
       const observed =
-        sessionCookies === undefined
+        browserSessionState === undefined
           ? await this.deps.explorer.observe(canonical)
-          : await (this.deps.explorer as ExplorationPort & {
-              observeWithSession: (url: string, session: { cookies: readonly LoginSessionCookie[] }) => Promise<PageObservation | null>;
-            }).observeWithSession(canonical, { cookies: sessionCookies });
+          : await this.deps.explorer.observeWithSession!(canonical, browserSessionState);
       if (observed === null) {
         continue;
       }
+      const finalUrl = ScopePolicy.canonicalBrowserUrl(observed.finalUrl ?? observed.url);
+      const finalDecision = ScopePolicy.decide(caseRecord.scope, finalUrl);
+      if (!finalDecision.allowed) {
+        deniedUrls.push({ url: finalUrl, reason: finalDecision.reason });
+        this.record({ type: 'EgressDenied', at: this.deps.clock.now().toISOString(), url: finalUrl, reason: finalDecision.reason });
+        continue;
+      }
       // 探索の追跡情報 (depth・発見元・由来) は core 側の値で上書きして記録する。
-      const observation: PageObservation = { ...observed, url: canonical, depth: entry.depth, discoveredFrom: entry.discoveredFrom, originType: entry.origin };
+      const observation: PageObservation = { ...observed, url: canonical, finalUrl, depth: entry.depth, discoveredFrom: entry.discoveredFrom, originType: entry.origin };
       observations.push(observation);
-      this.recordObservedExchange({ url: canonical, method: 'GET', status: observation.status, contentType: observation.contentType }, this.deps.clock.now().toISOString(), 'explore');
+      this.recordObservedExchange({ url: finalUrl, method: 'GET', status: observation.status, contentType: observation.contentType }, this.deps.clock.now().toISOString(), 'explore');
 
       if (entry.depth + 1 <= input.maxDepth) {
         for (const link of observation.links) {
-          const linkCanonical = ScopePolicy.canonicalUrl(link);
+          const linkCanonical = ScopePolicy.canonicalBrowserUrl(link);
           if (!visited.has(linkCanonical)) {
-            frontier.push({ url: linkCanonical, depth: entry.depth + 1, discoveredFrom: canonical, origin: 'crawl', priority: this.isPrioritizedUrl(linkCanonical) ? 'high' : 'normal' });
+            frontier.push({ url: linkCanonical, depth: entry.depth + 1, discoveredFrom: finalUrl, origin: 'crawl', priority: this.isPrioritizedUrl(linkCanonical) ? 'high' : 'normal' });
           }
+        }
+      }
+
+      // 観測で得たルートテンプレートと識別子を蓄積し、両者が揃った時点だけで
+      // 具体化 URL を frontier へ追加する。追加先は通常の link と同じ (pop 時に
+      // scope・session-control・上限を再評価する)。
+      for (const template of observation.routeTemplates ?? []) {
+        const canonicalTemplate = ScopePolicy.canonicalBrowserUrl(template);
+        if (routeTemplates.size < ROUTE_INSTANTIATION_LIMITS.maxTemplates && !routeTemplates.has(canonicalTemplate)) {
+          routeTemplates.set(canonicalTemplate, entry.depth + 1);
+        }
+      }
+      for (const id of observation.observedResourceIds ?? []) {
+        if (observedResourceIdCounts.size >= ROUTE_INSTANTIATION_LIMITS.maxResourceIds
+          && !observedResourceIdCounts.has(id)) break;
+        observedResourceIdCounts.set(id, (observedResourceIdCounts.get(id) ?? 0) + 1);
+      }
+      if (entry.depth + 1 <= input.maxDepth && instantiationCount < ROUTE_INSTANTIATION_LIMITS.maxTotalInstantiations) {
+        // 具体化の優先付け: 複数ページで観測された識別子 (中心的なエンティティ) ほど先に使う。
+        // 同頻度は観測順 (Map の挿入順・安定ソート) を維持する。
+        const prioritizedResourceIds = [...observedResourceIdCounts.entries()]
+          .sort((left, right) => right[1] - left[1])
+          .map(([id]) => id);
+        for (const template of routeTemplates.keys()) {
+          const used = instantiatedPerTemplate.get(template) ?? 0;
+          if (used >= ROUTE_INSTANTIATION_LIMITS.maxPerTemplate) continue;
+          // 複数パラメータの直積は観測根拠を稀薄にするため対象外。1 パラメータだけ。
+          const paramMatch = template.match(/\/:[A-Za-z][\w-]*(?=\/|$)/);
+          if (paramMatch === null) continue;
+          for (const id of prioritizedResourceIds) {
+            if ((instantiatedPerTemplate.get(template) ?? 0) >= ROUTE_INSTANTIATION_LIMITS.maxPerTemplate) break;
+            const concrete = template.replace(paramMatch[0]!, `/${id}`);
+            const canonical = ScopePolicy.canonicalBrowserUrl(concrete);
+            // 具体化結果にパラメータ片が残っていれば使用しない (送信前の防御)。
+            if (/\/:[A-Za-z][\w-]*(?=\/|$)/.test(canonical)) continue;
+            if (visited.has(canonical) || instantiatedUrls.has(canonical)) continue;
+            instantiatedUrls.add(canonical);
+            instantiatedPerTemplate.set(template, (instantiatedPerTemplate.get(template) ?? 0) + 1);
+            instantiationCount += 1;
+            frontier.push({ url: canonical, depth: entry.depth + 1, discoveredFrom: finalUrl, origin: 'crawl', priority: this.isPrioritizedUrl(canonical) ? 'high' : 'normal' });
+            if (instantiationCount >= ROUTE_INSTANTIATION_LIMITS.maxTotalInstantiations) break;
+          }
+          if (instantiationCount >= ROUTE_INSTANTIATION_LIMITS.maxTotalInstantiations) break;
         }
       }
     }
@@ -4055,10 +4184,68 @@ export class BaselineFlowService {
     };
     this.deps.runSink?.save(runRecord);
     this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason });
-    const candidates = observations.flatMap((observation) => candidatesFromObservation(observation, this.deps.ids));
-    this.latestCandidates = candidates;
+    // 観測横断で同一リクエスト/定義の候補を重複させない (同一スクリプトが複数ページで
+    // 読み込まれると API 呼び出し定義が毎ページ再抽出されるため、ここで一意化する)。
+    const candidates: ScanCandidate[] = [];
+    const candidateKeys = new Set<string>();
+    for (const observation of observations) {
+      for (const candidate of candidatesFromObservation(observation, this.deps.ids)) {
+        const key = `${candidate.category}|${loginMergeKeyOf(candidate.method, candidate.url, candidate.inputPoints ?? [])}`;
+        if (candidateKeys.has(key)) continue;
+        candidateKeys.add(key);
+        candidates.push(candidate);
+      }
+    }
+    // login 実行時に観測したリクエスト (XHR 裏付けの認証 API 等) を候補へ合成する。
+    // 同じ入力点を持つ候補が探索で既に観測されている場合は探索由来を優先する。
+    const crawlCandidateKeys = new Set(candidates.map((candidate) => loginMergeKeyOf(candidate.method, candidate.url, candidate.inputPoints ?? [])));
+    const loginCandidates: ScanCandidate[] = [];
+    const loginSeen = new Set<string>();
+    for (const observation of this.loginObservations.values()) {
+      for (const candidate of candidatesFromObservation({ ...observation, url: ScopePolicy.canonicalUrl(observation.url) }, this.deps.ids)) {
+        if (candidate.category === 'page' || isSessionControlUrl(candidate.url)) continue;
+        if (!ScopePolicy.decide(caseRecord.scope, candidate.url).allowed) continue;
+        const key = loginMergeKeyOf(candidate.method, candidate.url, candidate.inputPoints ?? []);
+        if (crawlCandidateKeys.has(key) || loginSeen.has(key)) continue;
+        loginSeen.add(key);
+        loginCandidates.push({
+          ...candidate,
+          detectionReason: `${candidate.detectionReason ?? ''} (login 実行時に観測)`.trim(),
+        });
+      }
+    }
+    const mergedCandidates = [...candidates, ...loginCandidates];
+    // API 仕様 (OpenAPI) 取込済み endpoint も診断候補へ合成する。閲覧クロールでは
+    // 発火しない書き込み API (POST/PUT/DELETE) を仕様から拾うことが目的。
+    // path template ({id}) は具体値がないため対象外とし、重複は既存候補を優先する。
+    const apiSpecCandidates: ScanCandidate[] = [];
+    const specSeen = new Set<string>();
+    for (const apiSpec of this.apiSpecImports) {
+      for (const endpoint of apiSpec.endpoints) {
+        if (endpoint.path.includes('{')) continue;
+        if (!ScopePolicy.decide(caseRecord.scope, endpoint.url).allowed) continue;
+        const key = loginMergeKeyOf(endpoint.method, endpoint.url, []);
+        if (crawlCandidateKeys.has(key) || loginSeen.has(key) || specSeen.has(key)) continue;
+        specSeen.add(key);
+        if (isSessionControlUrl(endpoint.url)) continue;
+        apiSpecCandidates.push({
+          candidateId: this.deps.ids.next('cand'),
+          url: ScopePolicy.canonicalUrl(endpoint.url),
+          method: endpoint.method,
+          category: 'api-endpoint',
+          guidelineBasis: [`api-spec:${apiSpec.documentLabel}`],
+          confidence: 0.8,
+          observationUrl: endpoint.url,
+          detectionReason: `API 仕様 (${apiSpec.documentLabel}) に ${endpoint.method} ${endpoint.path} が定義されている`,
+          dynamic: endpoint.method.toUpperCase() !== 'GET',
+          diagnosticTracks: diagnosticTracksFor(endpoint.url, endpoint.method, [], false),
+        });
+      }
+    }
+    const allCandidates = [...mergedCandidates, ...apiSpecCandidates];
+    this.latestCandidates = allCandidates;
     this.assessmentEndedAt = this.deps.clock.now().toISOString();
-    return { runRecord, planHash, observations, deniedUrls, candidates, engineVersion: this.deps.explorer.engineVersion };
+    return { runRecord, planHash, observations, deniedUrls, candidates: allCandidates, engineVersion: this.deps.explorer.engineVersion };
   }
 
   /** 候補の採用。基準シナリオでは提示された候補を全採用する。 */
@@ -4145,13 +4332,6 @@ export class BaselineFlowService {
       }
     }
     const workflowStep = plan.steps.find((candidate) => candidate.kind === 'workflow-scan');
-    const workflowCredentials = role === undefined ? undefined : this.roleWorkflowCredentials.get(role);
-    if (workflowStep !== undefined && role === undefined) {
-      throw domainError('NeedsInput', 'the confirmed workflow scan requires an authenticated role');
-    }
-    if (workflowStep !== undefined && workflowCredentials === undefined) {
-      throw domainError('NeedsInput', `workflow credentials for role '${role ?? ''}' are no longer available; run login again`);
-    }
     if (workflowStep !== undefined && this.deps.workflowScanTransportFactory === undefined) {
       throw domainError('CapabilityUnavailable', 'workflow scan transport is not configured');
     }
@@ -4336,6 +4516,52 @@ export class BaselineFlowService {
     });
     this.persistFindings([...importResult.created, ...importResult.reobserved]);
 
+    // payload 実行検証 (design/30 30.1): 反射系 XSS 所見のうち URL に payload が乗っている
+    // ものは、browser で実際に開いて dialog 発火を確認する。検証失敗は診断全体を失敗させず
+    // 結果に記録する (上限 5 件・browser 検証に非対応の構成では実行しない)。
+    const payloadVerifications: ActiveScanPayloadVerification[] = [];
+    if (typeof this.deps.explorer.verifyPayloadExecution === 'function') {
+      const verifiableFindings = [...importResult.created, ...importResult.reobserved]
+        .filter((finding) => PAYLOAD_EXECUTION_FINDING_PATTERN.test(finding.title) && PAYLOAD_URL_MARKER_PATTERN.test(finding.url))
+        .slice(0, PAYLOAD_VERIFICATION_MAX);
+      for (const finding of verifiableFindings) {
+        throwIfCancelled();
+        emit({
+          phase: 'running',
+          engine: 'scopepilot',
+          message: `所見「${finding.title}」の payload 実行を browser で検証します`,
+          progress: 95,
+        });
+        try {
+          const verification = await this.verifyFindingExecution(operator, {
+            url: finding.url,
+            findingId: finding.findingId,
+            ...(role === undefined ? {} : { role }),
+          });
+          payloadVerifications.push({
+            findingId: finding.findingId,
+            title: finding.title,
+            url: finding.url,
+            executed: verification.executed,
+            signals: verification.signals,
+            evidenceRef: verification.evidenceRef,
+          });
+        } catch (cause) {
+          if (control.signal?.aborted === true || (cause instanceof DomainError && cause.code === 'Cancelled')) {
+            throw domainError('Cancelled', 'scan stopped by user');
+          }
+          payloadVerifications.push({
+            findingId: finding.findingId,
+            title: finding.title,
+            url: finding.url,
+            executed: false,
+            signals: [],
+            error: cause instanceof Error ? cause.message : String(cause),
+          });
+        }
+      }
+    }
+
     for (const themeNo of automaticGuidelineChecksEnabled ? desiredAutomaticThemeNos : []) {
       throwIfCancelled();
       emit({
@@ -4450,8 +4676,9 @@ export class BaselineFlowService {
     }
 
     let workflowSummary: ActiveScanRunResult['workflow'];
-    if (workflowStep !== undefined && workflowCredentials !== undefined && this.deps.workflowScanTransportFactory !== undefined) {
+    if (workflowStep !== undefined && this.deps.workflowScanTransportFactory !== undefined) {
       const baseUrls = [...new Set(workflowStep.targetSnapshot.map((target) => new URL(target).origin))];
+      const plannedTargets = new Set(workflowStep.targetSnapshot.map((target) => ScopePolicy.canonicalUrl(target)));
       const selectedWorkflowCheckIds = resolveWorkflowScanCheckIds(plan.guidelineIds);
       const budget = { limit: workflowStep.limits.maxRequests, used: 0 };
       const evidenceRefs: string[] = [];
@@ -4463,12 +4690,24 @@ export class BaselineFlowService {
       try {
         for (const baseUrl of baseUrls) {
           throwIfCancelled();
+          const targetsForOrigin = adopted
+            .filter((candidate) => new URL(candidate.url).origin === baseUrl && plannedTargets.has(ScopePolicy.canonicalUrl(candidate.url)))
+            .map((candidate) => ({
+              url: ScopePolicy.canonicalUrl(candidate.url),
+              method: candidate.method,
+              inputPoints: candidate.inputPoints ?? [],
+              ...(candidate.contentType === undefined ? {} : { contentType: candidate.contentType }),
+            }));
+          const sessionCookies = scanSessionCookies === undefined
+            ? []
+            : applicableSessionCookies([...scanSessionCookies], baseUrl);
           const createTransport = (): WorkflowScanTransport => {
             const transport = new SharedBudgetWorkflowTransport(
               this.deps.workflowScanTransportFactory!({
                 baseUrl,
                 maxRequests: workflowStep.limits.maxRequests,
-                redactionValues: [workflowCredentials.username, workflowCredentials.password],
+                redactionValues: sessionCookies.map((cookie) => cookie.value),
+                sessionCookies: sessionCookies.map((cookie) => ({ name: cookie.name, value: cookie.value })),
                 ...(control.signal === undefined ? {} : { signal: control.signal }),
               }),
               budget,
@@ -4480,15 +4719,15 @@ export class BaselineFlowService {
           emit({
             phase: 'starting',
             engine: 'scopepilot',
-            message: `Workflow scan (${String(selectedWorkflowCheckIds.length)} checks) starting for ${baseUrl}`,
-            command: `ScopePilot workflow scan: ${WORKFLOW_SCAN_PAYLOAD_SET}; maxRequests=${String(workflowStep.limits.maxRequests)}`,
+            message: `汎用HTTP診断 (${String(selectedWorkflowCheckIds.length)}観点・${String(targetsForOrigin.length)}候補) を開始します: ${baseUrl}`,
+            command: `ScopePilot generic HTTP diagnostics: ${WORKFLOW_SCAN_PAYLOAD_SET}; maxRequests=${String(workflowStep.limits.maxRequests)}`,
             progress: 0,
           });
           const result = await runWorkflowScan(
             {
               baseUrl,
-              username: workflowCredentials.username,
-              password: workflowCredentials.password,
+              targets: targetsForOrigin,
+              authenticated: sessionCookies.length > 0,
               maxRequests: workflowStep.limits.maxRequests,
               checkIds: selectedWorkflowCheckIds,
               ...(control.signal === undefined ? {} : { signal: control.signal }),
@@ -4496,22 +4735,14 @@ export class BaselineFlowService {
             primary,
             {
               progress: (message) => emit({ phase: 'running', engine: 'scopepilot', message }),
-              createProbeTransport: createTransport,
             },
           );
-          if (!result.authenticated) {
-            throw new Error(`workflow scan login failed for ${baseUrl}`);
-          }
-          const probeRequestLog = transports
-            .filter((transport) => transport !== primary)
-            .flatMap((transport) => transport.takeRequestLog());
           const evidence = await this.deps.evidence.saveText(
             `workflow-scan:${runId}:${hashStable('scopepilot2.workflow.origin', baseUrl).slice(0, 12)}`,
             canonicalJson({
               runId,
               result,
               alerts: workflowHttpEvidenceRecords(result.checks, result.requestLog, baseUrl),
-              probeRequestLog,
               totalRequestCount: budget.used,
             }),
           );
@@ -4520,7 +4751,7 @@ export class BaselineFlowService {
           skipCount += result.skips.length;
           const imported = this.importer.importObservationCandidates(
             result.checks.map((check) => ({
-              key: `workflow-scan:${check.checkId}:${check.securityLevel || 'global'}`,
+              key: `workflow-scan:${check.checkId}:${hashStable('scopepilot2.workflow.target', check.url).slice(0, 12)}`,
               title: check.title,
               url: new URL(check.url, `${baseUrl}/`).toString(),
               method: check.method,
@@ -4537,12 +4768,6 @@ export class BaselineFlowService {
           importedCount += imported.created.length;
           duplicateCount += imported.duplicateCount;
           this.persistFindings([...imported.created, ...imported.reobserved]);
-          diagnosticRoutes = completeWorkflowRoutes(
-            diagnosticRoutes,
-            baseUrl,
-            result.checks.length,
-            [...new Set([...result.checks.map((check) => check.checkId), ...result.skips.map((check) => check.checkId)])],
-          );
           this.record({
             type: 'FindingsImported',
             at: this.deps.clock.now().toISOString(),
@@ -4567,7 +4792,7 @@ export class BaselineFlowService {
         emit({
           phase: 'completed',
           engine: 'scopepilot',
-          message: `Workflow scan completed: ${String(workflowSummary.checkKindCount)}/21 check types, ${String(workflowSummary.checkCount)} findings`,
+          message: `汎用HTTP診断完了: ${String(workflowSummary.checkKindCount)}/${String(selectedWorkflowCheckIds.length)}観点で所見 ${String(workflowSummary.checkCount)} 件`,
           progress: 100,
         });
       } catch (cause) {
@@ -4596,7 +4821,6 @@ export class BaselineFlowService {
           evidenceRefs,
           error,
         };
-        diagnosticRoutes = failWorkflowRoutes(diagnosticRoutes, baseUrls, error);
         emit({ phase: 'completed', engine: 'scopepilot', message: `Workflow scan failed independently: ${error}`, progress: 100 });
       }
     }
@@ -4743,6 +4967,7 @@ export class BaselineFlowService {
       guidelineRoutes,
       ...(workflowSummary === undefined ? {} : { workflow: workflowSummary }),
       ...(nucleiSummary === undefined ? {} : { nuclei: nucleiSummary }),
+      ...(payloadVerifications.length === 0 ? {} : { payloadVerifications }),
     };
   }
 
@@ -4944,7 +5169,8 @@ export class BaselineFlowService {
  * catalog (design/27) の実装まで仮ラベル (`provisional:*`) を使う。
  */
 function candidatesFromObservation(observation: PageObservation, ids: IdGenerator): ScanCandidate[] {
-  const parsedUrl = new URL(observation.url);
+  const pageUrl = observation.finalUrl ?? observation.url;
+  const parsedUrl = new URL(pageUrl);
   const queryParameterCount = [...parsedUrl.searchParams].length;
   const queryInputPoints: RequestInputPoint[] = [...new Set(parsedUrl.searchParams.keys())]
     .map((name) => ({ name, location: 'query', type: 'string' }));
@@ -4962,18 +5188,18 @@ function candidatesFromObservation(observation: PageObservation, ids: IdGenerato
   const candidates: ScanCandidate[] = [
     {
       candidateId: ids.next('cand'),
-      url: observation.url,
+      url: pageUrl,
       method: 'GET',
       category: 'page',
       guidelineBasis: ['provisional:page'],
       confidence: 0.7,
-      observationUrl: observation.url,
+      observationUrl: pageUrl,
       detectionReason: observation.discoveredFrom === null
         ? `探索開始URLとして観測 (HTTP ${observation.status}, ${observation.contentType})${dynamicReasons.length === 0 ? '' : `。${dynamicReasons.join('、')}を検出`}`
         : `${observation.discoveredFrom} からリンクを検出 (HTTP ${observation.status}, ${observation.contentType})${dynamicReasons.length === 0 ? '' : `。${dynamicReasons.join('、')}を検出`}`,
       dynamic: pageHasDynamicInput,
       inputPoints: queryInputPoints,
-      diagnosticTracks: diagnosticTracksFor(observation.url, 'GET', queryInputPoints, javascriptSignalCount > 0),
+      diagnosticTracks: diagnosticTracksFor(pageUrl, 'GET', queryInputPoints, javascriptSignalCount > 0),
     },
   ];
   for (const form of observation.forms) {
@@ -4990,8 +5216,8 @@ function candidatesFromObservation(observation: PageObservation, ids: IdGenerato
       category: 'form',
       guidelineBasis: [`provisional:form:${form.classification}`],
       confidence: 0.9,
-      observationUrl: observation.url,
-      detectionReason: `${observation.url} で ${form.classification} フォームを検出 (${form.method.toUpperCase()}, 入力 ${form.fields.length} 項目)`,
+      observationUrl: pageUrl,
+      detectionReason: `${pageUrl} で ${form.classification} フォームを検出 (${form.method.toUpperCase()}, 入力 ${form.fields.length} 項目)`,
       dynamic: true,
       inputPoints,
       ...(location === 'query' ? {} : {
@@ -5005,6 +5231,7 @@ function candidatesFromObservation(observation: PageObservation, ids: IdGenerato
   const seenRequests = new Set<string>();
   for (const request of observation.requests ?? []) {
     if (request.resourceType !== 'xhr' && request.resourceType !== 'fetch' && request.inputPoints.length === 0 && request.method === 'GET') continue;
+    if (isTransportChannelUrl(request.url)) continue;
     const key = `${request.method}|${ScopePolicy.canonicalUrl(request.url)}|${request.inputPoints.map((point) => `${point.location}:${point.name}`).sort().join(',')}`;
     if (seenRequests.has(key)) continue;
     seenRequests.add(key);
@@ -5015,13 +5242,36 @@ function candidatesFromObservation(observation: PageObservation, ids: IdGenerato
       category: request.resourceType === 'xhr' || request.resourceType === 'fetch' ? 'api-endpoint' : 'form',
       guidelineBasis: [`observed-http:${request.resourceType}`],
       confidence: 0.95,
-      observationUrl: observation.url,
-      detectionReason: `${observation.url} のブラウザー通信で ${request.method} リクエストと入力点 ${request.inputPoints.length} 件を観測`,
+      observationUrl: pageUrl,
+      detectionReason: `${pageUrl} のブラウザー通信で ${request.method} リクエストと入力点 ${request.inputPoints.length} 件を観測`,
       dynamic: true,
       requestId: request.requestId,
       ...(request.contentType === undefined ? {} : { contentType: request.contentType }),
       inputPoints: request.inputPoints,
-      diagnosticTracks: diagnosticTracksFor(request.url, request.method, request.inputPoints, false),
+      diagnosticTracks: diagnosticTracksFor(request.url, request.method, request.inputPoints, false, request.contentType),
+    });
+  }
+  // スクリプト内の API 呼び出し定義 (書き込み API は操作でしか発火せず閲覧観測に現れない)。
+  // 実行時観測 (requests) と同一視できるものは観測由来を優先する。
+  for (const call of observation.scriptApiCalls ?? []) {
+    const method = call.method.toUpperCase();
+    if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) continue;
+    if (isTransportChannelUrl(call.url)) continue;
+    const canonical = ScopePolicy.canonicalUrl(call.url);
+    const key = `${method}|${canonical}|`;
+    if (seenRequests.has(key)) continue;
+    seenRequests.add(key);
+    candidates.push({
+      candidateId: ids.next('cand'),
+      url: canonical,
+      method,
+      category: 'api-endpoint',
+      guidelineBasis: ['script-api-call'],
+      confidence: 0.75,
+      observationUrl: pageUrl,
+      detectionReason: `読込済みスクリプト内の ${method} API 呼び出し定義 (${new URL(call.url).pathname})。閲覧観測では発火しない操作系 API を含む`,
+      dynamic: method !== 'GET',
+      diagnosticTracks: diagnosticTracksFor(call.url, method, [], false),
     });
   }
   return candidates;
@@ -5031,7 +5281,28 @@ export function isSessionControlUrl(value: string): boolean {
   try {
     const pathname = new URL(value).pathname.toLowerCase();
     return /\/(?:logout|log-out|logoff|signout|sign-out)(?:\.php)?\/?$/.test(pathname)
-      || /\/(?:setup|install|security)(?:\.php)?\/?$/.test(pathname);
+      || /\/(?:setup|install)(?:\.php)?\/?$/.test(pathname);
+  } catch {
+    return true;
+  }
+}
+
+/** login 観測候補と探索候補の重複判定キー (method・URL・入力点の一致で同一視)。 */
+function loginMergeKeyOf(method: string, url: string, inputPoints: readonly RequestInputPoint[]): string {
+  return [
+    method.toUpperCase(),
+    ScopePolicy.canonicalUrl(url),
+    ...inputPoints.map((point) => `${point.location}:${point.name}`).sort(),
+  ].join('|');
+}
+
+/**
+ * Well-known リアルタイム通信チャネルの path。これらは応答も入力も転送管理が主目的で
+ * 診断対象としての価値が低く、一意なポーリング URL が候補枠を圧迫するため候補化から除外する。
+ */
+function isTransportChannelUrl(url: string): boolean {
+  try {
+    return /\/(?:socket\.io|engine\.io|sockjs|signalr|pusher|mqtt)(?:\/|$)/i.test(new URL(url).pathname);
   } catch {
     return true;
   }
@@ -5042,19 +5313,28 @@ function diagnosticTracksFor(
   method: string,
   inputPoints: readonly RequestInputPoint[],
   hasJavascript: boolean,
+  observedContentType?: string,
 ): readonly DiagnosticTrack[] {
   const text = `${url} ${method} ${inputPoints.map((point) => `${point.name}:${point.type}`).join(' ')}`.toLowerCase();
   const tracks = new Set<DiagnosticTrack>();
   const interactiveMutation = requiresInteractiveStateChange(inputPoints);
   if (inputPoints.length > 0 && !interactiveMutation) tracks.add('zap-active');
   if (interactiveMutation) tracks.add('workflow-state');
-  if (hasJavascript || /xss_d|javascript|csp/.test(text)) tracks.add('browser-dom');
-  if (/xss_s|csrf|captcha/.test(text)) tracks.add('workflow-state');
-  if (/weak_id|session|token/.test(text)) tracks.add('session-analysis');
-  if (/authbypass|authori[sz]|\brole\b|\buser_id\b/.test(text)) tracks.add('authorization-differential');
+  if (hasJavascript || /\b(?:javascript|script|html|content)\b/.test(text)) tracks.add('browser-dom');
+  if (/\b(?:csrf|captcha|confirm|approval|state|step)\b/.test(text)) tracks.add('workflow-state');
+  if (/\b(?:session|token|jwt|sid)\b/.test(text)) tracks.add('session-analysis');
+  if (/authori[sz]|\brole\b|\buser[_-]?id\b|\baccount[_-]?id\b/.test(text)) tracks.add('authorization-differential');
   if (inputPoints.some((point) => point.location === 'file') || /upload/.test(text)) tracks.add('upload-workflow');
   if (/\/api(?:\/|$)|graphql|openapi|swagger/.test(text)) tracks.add('api-schema');
   if (/crypt|cipher|encrypt|decrypt/.test(text)) tracks.add('cryptography-review');
+  // 観測済みの JSON 応答は API 表面の強い根拠 (パス命名に依存しない api-schema 適用)。
+  if (observedContentType !== undefined && /application\/(?:[\w.+-]*\+)?json/i.test(observedContentType)) tracks.add('api-schema');
+  // エンティティ ID を持つ読み取り経路は認可差分 (role 間比較) の対象になる。
+  try {
+    if (/\/\d+(?:\/|$)/.test(new URL(url).pathname)) tracks.add('authorization-differential');
+  } catch {
+    // 相対 URL 等はスキップ (他規則で評価)。
+  }
   if (tracks.size === 0) tracks.add('zap-active');
   return [...tracks];
 }
@@ -5127,54 +5407,6 @@ function updateDiagnosticRoute(
     : route);
 }
 
-const WORKFLOW_DIAGNOSTIC_TRACKS = new Set<DiagnosticTrack>([
-  'workflow-state',
-  'session-analysis',
-  'authorization-differential',
-  'upload-workflow',
-  'api-schema',
-  'cryptography-review',
-]);
-
-function completeWorkflowRoutes(
-  routes: readonly DiagnosticRouteResult[],
-  baseUrl: string,
-  findingCount: number,
-  executedCheckIds: readonly string[],
-): readonly DiagnosticRouteResult[] {
-  const origin = new URL(baseUrl).origin;
-  const executed = new Set(executedCheckIds);
-  const routeChecks: Readonly<Record<Exclude<DiagnosticTrack, 'zap-active' | 'browser-dom'>, readonly string[]>> = {
-    'workflow-state': ['csrf-password', 'file-upload', 'captcha-bypass', 'xss-stored'],
-    'session-analysis': ['weak-session', 'brute-force'],
-    'authorization-differential': ['authorization-bypass', 'bac-open-access', 'api-mass-assignment'],
-    'upload-workflow': ['file-upload'],
-    'api-schema': ['api-legacy', 'api-mass-assignment', 'api-command-injection'],
-    'cryptography-review': ['crypto-xor', 'crypto-ecb', 'crypto-cbc-oracle'],
-  };
-  return routes.map((route) => WORKFLOW_DIAGNOSTIC_TRACKS.has(route.track)
-    && new URL(route.targetUrl).origin === origin
-    && routeChecks[route.track as keyof typeof routeChecks].some((checkId) => executed.has(checkId))
-    ? {
-        ...route,
-        status: 'executed' as const,
-        detail: `ScopePilot workflow scan completed ${String(executed.size)} selected checks for ${origin}`,
-        findingCount,
-      }
-    : route);
-}
-
-function failWorkflowRoutes(
-  routes: readonly DiagnosticRouteResult[],
-  baseUrls: readonly string[],
-  error: string,
-): readonly DiagnosticRouteResult[] {
-  const origins = new Set(baseUrls.map((baseUrl) => new URL(baseUrl).origin));
-  return routes.map((route) => WORKFLOW_DIAGNOSTIC_TRACKS.has(route.track) && origins.has(new URL(route.targetUrl).origin)
-    ? { ...route, status: 'unavailable' as const, detail: `Workflow scan failed: ${error}` }
-    : route);
-}
-
 class SharedBudgetWorkflowTransport implements WorkflowScanTransport {
   private readonly delegate: WorkflowScanTransport;
   private readonly budget: { readonly limit: number; used: number };
@@ -5216,7 +5448,16 @@ function workflowHttpEvidenceRecords(
   const host = new URL(baseUrl).host;
   return checks.map((check) => {
     const checkUrl = new URL(check.url, `${baseUrl}/`);
+    const exactTarget = `${checkUrl.pathname}${checkUrl.search}`;
     const pathMatches = requestLog.filter((entry) => {
+      try {
+        const entryUrl = new URL(entry.url, `${baseUrl}/`);
+        return `${entryUrl.pathname}${entryUrl.search}` === exactTarget;
+      } catch {
+        return false;
+      }
+    });
+    const samePath = requestLog.filter((entry) => {
       try {
         return new URL(entry.url, `${baseUrl}/`).pathname === checkUrl.pathname;
       } catch {
@@ -5224,7 +5465,9 @@ function workflowHttpEvidenceRecords(
       }
     });
     const exchange = pathMatches.findLast((entry) => entry.method.toUpperCase() === check.method.toUpperCase())
-      ?? pathMatches.at(-1);
+      ?? pathMatches.at(-1)
+      ?? samePath.findLast((entry) => entry.method.toUpperCase() === check.method.toUpperCase())
+      ?? samePath.at(-1);
     if (exchange === undefined) {
       throw new Error(`workflow HTTP evidence is missing for ${check.checkId} ${checkUrl.pathname}`);
     }

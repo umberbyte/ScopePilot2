@@ -42,6 +42,8 @@ export interface FormDescriptor {
 export interface PageObservation {
   /** canonical URL。 */
   readonly url: string;
+  /** Final main-frame URL after redirects or client-side routing. */
+  readonly finalUrl?: string;
   readonly status: number;
   readonly contentType: string;
   readonly title?: string;
@@ -50,6 +52,26 @@ export interface PageObservation {
   readonly depth: number;
   readonly originType: 'crawl' | 'document-hint';
   readonly links: readonly string[];
+  /**
+   * SPA route templates (absolute, same-origin, with `:param` segments) found
+   * in already-loaded scripts. Templates are discovery facts only: they are
+   * never navigated as-is, only instantiated with observed resource ids.
+   */
+  readonly routeTemplates?: readonly string[];
+  /**
+   * Identifier-like values (short numerics, UUIDs) observed in same-origin API
+   * JSON responses and in request URL path segments while rendering the page.
+   * They ground dynamic route instantiation; response bodies are not retained.
+   */
+  readonly observedResourceIds?: readonly string[];
+  /**
+   * HTTP API calls extracted from already-loaded application scripts
+   * (absolute, same-origin). Write methods (POST/PUT/PATCH/DELETE) only fire
+   * on user interaction and are invisible to browse-only crawling, so their
+   * definition in the client code is the discovery evidence. Script bodies
+   * are not retained.
+   */
+  readonly scriptApiCalls?: readonly { readonly url: string; readonly method: string }[];
   readonly forms: readonly FormDescriptor[];
   /** Same-origin browser requests. No header/body values are retained. */
   readonly requests?: readonly ObservedHttpRequest[];

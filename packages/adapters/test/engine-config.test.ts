@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { describe, test } from 'node:test';
-import { composeEngines, createCapabilitySnapshots, createExplorerEngine, createScanEngine, resolveEngineSelection } from '../src/engine-config.ts';
+import { composeEngines, createCapabilitySnapshots, createExplorerEngine, createScanEngine, resolveEngineSelection, resolveOwnedZapBaseUrl } from '../src/engine-config.ts';
 import { PlaywrightExplorerAdapter } from '../src/playwright-explorer.ts';
 import { HttpSecurityFixtureOtpInbox, HttpSecurityFixtureSaml } from '../src/security-fixture.ts';
 import { ZapEngineAdapter } from '../src/zap-engine.ts';
@@ -21,6 +21,21 @@ describe('production engine composition', () => {
 
   test('OAST は server と config の両方を要求する', () => {
     assert.throws(() => resolveEngineSelection({ SCOPEPILOT_OAST_SERVER_URL: 'https://oast.example' }), /INTERACTSH_CONFIG/);
+  });
+
+  test('所有ZAPは対象アプリとの起動順にかかわらず一時ポートを選ぶ', async () => {
+    const occupied: Server = createServer();
+    await new Promise<void>((resolve) => occupied.listen(0, '127.0.0.1', resolve));
+    const address = occupied.address();
+    try {
+      if (address === null || typeof address === 'string') throw new Error('expected TCP address');
+      const preferred = `http://127.0.0.1:${String(address.port)}`;
+      const selected = await resolveOwnedZapBaseUrl(preferred);
+      assert.notEqual(selected, preferred);
+      assert.equal(new URL(selected).hostname, '127.0.0.1');
+    } finally {
+      occupied.close();
+    }
   });
 
   test('明示した実 ZAP の版を測定し、実 transport 群を構成する', async () => {

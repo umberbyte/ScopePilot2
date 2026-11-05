@@ -7,7 +7,7 @@
  * browser launcher は差し替え可能で、契約テストは stub context で行う
  * (実 browser での結合は実環境での確認項目)。
  */
-import type { ExplorationPort } from '@scopepilot2/core';
+import type { BrowserSessionState, ExplorationPort, LoginSessionCookie } from '@scopepilot2/core';
 import type { ObservedHttpRequest, PageObservation, RequestInputPoint } from '@scopepilot2/contracts';
 import { ScopePolicy } from '@scopepilot2/core';
 import type { Request as PlaywrightRequest, Response as PlaywrightResponse } from 'playwright';
@@ -15,32 +15,280 @@ import type { Request as PlaywrightRequest, Response as PlaywrightResponse } fro
 /** テスト差替え用の最小 browser 面 (playwright の該当部分に対応)。 */
 export interface StubBrowserContext {
   /** session cookie を指定した観測 (observeWithSession 経由)。差替え実装は引数を無視できる。 */
-  newPage(cookies?: readonly BrowserCookie[]): Promise<StubPage>;
+  newPage(session?: BrowserSessionState): Promise<StubPage>;
+  /** payload 実行検証 (dialog・console 監視付きで URL を開く)。実装は検証結果だけを返す。 */
+  verifyExecution?(url: string, session?: BrowserSessionState): Promise<{ executed: boolean; signals: readonly string[] }>;
   close(): Promise<void>;
 }
 
 export interface StubPage {
   goto(url: string): Promise<{ status(): number; headers(): Record<string, string> } | null>;
+  /** Wait briefly for SPA rendering and initial API calls. */
+  settle?(): Promise<void>;
+  /** Current main-frame URL after redirects or client-side routing. */
+  url?(): string;
   title(): Promise<string>;
   $$eval(selector: string, fn: (elements: readonly unknown[]) => readonly unknown[]): Promise<readonly unknown[]>;
   observedRequests?(): readonly ObservedHttpRequest[];
+  /**
+   * Identifier-like values from same-origin JSON responses observed while
+   * rendering (API XHR/fetch bodies and JSON navigations). Response bodies
+   * themselves must not be retained or returned.
+   */
+  observedResourceIds?(): Promise<readonly string[]>;
+  /** Already-loaded JavaScript response bodies. Reading these must not issue another request. */
+  scriptSources?(): Promise<readonly string[]>;
   close(): Promise<void>;
 }
 
 export type BrowserLauncher = () => Promise<StubBrowserContext>;
 
 /** browser context へ事前設定する cookie (playwright addCookies 形式の部分)。 */
-export interface BrowserCookie {
-  readonly name: string;
-  readonly value: string;
-  readonly domain: string;
-  readonly path: string;
-  readonly secure?: boolean;
-  readonly httpOnly?: boolean;
+export type BrowserCookie = LoginSessionCookie;
+
+const MAX_SINGLE_SCRIPT_SOURCE_BYTES = 8 * 1024 * 1024;
+const MAX_TOTAL_SCRIPT_SOURCE_BYTES = 24 * 1024 * 1024;
+const MAX_SCRIPT_ROUTE_CANDIDATES = 512;
+const MAX_PAGE_RESOURCE_IDS = 256;
+const MAX_SINGLE_API_BODY_BYTES = 512 * 1024;
+const MAX_TOTAL_API_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_CAPTURED_API_RESPONSES = 64;
+const MAX_JSON_TRAVERSAL_NODES = 4096;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ROUTE_PARAM_SEGMENT_PATTERN = /^:[A-Za-z][\w-]*$/;
+
+/**
+ * Extract client-side route literals from already-loaded application scripts.
+ *
+ * This is deliberately limited to route-related syntax used by common SPA
+ * routers. It does not retain script bodies or turn arbitrary strings into
+ * crawl targets. Literals with `:param` segments are reported as templates:
+ * they are never navigated as-is, only instantiated with observed resource
+ * ids by the exploration core.
+ */
+export interface ScriptRouteLiterals {
+  /** Navigable same-origin URLs without parameter segments. */
+  readonly candidates: readonly string[];
+  /** Same-origin route templates with `:param` segments (not navigable as-is). */
+  readonly templates: readonly string[];
+}
+
+export function extractScriptRouteLiterals(source: string, pageUrl: string): ScriptRouteLiterals {
+  const rawCandidates: string[] = [];
+  const patterns = [
+    /\b(?:path|route|redirectTo)\s*:\s*(["'`])([^"'`\\\r\n]{1,256})\1/g,
+    /\b(?:routerLink|routerlink|navigate|navigateByUrl)\s*(?:\(|:|=)\s*(?:\[\s*)?(["'`])([^"'`\\\r\n]{1,256})\1/g,
+    /["'`](?:routerLink|routerlink|path|route|redirectTo)["'`]\s*[, :]\s*(["'`])([^"'`\\\r\n]{1,256})\1/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const value = match[2];
+      if (value !== undefined) rawCandidates.push(value);
+      if (rawCandidates.length >= MAX_SCRIPT_ROUTE_CANDIDATES) break;
+    }
+    if (rawCandidates.length >= MAX_SCRIPT_ROUTE_CANDIDATES) break;
+  }
+
+  const origin = new URL(pageUrl).origin;
+  const candidates = new Set<string>();
+  const templates = new Set<string>();
+  for (const candidate of rawCandidates) {
+    const value = candidate.trim().replaceAll('\\/', '/');
+    if (value === '' || value === '**' || /^(?:path|route|redirectTo|routerLink|navigate|navigateByUrl)$/i.test(value)) continue;
+    if (/[*{}$]/.test(value)) continue;
+    if (!/^[\w./#?&=%:~-]+$/u.test(value)) continue;
+    if (/\.(?:js|mjs|css|map|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|eot)(?:[?#]|$)/i.test(value)) continue;
+    // ':' は :param セグメントだけに許す (URL scheme 等を含む文字列は候補化しない)。
+    const segments = value.split('/');
+    if (segments.some((segment) => segment.includes(':') && !ROUTE_PARAM_SEGMENT_PATTERN.test(segment.replace(/[?#].*$/, '')))) continue;
+    try {
+      const absolute = value.startsWith('/')
+        ? new URL(value, origin).href
+        : new URL(`/${value}`, origin).href;
+      const parsedAbsolute = new URL(absolute);
+      if (parsedAbsolute.origin !== origin) continue;
+      const paramSegments = parsedAbsolute.pathname.split('/').filter((segment) => ROUTE_PARAM_SEGMENT_PATTERN.test(segment));
+      if (paramSegments.length === 0) {
+        candidates.add(absolute);
+      } else if (paramSegments.length <= 3) {
+        templates.add(absolute);
+      }
+    } catch {
+      // Ignore malformed literals from minified or generated sources.
+    }
+    if (candidates.size + templates.size >= MAX_SCRIPT_ROUTE_CANDIDATES) break;
+  }
+  return { candidates: [...candidates], templates: [...templates] };
+}
+
+/**
+ * Conservative identifier shape used to ground dynamic route instantiation:
+ * short numerics and UUIDs only. Free text, slugs and token-like values are
+ * deliberately excluded so observed values cannot smuggle content into URLs.
+ */
+export function looksLikeResourceIdentifier(value: string): boolean {
+  return /^\d{1,18}$/.test(value) || UUID_PATTERN.test(value);
+}
+
+const HTTP_METHODS_IN_SCRIPTS = ['get', 'post', 'put', 'patch', 'delete'] as const;
+const MAX_SCRIPT_API_CALLS = 256;
+
+/**
+ * Extract HTTP API call definitions from already-loaded application scripts.
+ *
+ * Two generalized shapes are recognised (minified bundles keep string and
+ * template literals intact):
+ * 1. Direct call with a path literal in the first argument expression:
+ *    `.post(this.hostServer + \`/rest/user/login\`, ...)`
+ * 2. Service-base pairing: a base path assigned via string concatenation
+ *    (`host = this.hostServer + \`/api/Feedbacks\``) paired with the HTTP
+ *    verbs used against that base until the next base assignment.
+ *
+ * Only same-origin absolute URLs with plausible path literals are returned.
+ * Script bodies are not retained. This is how write APIs (POST/PUT/PATCH/
+ * DELETE), which never fire during browse-only crawling, become diagnosable.
+ */
+export function extractScriptApiCalls(source: string, pageUrl: string): readonly { url: string; method: string }[] {
+  const origin = new URL(pageUrl).origin;
+  const results = new Set<string>();
+  const add = (method: string, literal: string): void => {
+    if (results.size >= MAX_SCRIPT_API_CALLS) return;
+    const value = literal.trim().replaceAll('\\/', '/');
+    if (!value.startsWith('/') || value === '/' || value.length > 200) return;
+    if (!/^[\w./#?&=%:{}-]+$/u.test(value)) return;
+    if (/\.(?:js|mjs|css|map|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|eot)(?:[?#]|$)/i.test(value)) return;
+    try {
+      const absolute = new URL(value, origin).href;
+      if (new URL(absolute).origin !== origin) return;
+      results.add(`${method.toUpperCase()} ${absolute}`);
+    } catch {
+      // Ignore malformed literals.
+    }
+  };
+
+  // 1. 直接呼び出し: 第一引数式の中にパスリテラルを含む HTTP 動詞呼び出し。
+  const directPattern = /\.(get|post|put|patch|delete)\(\s*[^,()]{0,80}?["'`](\/[\w./#?&=%:{}-]{1,150})["'`]/g;
+  for (const match of source.matchAll(directPattern)) {
+    add(match[1]!, match[2]!);
+  }
+
+  // 2. サービス基底ペアリング: 文字列連結で代入された基底パスと、
+  //    次の基底代入までの間に使われている HTTP 動詞を組にする。
+  const basePattern = /["'`](\/[A-Za-z0-9_][\w./-]{1,120})["'`]/g;
+  const bases: { readonly end: number; readonly path: string }[] = [];
+  for (const match of source.matchAll(basePattern)) {
+    const before = source.slice(Math.max(0, match.index - 40), match.index);
+    if (/=\s*[A-Za-z_$][\w$.]*\s*\+\s*$/.test(before)) {
+      bases.push({ end: (match.index ?? 0) + match[0].length, path: match[1]! });
+    }
+  }
+  for (let index = 0; index < bases.length && results.size < MAX_SCRIPT_API_CALLS; index += 1) {
+    const base = bases[index]!;
+    const windowEnd = index + 1 < bases.length ? bases[index + 1]!.end : Math.min(base.end + 8000, source.length);
+    const window = source.slice(base.end, windowEnd);
+    for (const method of HTTP_METHODS_IN_SCRIPTS) {
+      if (window.includes(`.${method}(`)) add(method, base.path);
+    }
+  }
+
+  return [...results].map((key) => {
+    const separator = key.indexOf(' ');
+    return { method: key.slice(0, separator), url: key.slice(separator + 1) };
+  });
+}
+
+/** JSON keys whose scalar values are treated as resource identifiers. */
+function isIdentifierKey(key: string): boolean {
+  if (key === 'id' || key === 'uuid') return true;
+  if (/(?:^|[_.-])(?:id|uuid)$/i.test(key)) return true;
+  return /^[a-z][A-Za-z0-9]*(?:Id|ID)$/.test(key);
+}
+
+/**
+ * Collect identifier-like values from a parsed same-origin JSON payload.
+ * Values are kept only when both the key looks like an identifier field and
+ * the value matches the conservative identifier shape. The payload itself is
+ * never retained.
+ */
+export function extractResourceIdsFromJson(value: unknown): readonly string[] {
+  const ids = new Set<string>();
+  let visited = 0;
+  const walk = (node: unknown, depth: number): void => {
+    if (depth > 8 || visited >= MAX_JSON_TRAVERSAL_NODES || ids.size >= MAX_PAGE_RESOURCE_IDS) return;
+    visited += 1;
+    if (Array.isArray(node)) {
+      for (const entry of node) {
+        if (visited >= MAX_JSON_TRAVERSAL_NODES) break;
+        walk(entry, depth + 1);
+      }
+      return;
+    }
+    if (node !== null && typeof node === 'object') {
+      for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+        if (isIdentifierKey(key)) {
+          if (typeof child === 'string' && looksLikeResourceIdentifier(child)) {
+            ids.add(child);
+            continue;
+          }
+          if (typeof child === 'number' && Number.isInteger(child) && child >= 0 && Object.is(child, -0) === false) {
+            ids.add(String(child));
+            continue;
+          }
+        }
+        walk(child, depth + 1);
+      }
+    }
+  };
+  walk(value, 0);
+  return [...ids];
+}
+
+/** Identifier-like path segments of a request URL (query values are excluded). */
+export function extractResourceIdsFromUrlSegments(url: string): readonly string[] {
+  try {
+    return new URL(url).pathname.split('/').filter((segment) => looksLikeResourceIdentifier(segment));
+  } catch {
+    return [];
+  }
+}
+
+const RESPONSE_BODY_DEADLINE_MS = 3_000;
+const CAPTURE_SETTLE_DEADLINE_MS = 10_000;
+
+/**
+ * playwright の response.body() は、対象が応答本文を返し切らない (streaming・
+ * chunked 継続中など) 場合に永久に解決しないことがある。識別子・スクリプトの
+ * 観測は他のページ観測で補えるため、応答ごとに短い期限で諦め、探索全体を
+ * 止めない (design/22: 停止可能性の保証)。
+ */
+function withResponseBodyDeadline<T>(body: Promise<T>): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), RESPONSE_BODY_DEADLINE_MS);
+    body.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
+/** settle 待ち全体にも上限を設け、 capture task の滞留が観測を固めないようにする。 */
+async function withCaptureDeadline(tasks: Promise<unknown>): Promise<void> {
+  await Promise.race([
+    tasks.catch(() => undefined),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, CAPTURE_SETTLE_DEADLINE_MS);
+    }),
+  ]);
 }
 
 /** 既定 launcher: playwright を動的 import して chromium を起動する。 */
-function requestInputPoints(request: PlaywrightRequest): readonly RequestInputPoint[] {
+export function requestInputPoints(request: PlaywrightRequest): readonly RequestInputPoint[] {
   const parsed = new URL(request.url());
   const points: RequestInputPoint[] = [...new Set(parsed.searchParams.keys())].map((name) => ({ name, location: 'query', type: 'string' }));
   const postData = request.postData() ?? '';
@@ -72,22 +320,38 @@ const createDefaultLauncher = (fixedCookies?: readonly BrowserCookie[], proxySer
     const playwright = await import('playwright');
     const browser = await playwright.chromium.launch(proxyServer === undefined ? {} : { proxy: { server: proxyServer } });
     return {
-      newPage: async (perCallCookies?: readonly BrowserCookie[]) => {
-        const context = await browser.newContext();
+      newPage: async (session?: BrowserSessionState) => {
+        // ZAP 等の自前 proxy を通る HTTPS は proxy のルート CA で再署名される。
+        // fresh な browser context はその CA を信頼しないため、明示的に proxy を
+        // 指定した観測に限り証明書検証を免除する (対象・経路は我々の管理内)。
+        const context = await browser.newContext(proxyServer === undefined ? {} : { ignoreHTTPSErrors: true });
         // 構成時 cookie と呼出時 cookie (runLogin で得た session) を context へ注入する。
-        const cookies = [...(fixedCookies ?? []), ...(perCallCookies ?? [])];
+        const cookies = [...(fixedCookies ?? []), ...(session?.cookies ?? [])];
         if (cookies.length > 0) {
           await context.addCookies(cookies.map((cookie) => ({
             name: cookie.name,
             value: cookie.value,
             domain: cookie.domain,
             path: cookie.path,
+            ...(cookie.expires === undefined ? {} : { expires: cookie.expires }),
             ...(cookie.secure === undefined ? {} : { secure: cookie.secure }),
             ...(cookie.httpOnly === undefined ? {} : { httpOnly: cookie.httpOnly }),
+            ...(cookie.sameSite === undefined ? {} : { sameSite: cookie.sameSite }),
           })));
+        }
+        if ((session?.origins.length ?? 0) > 0) {
+          await context.addInitScript((origins) => {
+            const state = origins.find((candidate) => candidate.origin === globalThis.location.origin);
+            if (state === undefined) return;
+            for (const entry of state.localStorage) globalThis.localStorage.setItem(entry.name, entry.value);
+            for (const entry of state.sessionStorage) globalThis.sessionStorage.setItem(entry.name, entry.value);
+          }, session!.origins);
         }
         const page = await context.newPage();
         const requests: ObservedHttpRequest[] = [];
+        const scriptSources: string[] = [];
+        const scriptCaptureTasks = new Set<Promise<void>>();
+        let capturedScriptBytes = 0;
         const captureRequest = (request: PlaywrightRequest): void => {
           const method = request.method().toUpperCase();
           requests.push({
@@ -100,7 +364,55 @@ const createDefaultLauncher = (fixedCookies?: readonly BrowserCookie[], proxySer
             sourceUrl: page.url() || request.url(),
           });
         };
+        // 同一Originの JSON 応答から識別子様の値だけをメモリ内で収集する。本文は保持しない。
+        const capturedJsonIds: { readonly url: string; readonly ids: readonly string[] }[] = [];
+        let capturedApiBytes = 0;
+        let capturedApiResponses = 0;
+        const bodyCaptureTasks = new Set<Promise<void>>();
+        const captureJsonIds = async (response: PlaywrightResponse): Promise<void> => {
+          const contentType = response.headers()['content-type'] ?? '';
+          if (!/application\/(?:[\w.+-]*\+)?json/i.test(contentType)) return;
+          if (capturedApiResponses >= MAX_CAPTURED_API_RESPONSES) return;
+          const declaredLength = Number.parseInt(response.headers()['content-length'] ?? '', 10);
+          if (Number.isFinite(declaredLength) && declaredLength > MAX_SINGLE_API_BODY_BYTES) return;
+          // Streaming/.chunked 応答では body() が返らないことがある。識別子観測は
+          // 他の観測機会で補えるため、応答ごとに短い期限で諦めて探索を止めない。
+          const body = await withResponseBodyDeadline(response.body());
+          if (body === null || body.byteLength === 0 || body.byteLength > MAX_SINGLE_API_BODY_BYTES) return;
+          if (capturedApiBytes + body.byteLength > MAX_TOTAL_API_BODY_BYTES) return;
+          capturedApiBytes += body.byteLength;
+          capturedApiResponses += 1;
+          try {
+            const ids = extractResourceIdsFromJson(JSON.parse(body.toString('utf8')) as unknown);
+            if (ids.length > 0) capturedJsonIds.push({ url: response.url(), ids });
+          } catch {
+            // Not JSON or malformed: nothing to extract.
+          }
+        };
+        const captureScriptResponse = (response: PlaywrightResponse): void => {
+          if (response.request().resourceType() !== 'script') return;
+          const declaredLength = Number.parseInt(response.headers()['content-length'] ?? '', 10);
+          if (Number.isFinite(declaredLength) && declaredLength > MAX_SINGLE_SCRIPT_SOURCE_BYTES) return;
+          const task = withResponseBodyDeadline(response.body()).then((body) => {
+            if (body === null) return;
+            if (body.byteLength > MAX_SINGLE_SCRIPT_SOURCE_BYTES) return;
+            if (capturedScriptBytes + body.byteLength > MAX_TOTAL_SCRIPT_SOURCE_BYTES) return;
+            capturedScriptBytes += body.byteLength;
+            scriptSources.push(body.toString('utf8'));
+          }).catch(() => undefined).then(() => undefined);
+          scriptCaptureTasks.add(task);
+          void task.finally(() => scriptCaptureTasks.delete(task));
+        };
+        const captureApiResponse = (response: PlaywrightResponse): void => {
+          const resourceType = response.request().resourceType();
+          if (resourceType !== 'xhr' && resourceType !== 'fetch') return;
+          const task = captureJsonIds(response).then(() => undefined);
+          bodyCaptureTasks.add(task);
+          void task.finally(() => bodyCaptureTasks.delete(task));
+        };
         page.on('request', captureRequest);
+        page.on('response', captureScriptResponse);
+        page.on('response', captureApiResponse);
         return {
           goto: async (url: string) => {
             let navigationResponse: PlaywrightResponse | null = null;
@@ -111,7 +423,14 @@ const createDefaultLauncher = (fixedCookies?: readonly BrowserCookie[], proxySer
             };
             page.on('response', captureNavigationResponse);
             try {
-              return await page.goto(url, { waitUntil: 'domcontentloaded' });
+              const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+              // JSON 文書への直接 navigation も識別子の観測源になる (例: API URL への直接遷移)。
+              if (response !== null) {
+                const task = captureJsonIds(response).then(() => undefined);
+                bodyCaptureTasks.add(task);
+                void task.finally(() => bodyCaptureTasks.delete(task));
+              }
+              return response;
             } catch (cause) {
               // Chromium turns Content-Disposition: attachment into a download and
               // page.goto rejects even though an HTTP response was received.
@@ -127,18 +446,86 @@ const createDefaultLauncher = (fixedCookies?: readonly BrowserCookie[], proxySer
               page.off('response', captureNavigationResponse);
             }
           },
+          settle: async () => {
+            await page.waitForLoadState('networkidle', { timeout: 1_500 }).catch(() => undefined);
+            await withCaptureDeadline(Promise.all([...scriptCaptureTasks, ...bodyCaptureTasks]));
+          },
+          url: () => page.url(),
           title: async () => await page.title(),
           $$eval: async (selector: string, fn: (elements: readonly unknown[]) => readonly unknown[]): Promise<readonly unknown[]> =>
             await page.$$eval(selector, fn as never) as readonly unknown[],
           observedRequests: () => [...requests],
+          observedResourceIds: async () => {
+            await Promise.all([...bodyCaptureTasks]);
+            const pageOrigin = new URL(page.url()).origin;
+            const ids = new Set<string>();
+            for (const captured of capturedJsonIds) {
+              if (new URL(captured.url).origin !== pageOrigin) continue;
+              for (const id of captured.ids) {
+                if (ids.size >= MAX_PAGE_RESOURCE_IDS) return [...ids];
+                ids.add(id);
+              }
+            }
+            return [...ids];
+          },
+          scriptSources: async () => {
+            await Promise.all([...scriptCaptureTasks]);
+            return [...scriptSources];
+          },
           close: async () => {
             page.off('request', captureRequest);
+            page.off('response', captureScriptResponse);
+            page.off('response', captureApiResponse);
             await context.close();
           },
         } satisfies StubPage;
       },
       close: async () => {
         await browser.close();
+      },
+      verifyExecution: async (url: string, session?: BrowserSessionState) => {
+        // 検証専用 page: dialog は自動で dismiss しつつ種別と文言 (先頭のみ) を記録する。
+        const context = await browser.newContext(proxyServer === undefined ? {} : { ignoreHTTPSErrors: true });
+        const cookies = [...(fixedCookies ?? []), ...(session?.cookies ?? [])];
+        if (cookies.length > 0) {
+          await context.addCookies(cookies.map((cookie) => ({
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+            ...(cookie.expires === undefined ? {} : { expires: cookie.expires }),
+            ...(cookie.secure === undefined ? {} : { secure: cookie.secure }),
+            ...(cookie.httpOnly === undefined ? {} : { httpOnly: cookie.httpOnly }),
+            ...(cookie.sameSite === undefined ? {} : { sameSite: cookie.sameSite }),
+          })));
+        }
+        if ((session?.origins.length ?? 0) > 0) {
+          await context.addInitScript((origins) => {
+            const state = origins.find((candidate) => candidate.origin === globalThis.location.origin);
+            if (state === undefined) return;
+            for (const entry of state.localStorage) globalThis.localStorage.setItem(entry.name, entry.value);
+            for (const entry of state.sessionStorage) globalThis.sessionStorage.setItem(entry.name, entry.value);
+          }, session!.origins);
+        }
+        const page = await context.newPage();
+        const signals: string[] = [];
+        page.on('dialog', async (dialog) => {
+          signals.push(`dialog:${dialog.type()} ${dialog.message().slice(0, 80)}`.trimEnd());
+          await dialog.dismiss().catch(() => undefined);
+        });
+        page.on('pageerror', (error) => {
+          signals.push(`pageerror ${error.message.slice(0, 80)}`);
+        });
+        try {
+          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15_000 });
+          await page.waitForLoadState('networkidle', { timeout: 1_500 }).catch(() => undefined);
+          // 遅延発火 (setTimeout 系 payload) ための短期間の追加観測。
+          await page.waitForTimeout(750);
+          const executed = signals.some((signal) => signal.startsWith('dialog:'));
+          return { executed, signals: signals.slice(0, 16) };
+        } finally {
+          await context.close();
+        }
       },
     };
   };
@@ -163,6 +550,17 @@ function isDownloadNavigationError(cause: unknown): boolean {
   return /download is starting/i.test(message);
 }
 
+/**
+ * 実対象には一時的に到達できない URL・証明書検証に失敗する経路が混ざる。
+ * 1 件の navigation 失敗で探索全体を落とさず、status 0 の観測として記録して
+ * 続行する (design/22: 停止可能性は保証しつつ観測は欠落させない)。
+ * 実装ミス (TypeError 等) は握りつぶさずそのまま throw する。
+ */
+function isRecoverableNavigationError(cause: unknown): boolean {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return /net::ERR_|navigation failed because|target closed|timeout .*exceeded/i.test(message);
+}
+
 function downloadObservation(url: string): PageObservation {
   return {
     url,
@@ -179,6 +577,43 @@ function downloadObservation(url: string): PageObservation {
   };
 }
 
+function navigationFailureObservation(url: string): PageObservation {
+  return {
+    url,
+    status: 0,
+    contentType: 'application/x-navigation-failure',
+    discoveredFrom: null,
+    depth: 0,
+    originType: 'crawl',
+    links: [],
+    forms: [],
+  };
+}
+
+/**
+ * ページ観測で得た識別子様の値を 1 つにまとめる。観測源は (1) launcher が
+ * メモリ内解析した同一Origin JSON 応答、(2) scope 許可済みリクエスト URL の
+ * パス要素。どちらも「対象が実際に返した値」だけで、推測値を含まない。
+ */
+async function collectObservedResourceIds(
+  page: StubPage,
+  scopeAllowedRequests?: readonly ObservedHttpRequest[],
+): Promise<readonly string[]> {
+  const ids = new Set<string>();
+  for (const id of await page.observedResourceIds?.() ?? []) {
+    if (looksLikeResourceIdentifier(id)) ids.add(id);
+    if (ids.size >= MAX_PAGE_RESOURCE_IDS) return [...ids];
+  }
+  const requests = scopeAllowedRequests ?? (page.observedRequests?.() ?? []);
+  for (const request of requests) {
+    for (const segment of extractResourceIdsFromUrlSegments(request.url)) {
+      if (ids.size >= MAX_PAGE_RESOURCE_IDS) return [...ids];
+      ids.add(segment);
+    }
+  }
+  return [...ids];
+}
+
 export class PlaywrightExplorerAdapter implements ExplorationPort {
   readonly engineVersion = 'playwright-chromium';
   private scope: PlaywrightExplorerOptions['scope'];
@@ -190,7 +625,7 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
    * AbortError (timeout) で正常な探索結果を失う。WeakMap にして cookie 値自体は保持・
    * 記録せず、新しい login が新しい cookie 配列を渡した時は改めて解除する。
    */
-  private readonly preparedSessionOrigins = new WeakMap<readonly BrowserCookie[], Set<string>>();
+  private readonly preparedSessionOrigins = new WeakMap<BrowserSessionState, Set<string>>();
   private contextPromise: Promise<StubBrowserContext> | null = null;
   private resolvedVersion = 'playwright (未起動)';
 
@@ -233,24 +668,42 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
    */
   async observeWithSession(
     url: string,
-    session: { readonly cookies: readonly { readonly name: string; readonly value: string; readonly domain: string; readonly path: string }[] },
+    session: BrowserSessionState,
   ): Promise<PageObservation | null> {
-    return await this.observeInternal(url, session.cookies);
+    return await this.observeInternal(url, session);
   }
 
-  private async observeInternal(url: string, sessionCookies: readonly BrowserCookie[] | undefined): Promise<PageObservation | null> {
+  /**
+   * 検証用 URL (payload 付き) を実 browser で開き、攻撃コードの実行を観測する。
+   * scope 強制は観測と同じ入口で行う (Enforced: 送信前拒否)。
+   */
+  async verifyPayloadExecution(
+    url: string,
+    session?: BrowserSessionState,
+  ): Promise<{ executed: boolean; signals: readonly string[] }> {
+    if (!ScopePolicy.decide(this.scope, url).allowed) {
+      throw new Error(`payload execution verification denied by scope: ${url}`);
+    }
+    const context = await this.ensureContext();
+    if (context.verifyExecution === undefined) {
+      throw new Error('configured browser context does not support payload execution verification');
+    }
+    return await context.verifyExecution(url, session);
+  }
+
+  private async observeInternal(url: string, sessionState: BrowserSessionState | undefined): Promise<PageObservation | null> {
     // scope 強制は経路の入口でも行う (Enforced: ここは送信前)。
     if (!ScopePolicy.decide(this.scope, url).allowed) {
       return null;
     }
-    if (sessionCookies !== undefined) {
+    if (sessionState !== undefined) {
       // ZAP の HTTP Sessions add-on は active session の cookie を上書き注入する。
       // login executor から受け取った最新 cookie が優先されるよう、送信前に解除する。
       const origin = new URL(url).origin;
-      let preparedOrigins = this.preparedSessionOrigins.get(sessionCookies);
+      let preparedOrigins = this.preparedSessionOrigins.get(sessionState);
       if (preparedOrigins === undefined) {
         preparedOrigins = new Set<string>();
-        this.preparedSessionOrigins.set(sessionCookies, preparedOrigins);
+        this.preparedSessionOrigins.set(sessionState, preparedOrigins);
       }
       if (!preparedOrigins.has(origin)) {
         await this.beforeSessionObservation?.(origin);
@@ -259,34 +712,67 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
       }
     }
     const context = await this.ensureContext();
-    const page = await context.newPage(sessionCookies);
+    const page = await context.newPage(sessionState);
     try {
       const response = await page.goto(url);
       if (response === null) {
         return null;
       }
+      await page.settle?.();
+      const finalUrl = page.url?.() ?? url;
       const status = response.status();
       const contentType = response.headers()['content-type'] ?? 'application/octet-stream';
+      const scopeAllowedRequests = (page.observedRequests?.() ?? []).filter((request) => ScopePolicy.decide(this.scope, request.url).allowed);
       if (status >= 400 || !/^(?:text\/html|application\/xhtml\+xml)(?:;|$)/i.test(contentType)) {
         // エラー応答と非HTML応答は観測として記録するが、DOM解析は行わない。
+        // 識別子の観測 (JSON 応答・URL セグメント) は解析対象外の応答でも行う。
+        const errorPageResourceIds = await collectObservedResourceIds(page, scopeAllowedRequests);
         return {
           url,
+          finalUrl,
           status,
           contentType,
           discoveredFrom: null,
           depth: 0,
           originType: 'crawl',
           links: [],
+          ...(errorPageResourceIds.length === 0 ? {} : { observedResourceIds: errorPageResourceIds }),
           forms: [],
         };
       }
       const title = await page.title();
-      const links = await page.$$eval('a[href]', (anchors) =>
-        anchors.map((anchor) => {
-          const href = (anchor as HTMLAnchorElement).href;
-          return typeof href === 'string' ? href : '';
+      const links = await page.$$eval(
+        'a[href], area[href], [role="link"][href], [data-href], [data-to], [routerlink]',
+        (elements) => elements.map((candidate) => {
+          const element = candidate as Element;
+          const raw = element instanceof HTMLAnchorElement || element instanceof HTMLAreaElement
+            ? element.href
+            : element.getAttribute('href')
+              ?? element.getAttribute('data-href')
+              ?? element.getAttribute('data-to')
+              ?? element.getAttribute('routerlink')
+              ?? '';
+          if (raw === '' || raw.trim().toLowerCase().startsWith('javascript:')) return '';
+          try {
+            return new URL(raw, globalThis.location.href).href;
+          } catch {
+            return '';
+          }
         }),
       );
+      const scriptAnalysis = (await page.scriptSources?.() ?? [])
+        .reduce((accumulated: { candidates: string[]; templates: string[]; apiCalls: { url: string; method: string }[] }, source) => {
+          const extracted = extractScriptRouteLiterals(source, finalUrl);
+          accumulated.candidates.push(...extracted.candidates);
+          accumulated.templates.push(...extracted.templates);
+          accumulated.apiCalls.push(...extractScriptApiCalls(source, finalUrl));
+          return accumulated;
+        }, { candidates: [], templates: [], apiCalls: [] });
+      const scriptApiCallMap = new Map<string, { url: string; method: string }>();
+      for (const call of scriptAnalysis.apiCalls) {
+        scriptApiCallMap.set(`${call.method} ${call.url}`, call);
+      }
+      const scriptApiCalls = [...scriptApiCallMap.values()];
       const forms = await page.$$eval('form', (elements) => elements.map((element) => {
         const form = element as HTMLFormElement;
         const fields = Array.from(form.elements)
@@ -324,23 +810,33 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
         return [{ scriptElements, inlineEventHandlers, javascriptUrls }];
       });
       const javascriptSignals = javascriptSignalRows[0] as PageObservation['javascriptSignals'] | undefined;
-      const observedRequests = (page.observedRequests?.() ?? []).filter((request) => ScopePolicy.decide(this.scope, request.url).allowed);
+      const resourceIds = await collectObservedResourceIds(page, scopeAllowedRequests);
       return {
         url,
+        finalUrl,
         status,
         contentType,
         ...(title === '' ? {} : { title }),
         discoveredFrom: null,
         depth: 0,
         originType: 'crawl',
-        links: (links as readonly string[]).filter((link) => link.startsWith('http://') || link.startsWith('https://')),
+        links: [...new Set([
+          ...(links as readonly string[]).filter((link) => link.startsWith('http://') || link.startsWith('https://')),
+          ...scriptAnalysis.candidates,
+        ])],
+        ...(scriptAnalysis.templates.length === 0 ? {} : { routeTemplates: [...new Set(scriptAnalysis.templates)] }),
+        ...(scriptApiCalls.length === 0 ? {} : { scriptApiCalls }),
+        ...(resourceIds.length === 0 ? {} : { observedResourceIds: resourceIds }),
         forms: forms as PageObservation['forms'],
-        requests: observedRequests,
+        requests: scopeAllowedRequests,
         ...(javascriptSignals === undefined ? {} : { javascriptSignals }),
       };
     } catch (cause) {
       if (isDownloadNavigationError(cause)) {
         return downloadObservation(url);
+      }
+      if (isRecoverableNavigationError(cause)) {
+        return navigationFailureObservation(url);
       }
       throw new Error(`Playwright exploration failed for ${url}: ${cause instanceof Error ? cause.message : String(cause)}`);
     } finally {

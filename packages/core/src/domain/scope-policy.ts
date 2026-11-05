@@ -30,6 +30,16 @@ export class ScopePolicy {
     return `${origin}${path}${parsed.search}`;
   }
 
+  /**
+   * Canonical URL used by browser exploration. Unlike an HTTP request target,
+   * a fragment can identify a distinct client-side SPA route and must remain
+   * part of crawl identity.
+   */
+  static canonicalBrowserUrl(url: string): string {
+    const parsed = new URL(url);
+    return `${ScopePolicy.canonicalUrl(url)}${parsed.hash}`;
+  }
+
   /** deny を allow より優先して判定する。 */
   static decide(scope: ScopeOrigins, url: string): ScopeDecision {
     const origin = ScopePolicy.canonicalOrigin(url);

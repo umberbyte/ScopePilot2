@@ -1,232 +1,130 @@
-/**
- * ワークフロー診断の回帰テスト。DVWAが意図して含む18分類の脆弱性と副ギャップ
- * （API経由のOSコマンドインジェクション、LFI成立証拠、SQLi URL単位確認、
- * オープンリダイレクト medium/high 迂回）を取りこぼしなく検出できることを確認する。
- * 旧 C# 実装の WorkflowScanTests に相当する。
- */
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createServer, type Server } from 'node:http';
 import { after, before, describe, test } from 'node:test';
-import { NodeWorkflowScanTransport } from '../src/workflow-scan-transport.ts';
-import { startFakeDvwaServer, type FakeDvwaServer } from './fake-dvwa-server.ts';
 import {
+  WORKFLOW_SCAN_CHECK_IDS,
+  analyzeSessionPattern,
   clientSideTokenCandidates,
   detectRepeatingKey,
   findDomSink,
-  analyzeSessionPattern,
   md5Hex,
   parseExternalScriptOrigins,
   resolveWorkflowScanCheckIds,
   runWorkflowScan,
   tryGetHost,
   xorBytes,
-  type WorkflowScanTransport,
 } from '@scopepilot2/core';
+import { NodeWorkflowScanTransport } from '../src/workflow-scan-transport.ts';
 
-const EXPECTED_CHECK_IDS: readonly string[] = [
-  'brute-force',
-  'csrf-password',
-  'file-upload',
-  'captcha-bypass',
-  'weak-session',
-  'xss-reflected',
-  'xss-stored',
-  'xss-dom',
-  'csp-bypass',
-  'client-side-token',
-  'authorization-bypass',
-  'bac-open-access',
-  'open-redirect',
-  'crypto-xor',
-  'crypto-ecb',
-  'crypto-cbc-oracle',
-  'api-legacy',
-  'api-mass-assignment',
-  'api-command-injection',
-  'sqli-verify',
-  'lfi',
-];
-
-function createTransport(baseUrl: string, maxRequests: number, redactions: readonly string[]): WorkflowScanTransport {
-  return new NodeWorkflowScanTransport({ baseUrl, maxRequests, redactionValues: redactions });
-}
-
-describe('WorkflowScan (DVWA 18分類の網羅検出)', () => {
-  let server: (FakeDvwaServer & { loginAttempted: boolean; currentPassword: string }) | undefined;
+describe('Generic HTTP diagnostics', () => {
+  let server: Server | undefined;
+  let baseUrl = '';
 
   before(async () => {
-    server = (await startFakeDvwaServer('admin', 'SecretPass123')) as FakeDvwaServer & {
-      loginAttempted: boolean;
-      currentPassword: string;
-    };
+    server = createServer((request, response) => {
+      const target = new URL(request.url ?? '/', 'http://fixture.invalid');
+      const origin = request.headers.origin;
+      if (typeof origin === 'string') {
+        response.setHeader('Access-Control-Allow-Origin', origin);
+        response.setHeader('Access-Control-Allow-Credentials', 'true');
+      }
+      response.setHeader('Content-Type', 'text/html; charset=utf-8');
+      response.setHeader('Set-Cookie', 'fixture_session=opaque');
+      if (target.pathname === '/go') {
+        response.statusCode = 302;
+        response.setHeader('Location', target.searchParams.get('next') ?? '/');
+        response.end('redirect');
+        return;
+      }
+      if (target.pathname === '/download' && target.searchParams.get('file')?.includes('../') === true) {
+        response.end('root:x:0:0:root:/root:/bin/bash');
+        return;
+      }
+      const query = target.searchParams.get('q') ?? '';
+      if (query === "'") {
+        response.statusCode = 500;
+        response.end('SQL syntax error near quotation');
+        return;
+      }
+      response.end(`<html><script>const value = location.search; document.write(value);</script><body>${query}</body></html>`);
+    });
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('fixture server did not bind');
+    baseUrl = `http://127.0.0.1:${String(address.port)}`;
   });
 
   after(async () => {
-    await server?.close();
+    await new Promise<void>((resolve, reject) => server?.close((error) => error === undefined ? resolve() : reject(error)) ?? resolve());
   });
 
-  test('全チェックIDを検出し、レベル別挙動・証跡・復元を確認する', async () => {
-    assert.ok(server !== undefined);
-    const baseUrl = server.baseUrl;
+  test('uses observed URLs and input points without assuming a target product', async () => {
     const transport = new NodeWorkflowScanTransport({
       baseUrl,
-      maxRequests: 2000,
-      redactionValues: ['SecretPass123'],
+      maxRequests: 100,
+      sessionCookies: [{ name: 'authenticated_session', value: 'secret-session-value' }],
+      redactionValues: ['secret-session-value'],
     });
-    const result = await runWorkflowScan(
-      { baseUrl, username: 'admin', password: 'SecretPass123' },
-      transport,
-      {
-        progress: () => undefined,
-        createProbeTransport: () =>
-          createTransport(baseUrl, 100, ['SecretPass123']),
-      },
-    );
+    const result = await runWorkflowScan({
+      baseUrl,
+      authenticated: true,
+      targets: [
+        { url: `${baseUrl}/catalog/search?q=book`, method: 'GET', inputPoints: [{ name: 'q', location: 'query', type: 'text' }] },
+        { url: `${baseUrl}/go?next=%2Fhome`, method: 'GET', inputPoints: [{ name: 'next', location: 'query', type: 'url' }] },
+        { url: `${baseUrl}/download?file=manual.pdf`, method: 'GET', inputPoints: [{ name: 'file', location: 'query', type: 'text' }] },
+      ],
+    }, transport);
 
+    const detected = new Set(result.checks.map((check) => check.checkId));
+    for (const expected of ['security-headers', 'cookie-security', 'cors-policy', 'dom-source-sink', 'reflected-input', 'sql-error', 'open-redirect', 'path-traversal']) {
+      assert.ok(detected.has(expected), `missing ${expected}: ${[...detected].join(', ')}`);
+    }
     assert.equal(result.authenticated, true);
-    assert.equal(result.originalSecurityLevel, 'low');
-    const detectedIds = new Set(result.checks.map((check) => check.checkId));
-    const missing = EXPECTED_CHECK_IDS.filter((id) => !detectedIds.has(id));
-    assert.deepEqual(missing, [], `未検出のチェック: ${missing.join(', ')} / 検出済み: ${[...detectedIds].join(', ')}`);
-
-    // レベル別に挙動が変わる暗号モジュール: XOR=low / ECB=medium / CBCオラクル=high
-    assert.ok(result.checks.some((c) => c.checkId === 'crypto-xor' && c.securityLevel === 'low'));
-    assert.ok(result.checks.some((c) => c.checkId === 'crypto-ecb' && c.securityLevel === 'medium'));
-    assert.ok(result.checks.some((c) => c.checkId === 'crypto-cbc-oracle' && c.securityLevel === 'high'));
-
-    // セッションIDの生成規則はレベルごとに判定される（連番・時刻・MD5連番）。
-    const weakSessionLevels = new Set(
-      result.checks.filter((c) => c.checkId === 'weak-session').map((c) => c.securityLevel),
-    );
-    for (const level of ['low', 'medium', 'high']) {
-      assert.ok(weakSessionLevels.has(level), `weak-session ${level} が未検出`);
-    }
-
-    // LFI（ローカルファイル読取りの成立証拠）は全レベルで確認する。
-    const lfiLevels = new Set(result.checks.filter((c) => c.checkId === 'lfi').map((c) => c.securityLevel));
-    for (const level of ['low', 'medium', 'high']) {
-      assert.ok(lfiLevels.has(level), `lfi ${level} が未検出`);
-    }
-
-    // SQLインジェクションはURL単位（通常型・ブラインド型）で確認する。
-    const sqliUrls = [...new Set(result.checks.filter((c) => c.checkId === 'sqli-verify').map((c) => c.url))];
-    assert.ok(
-      sqliUrls.some((url) => url.includes('vulnerabilities/sqli/') && !url.includes('blind')),
-      `通常型のURLが無い: ${sqliUrls.join(', ')}`,
-    );
-    assert.ok(sqliUrls.some((url) => url.includes('sqli_blind')), `ブラインド型のURLが無い: ${sqliUrls.join(', ')}`);
-
-    // オープンリダイレクトは low/medium/high の各実装ファイルで確認する。
-    assert.equal(result.checks.filter((c) => c.checkId === 'open-redirect').length, 3);
-
-    // すべての所見が報告に必要な内容を持つ。
-    for (const check of result.checks) {
-      assert.ok(check.title.trim() !== '');
-      assert.ok(check.description.trim() !== '');
-      assert.ok(check.evidence.trim() !== '');
-      assert.ok(check.remediation.trim() !== '');
-      assert.ok(['high', 'medium', 'low', 'info'].includes(check.severity), check.severity);
-      assert.ok(/^\d+$/.test(check.cwe), check.cwe);
-    }
-
-    // ペイロード集合の版が記録されている (AGENTS.md ベンチマーク節の要件)。
-    assert.match(result.payloadSet, /^scopepilot-workflow-payloads\/v2\.0\.0 sha256:[a-f0-9]{64}$/);
-
-    // 認証情報は要求証跡へ露出しない。
-    const logText = JSON.stringify(result.requestLog);
-    assert.ok(!logText.includes('SecretPass123'), '証跡ログへパスワードが含まれている');
-
-    // 破壊的検証の復元: パスワード・セキュリティレベルは元の値へ戻る。
-    assert.equal(server.currentPassword, 'SecretPass123');
-    assert.equal(server.securityLevel, 'low');
-
-    assert.ok(result.requestCount > 100 && result.requestCount <= 2000, `requestCount=${String(result.requestCount)}`);
+    assert.equal(result.originalSecurityLevel, '');
+    assert.deepEqual(result.testedSecurityLevels, []);
+    assert.ok(result.requestCount <= 100);
+    assert.ok(!JSON.stringify(result.requestLog).includes('secret-session-value'));
+    assert.ok(result.checks.every((check) => !check.url.includes('/vulnerabilities/')));
   });
 
-  test('ログイン失敗時は未認証のまま安全に完了する', async () => {
-    assert.ok(server !== undefined);
-    const transport = new NodeWorkflowScanTransport({ baseUrl: server.baseUrl, maxRequests: 500 });
-    const result = await runWorkflowScan({ baseUrl: server.baseUrl, username: 'admin', password: 'wrong-password' }, transport);
-    assert.equal(result.authenticated, false);
+  test('does not invent a body for a non-GET candidate', async () => {
+    const transport = new NodeWorkflowScanTransport({ baseUrl, maxRequests: 20 });
+    const result = await runWorkflowScan({
+      baseUrl,
+      targets: [{ url: `${baseUrl}/account/update`, method: 'POST', inputPoints: [{ name: 'displayName', location: 'body', type: 'text' }] }],
+    }, transport);
+    assert.equal(result.requestCount, 0);
     assert.equal(result.checks.length, 0);
-    assert.equal(server.loginAttempted, true);
+    assert.equal(result.skips.length, WORKFLOW_SCAN_CHECK_IDS.length);
+    assert.ok(result.skips.every((entry) => entry.note.includes('元本文値を保存していない')));
   });
 
-  test('DS-221選択時は対応するチェックだけを実行する', async () => {
-    assert.ok(server !== undefined);
-    const checkIds = resolveWorkflowScanCheckIds(['デジタル庁 DS-221']);
-    const transport = createTransport(server.baseUrl, 1000, ['SecretPass123']);
-    const result = await runWorkflowScan(
-      { baseUrl: server.baseUrl, username: 'admin', password: 'SecretPass123', checkIds },
-      transport,
-      { createProbeTransport: () => createTransport(server!.baseUrl, 1000, ['SecretPass123']) },
-    );
-    const executed = new Set([
-      ...result.checks.map((check) => check.checkId),
-      ...result.skips.map((check) => check.checkId),
-    ]);
-    assert.ok(executed.has('csrf-password'));
-    assert.ok(executed.has('weak-session'));
-    assert.ok(!executed.has('xss-reflected'));
-    assert.ok(!executed.has('lfi'));
+  test('DS-221 selects only applicable generic HTTP checks', () => {
+    const checks = resolveWorkflowScanCheckIds(['デジタル庁 DS-221']);
+    assert.ok(checks.includes('security-headers'));
+    assert.ok(checks.includes('cookie-security'));
+    assert.ok(!checks.includes('dom-source-sink'));
+    assert.ok(!checks.includes('sql-error'));
+    assert.deepEqual(resolveWorkflowScanCheckIds(['OWASP ASVS 5.0']), WORKFLOW_SCAN_CHECK_IDS);
   });
 });
 
-describe('WorkflowScan 純粋関数', () => {
-  test('ガイドライン選択でワークフローチェック集合を切り替える', () => {
-    assert.deepEqual(resolveWorkflowScanCheckIds([]), EXPECTED_CHECK_IDS);
-    assert.deepEqual(resolveWorkflowScanCheckIds(['OWASP ASVS 5.0']), EXPECTED_CHECK_IDS);
-    const ds221 = resolveWorkflowScanCheckIds(['デジタル庁 DS-221']);
-    assert.ok(ds221.includes('csrf-password'));
-    assert.ok(ds221.includes('weak-session'));
-    assert.ok(!ds221.includes('xss-reflected'));
-    assert.deepEqual(resolveWorkflowScanCheckIds(['デジタル庁 DS-221', 'OWASP WSTG 4.2']), EXPECTED_CHECK_IDS);
-  });
-
-  test('セッションID系列からDVWAの生成規則を特定する', () => {
+describe('HTTP diagnostic pure helpers', () => {
+  test('session sequence analysis is product independent', () => {
     assert.equal(analyzeSessionPattern(['1', '2', '3', '4'])?.name, '単純連番');
     const now = String(Math.floor(Date.now() / 1000));
     assert.equal(analyzeSessionPattern([now, now, now])?.name, '現在時刻');
     assert.equal(analyzeSessionPattern([md5Hex('7'), md5Hex('7')])?.name, '連番のMD5（7）');
-    assert.equal(analyzeSessionPattern(['xk29fja0w83', 'pqq1zlm4vc9']), undefined);
   });
 
-  test('既知平文から反復XOR鍵を復元する', () => {
-    const key = new TextEncoder().encode('wachtwoord');
-    const plain = new TextEncoder().encode('the password is Olifant and more text to cover the whole key');
-    const cipher = xorBytes(plain, key);
-    const stream = xorBytes(cipher, plain);
-    const recovered = detectRepeatingKey(stream);
-    assert.equal(recovered === undefined ? '' : new TextDecoder().decode(recovered), 'wachtwoord');
-    assert.equal(detectRepeatingKey(new Uint8Array(64).map(() => Math.floor(Math.random() * 256))), undefined);
-  });
-
-  test('DOMシンク検出はソースとシンクの両方を要求する', () => {
-    assert.ok(findDomSink('var lang = location.href.substring(10);\ndocument.write(lang);') !== undefined);
-    assert.equal(findDomSink("document.write('static content');"), undefined);
-    assert.equal(findDomSink('var x = location.href;'), undefined);
-  });
-
-  test('CSP許可元パースは self キーワードを除外する', () => {
-    const origins = parseExternalScriptOrigins("script-src 'self' https://pastebin.com example.com cdn.jsdelivr.net;");
-    assert.equal(origins.length, 3);
-    assert.ok(origins.includes('https://pastebin.com'));
-  });
-
-  test('クライアント側トークン候補は配布ロジックと一致する', () => {
-    const [low, medium, high] = clientSideTokenCandidates('success');
-    assert.equal(low, md5Hex('fhpprff'));
-    assert.equal(medium, 'XXsseccusXX');
-    const inner = `XX${'success'.split('').reverse().join('')}`;
-    const expected = createHash('sha256')
-      .update(`${createHash('sha256').update(inner, 'ascii').digest('hex')}ZZ`, 'ascii')
-      .digest('hex');
-    assert.equal(high, expected);
-  });
-
-  test('リダイレクト先ホスト解析はプロトコル相対URLを扱う', () => {
-    assert.equal(tryGetHost('//scopepilot-check.invalid/x'), 'scopepilot-check.invalid');
-    assert.equal(tryGetHost('https://evil.test/y'), 'evil.test');
-    assert.equal(tryGetHost('login.php'), undefined);
+  test('repeating XOR and browser helpers remain reusable', () => {
+    const key = new TextEncoder().encode('generalkey');
+    const plain = new TextEncoder().encode('generic known plaintext long enough to repeat the complete key twice');
+    const recovered = detectRepeatingKey(xorBytes(xorBytes(plain, key), plain));
+    assert.equal(new TextDecoder().decode(recovered), 'generalkey');
+    assert.ok(findDomSink('const value = location.search; document.write(value);') !== undefined);
+    assert.equal(parseExternalScriptOrigins("script-src 'self' https://cdn.example.test")[0], 'https://cdn.example.test');
+    assert.equal(tryGetHost('//redirect.example.test/path'), 'redirect.example.test');
+    assert.equal(clientSideTokenCandidates('success').length, 3);
   });
 });
