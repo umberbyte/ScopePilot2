@@ -68,7 +68,7 @@ function buildCoverageItems(
     const automationClass = route.mode === 'automatic' ? 'automatic' : ('operator-workflow' as const);
     const guarantee = route.mode === 'automatic' ? ('Delegated' as const) : ('Enforced' as const);
 
-    return {
+    const item: GuidelineCoverageItemView = {
       itemId: `theme-${route.themeNo}`,
       itemDisplayName: `テーマ${route.themeNo}`,
       checkItem: `テーマ${route.themeNo}の検証項目`, // GO-22でカタログから取得
@@ -94,9 +94,9 @@ function buildCoverageItems(
           limitations: [],
         },
       ],
-      // execution は実行後のみ
-      execution: undefined,
+      // execution は実行後のみ（optional property は省略）
     };
+    return item;
   });
 }
 
