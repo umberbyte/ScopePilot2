@@ -55,7 +55,7 @@ describe('ScanStartPolicy (BaselineFlowService.runActiveScan)', () => {
     assert.equal(scanEngine.startCalls.length, 0, 'engine は起動しない');
   });
 
-  test('ASVS選択はテーマ30を実行関数へ接続し、送信数をZAP leaseから予約する', async () => {
+  test('ASVS選択は安全なHTTP観測テーマを実行関数へ接続し、送信数をZAP leaseから予約する', async () => {
     const sent: string[] = [];
     const repeaterTransport: RepeaterTransportPort = {
       send: async (input) => {
@@ -82,13 +82,17 @@ describe('ScanStartPolicy (BaselineFlowService.runActiveScan)', () => {
       observationUrl: target,
     }]);
 
-    assert.deepEqual(sent, [target]);
+    assert.equal(sent.length, 12);
+    assert.ok(sent.every((url) => url === target));
+    for (const themeNo of ['13', '24', '25', '30']) {
+      assert.equal(result.guidelineRoutes.find((candidate) => candidate.routeId === `zap-unsupported:${themeNo}`)?.status, 'executed');
+    }
     const route = result.guidelineRoutes.find((candidate) => candidate.routeId === 'zap-unsupported:30');
     assert.equal(route?.status, 'executed');
     assert.equal(route?.checkStatus, 'fail');
     assert.ok(route?.checkId?.startsWith('themecheck-'));
     assert.ok(result.guidelineRoutes.some((candidate) => candidate.status === 'needs-input'));
     const activeStep = plan.steps.find((step) => step.kind === 'active-scan')!;
-    assert.equal(scanEngine.startCalls[0]?.leasedMaxRequests, activeStep.limits.maxRequests - result.overshootReservation - 1);
+    assert.equal(scanEngine.startCalls[0]?.leasedMaxRequests, activeStep.limits.maxRequests - result.overshootReservation - 12);
   });
 });

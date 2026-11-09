@@ -1320,17 +1320,43 @@ export function buildAssuranceReport(input: {
       .filter((finding) => finding.evidenceRefs.includes(item.evidenceId))
       .map((finding) => reportFindingIdBySourceId.get(finding.findingId) ?? finding.findingId))],
   })).filter((item) => item.relatedFindingIds.length > 0);
-  const guidelineCoverage = (model.guidelines.length === 0 ? ['ScopePilot 診断計画'] : model.guidelines).map((guideline, index) => ({
-    controlId: `COV-${String(index + 1).padStart(3, '0')}`,
-    title: guideline,
-    status: model.coverage.scannedUrlCount > 0 || model.coverage.exploredUrlCount > 0 ? '一部実施' : '未実施',
-    method: methods.join(' / ') || '未実施',
-    roles: model.assessmentScope.authorization?.targetRoles ?? [],
-    targets: origins,
-    limitations: model.coverage.limitations.join(' / '),
-  }));
+  const guidelineCoverage = (model.guidelines.length === 0 ? ['ScopePilot 診断計画'] : model.guidelines).map((guideline, index) => {
+    const routes = (model.coverage.guidelineRoutes ?? []).filter((route) => route.guidelineIds.includes(guideline));
+    const executed = routes.filter((route) => route.status === 'executed').length;
+    const pending = routes.filter((route) => route.status === 'needs-input').length;
+    const unavailable = routes.filter((route) => route.status === 'unavailable').length;
+    const delegated = routes.filter((route) => route.status === 'delegated').length;
+    const routeSummary = routes.length === 0
+      ? ''
+      : `ガイドライン診断経路: 実施 ${String(executed)} / 追加入力待ち ${String(pending)} / 実行不可 ${String(unavailable)} / 委譲中 ${String(delegated)}`;
+    const status = routes.length === 0
+      ? model.coverage.scannedUrlCount > 0 || model.coverage.exploredUrlCount > 0 ? '探索のみ' : '未実施'
+      : executed === routes.length ? '実施済み'
+        : executed > 0 ? '一部実施'
+          : pending > 0 ? '追加入力待ち'
+            : delegated > 0 ? '委譲実施'
+              : '実行不可';
+    return {
+      controlId: `COV-${String(index + 1).padStart(3, '0')}`,
+      title: guideline,
+      status,
+      method: routes.length === 0 ? '探索・汎用診断' : `ScopePilot theme ${routes.map((route) => route.themeNo).join(', ')}`,
+      roles: model.assessmentScope.authorization?.targetRoles ?? [],
+      targets: origins,
+      limitations: [routeSummary, ...model.coverage.limitations].filter((value) => value !== '').join(' / '),
+    };
+  });
   const coverage = [
     ...guidelineCoverage,
+    ...(model.coverage.guidelineRoutes ?? []).map((route, index) => ({
+      controlId: `THEME-${String(index + 1).padStart(3, '0')}`,
+      title: `ガイドライン代替診断 theme ${route.themeNo}`,
+      status: route.status === 'executed' ? '実施済み' : route.status === 'delegated' ? '委譲実施' : route.status === 'needs-input' ? '追加入力待ち' : '実行不可',
+      method: route.routeId,
+      roles: model.assessmentScope.authorization?.targetRoles ?? [],
+      targets: origins,
+      limitations: route.detail,
+    })),
     ...(model.coverage.diagnosticRoutes ?? []).map((route, index) => ({
       controlId: `AUTO-${String(index + 1).padStart(3, '0')}`,
       title: route.track,

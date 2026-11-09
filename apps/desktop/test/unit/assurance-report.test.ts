@@ -14,6 +14,46 @@ import {
 } from '../../src/main/assurance-report.ts';
 
 describe('ScopePilot2 assurance report', () => {
+  test('ガイドライン経路の未実施を探索件数で一部実施に見せず、theme別状態を掲載する', () => {
+    const report = buildAssuranceReport({
+      reportId: 'report-guideline-routes',
+      modelHash: '0'.repeat(64),
+      startUrl: 'https://shop.example.test/',
+      forbiddenActions: [],
+      profile: DEFAULT_REPORT_PROFILE,
+      model: {
+        caseId: 'case-guideline-routes',
+        generatedAt: '2026-11-05T00:00:00.000Z',
+        guidelines: ['OWASP ASVS 5.0'],
+        assessmentScope: {
+          caseName: '経路状態テスト',
+          allowedOrigins: ['https://shop.example.test'],
+          deniedOrigins: [],
+          limits: { maxRequests: 100, maxPages: 10, maxDurationMinutes: 10 },
+        },
+        coverage: {
+          exploredUrlCount: 5,
+          scannedUrlCount: 5,
+          delegatedSteps: [],
+          limitations: ['比較roleは未登録'],
+          guidelineRoutes: [
+            { routeId: 'zap-unsupported:10', themeNo: '10', guidelineIds: ['OWASP ASVS 5.0'], status: 'needs-input', detail: '比較する複数roleが必要です' },
+            { routeId: 'zap-unsupported:30', themeNo: '30', guidelineIds: ['OWASP ASVS 5.0'], status: 'executed', detail: '自動HTTP検査を完了しました', checkStatus: 'pass' },
+          ],
+        },
+        findings: [],
+      },
+      evidence: [],
+      evidenceContents: {},
+    });
+
+    const guideline = report.coverage.find((entry) => entry.controlId === 'COV-001');
+    assert.equal(guideline?.status, '一部実施');
+    assert.match(guideline?.limitations ?? '', /実施 1 \/ 追加入力待ち 1/u);
+    assert.equal(report.coverage.find((entry) => entry.controlId === 'THEME-001')?.status, '追加入力待ち');
+    assert.equal(report.coverage.find((entry) => entry.controlId === 'THEME-002')?.status, '実施済み');
+  });
+
   test('前回と同じ所見とHTTP通信から具体的な説明・再現手順・対策を生成する', async () => {
     const input = {
       reportId: 'report-0001',

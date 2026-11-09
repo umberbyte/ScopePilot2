@@ -17,30 +17,31 @@ interface GuidelineExecutionProfile {
 
 /**
  * ガイドライン選択から ZAP 非対応の実行経路を決定する正本。
- * テーマ30は、確認済みHTTP対象へのGET観測だけなので active scan から自動実行できる。
- * それ以外は資格情報・比較role・対象固有payload・副作用確認等を要するため、選択時に
- * needs-input として公開し、A03 の個別実行関数へ接続する。
+ * テーマ13 (CORS)、24 (browser protection headers)、25 (安全なHTTP method)、30
+ * (公開情報) は、確認済みHTTP対象へ非破壊の既定probeだけを送るため active scan から
+ * 自動実行できる。それ以外は資格情報・比較role・対象固有payload・副作用確認等を
+ * 要するため、選択時に needs-input として公開し、A03 の個別実行関数へ接続する。
  */
 const PROFILES: Readonly<Record<SupportedHttpGuideline, GuidelineExecutionProfile>> = {
   'OWASP Top 10-2025': {
-    automaticThemeNos: ['30'],
-    needsInputThemeNos: ['5', '6', '10', '15', '20', '21', '24', '25'],
+    automaticThemeNos: ['24', '25', '30'],
+    needsInputThemeNos: ['5', '6', '10', '15', '20', '21'],
   },
   'OWASP ASVS 5.0': {
-    automaticThemeNos: ['30'],
-    needsInputThemeNos: ['2', '3', '4', '5', '6', '7', '9', '10', '11', '13', '14', '15', '16', '18', '20', '21', '23', '24', '25', '26', '27', '29'],
+    automaticThemeNos: ['13', '24', '25', '30'],
+    needsInputThemeNos: ['2', '3', '4', '5', '6', '7', '9', '10', '11', '14', '15', '16', '18', '20', '21', '23', '26', '27', '29'],
   },
   'OWASP WSTG 4.2': {
-    automaticThemeNos: ['30'],
-    needsInputThemeNos: ['2', '3', '4', '5', '6', '7', '9', '10', '11', '13', '14', '15', '16', '18', '20', '21', '23', '24', '25', '26', '27', '29'],
+    automaticThemeNos: ['13', '24', '25', '30'],
+    needsInputThemeNos: ['2', '3', '4', '5', '6', '7', '9', '10', '11', '14', '15', '16', '18', '20', '21', '23', '26', '27', '29'],
   },
   'デジタル庁 DS-221': {
-    automaticThemeNos: ['30'],
-    needsInputThemeNos: ['3', '4', '5', '6', '7', '10', '13', '15', '16', '20', '21', '23', '24', '25', '29'],
+    automaticThemeNos: ['13', '24', '25', '30'],
+    needsInputThemeNos: ['3', '4', '5', '6', '7', '10', '15', '16', '20', '21', '23', '29'],
   },
   'IPA/NISC/WebAppPentestGuidelines': {
-    automaticThemeNos: ['30'],
-    needsInputThemeNos: ['2', '3', '4', '5', '6', '7', '9', '10', '11', '13', '14', '15', '16', '18', '20', '21', '22', '23', '24', '25', '26', '27', '29'],
+    automaticThemeNos: ['13', '24', '25', '30'],
+    needsInputThemeNos: ['2', '3', '4', '5', '6', '7', '9', '10', '11', '14', '15', '16', '18', '20', '21', '22', '23', '26', '27', '29'],
   },
 };
 

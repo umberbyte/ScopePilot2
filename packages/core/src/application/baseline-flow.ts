@@ -4392,7 +4392,10 @@ export class BaselineFlowService {
     const guidelineThemePlans = resolveGuidelineThemeRoutes(plan.guidelineIds);
     const guidelineTargetUrls = [...new Set(targets.map((target) => ScopePolicy.canonicalUrl(target)))].slice(0, 5);
     const desiredAutomaticThemeNos = guidelineThemePlans.filter((route) => route.mode === 'automatic').map((route) => route.themeNo);
-    const desiredGuidelineRequestCount = desiredAutomaticThemeNos.length * guidelineTargetUrls.length;
+    const desiredGuidelineRequestCount = desiredAutomaticThemeNos.reduce(
+      (total, themeNo) => total + automaticGuidelineRequestCount(themeNo, guidelineTargetUrls.length),
+      0,
+    );
     const automaticGuidelineChecksEnabled = desiredGuidelineRequestCount > 0
       && step.limits.maxRequests - reservedRequests - desiredGuidelineRequestCount >= 1;
     const guidelineRequestReservation = automaticGuidelineChecksEnabled ? desiredGuidelineRequestCount : 0;
@@ -5402,6 +5405,24 @@ function requiresInteractiveStateChange(inputPoints: readonly RequestInputPoint[
 function candidateAllowsAutomatedZap(candidate: ScanCandidate): boolean {
   const tracks = candidate.diagnosticTracks ?? ['zap-active'];
   return tracks.includes('zap-active') && !requiresInteractiveStateChange(candidate.inputPoints ?? []);
+}
+
+/** Upper bound used to reserve the shared request lease before automatic guideline probes. */
+function automaticGuidelineRequestCount(themeNo: ZapUnsupportedThemeNo, targetCount: number): number {
+  switch (themeNo) {
+    case '13':
+      // Same-origin control, one external Origin, and `null`; GET + OPTIONS for each.
+      return targetCount === 0 ? 0 : 6;
+    case '24':
+      return targetCount * 2;
+    case '25':
+      // OPTIONS plus the non-state-changing TRACE and TRACK defaults.
+      return targetCount === 0 ? 0 : 3;
+    case '30':
+      return targetCount;
+    default:
+      return 0;
+  }
 }
 
 function diagnosticRouteDetail(track: DiagnosticTrack, domAvailable: boolean): Pick<DiagnosticRouteResult, 'status' | 'detail'> {

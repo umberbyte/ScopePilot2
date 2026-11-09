@@ -8,10 +8,12 @@ describe('guideline execution route selection', () => {
     assert.deepEqual(resolveGuidelineThemeRoutes(['OWASP AISVS 1.01']), []);
   });
 
-  test('ASVS/WSTG/DS-221/WAPG はテーマ30を自動経路へ接続する', () => {
+  test('ASVS/WSTG/DS-221/WAPG は安全なHTTP観測テーマを自動経路へ接続する', () => {
     for (const guideline of ['OWASP ASVS 5.0', 'OWASP WSTG 4.2', 'デジタル庁 DS-221', 'IPA/NISC/WebAppPentestGuidelines']) {
       const routes = resolveGuidelineThemeRoutes([guideline]);
-      assert.equal(routes.find((route) => route.themeNo === '30')?.mode, 'automatic', guideline);
+      for (const themeNo of ['13', '24', '25', '30']) {
+        assert.equal(routes.find((route) => route.themeNo === themeNo)?.mode, 'automatic', `${guideline}: theme ${themeNo}`);
+      }
       assert.ok(routes.some((route) => route.mode === 'needs-input'), guideline);
     }
   });
