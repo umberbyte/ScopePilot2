@@ -88,6 +88,13 @@ describe('ScanStartPolicy (BaselineFlowService.runActiveScan)', () => {
     assert.ok(smuggling?.limitationCodes?.includes('smuggling-send-prohibited'));
     assert.equal(smuggling?.checkId, undefined);
     assert.equal(smuggling?.checkStatus, undefined);
+    assert.deepEqual(result.unsupportedAssessments.map((entry) => entry.routeId), ['theme:17:unsupported', 'asvs:10.2.3:unsupported']);
+    const artifact = service.generateReport(operator, { guidelines: ['OWASP ASVS 5.0'] });
+    assert.deepEqual(artifact.model.coverage.unsupportedAssessments, result.unsupportedAssessments);
+    assert.match(artifact.content, /検査不能・スキップ/u);
+    assert.match(artifact.content, /ASVS 10.2.3/u);
+    assert.match(artifact.content, /RAW_TRANSPORT_AND_DUAL_PARSER_ORACLE_MISSING/u);
+    assert.match(artifact.content, /not-assessed/u);
     const conditional = result.guidelineRoutes.find((route) => route.themeNo === '26');
     assert.equal(conditional?.status, 'needs-input');
     assert.equal(conditional?.automationClass, 'conditional-automatic');

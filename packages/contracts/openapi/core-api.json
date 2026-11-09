@@ -7334,6 +7334,12 @@
             "items": {
               "type": "string"
             }
+          },
+          "unsupportedAssessments": {
+            "type": "array",
+            "items": {
+              "": "#/components/schemas/UnsupportedAssessment"
+            }
           }
         }
       },
@@ -10141,6 +10147,74 @@
           "samples"
         ],
         "additionalProperties": false
+      },
+      "UnsupportedAssessment": {
+        "type": "object",
+        "required": [
+          "routeId",
+          "title",
+          "policyVersion",
+          "reasonCode",
+          "detail",
+          "guidelineIds",
+          "resumeConditions",
+          "routeKind",
+          "guarantee",
+          "assessment"
+        ],
+        "properties": {
+          "routeId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "themeNo": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "policyVersion": {
+            "type": "string"
+          },
+          "reasonCode": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "guidelineIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resumeConditions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "routeKind": {
+            "type": "string",
+            "enum": [
+              "unsupported"
+            ]
+          },
+          "guarantee": {
+            "type": "string",
+            "enum": [
+              "Unsupported"
+            ]
+          },
+          "assessment": {
+            "type": "string",
+            "enum": [
+              "not-assessed"
+            ]
+          }
+        }
       }
     },
     "responses": {

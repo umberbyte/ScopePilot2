@@ -1,3 +1,4 @@
+import { resolveUnsupportedAssessments } from '@scopepilot2/core';
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -52,6 +53,39 @@ describe('ScopePilot2 assurance report', () => {
     assert.match(guideline?.limitations ?? '', /実施 1 \/ 追加入力待ち 1/u);
     assert.equal(report.coverage.find((entry) => entry.controlId === 'THEME-001')?.status, '追加入力待ち');
     assert.equal(report.coverage.find((entry) => entry.controlId === 'THEME-002')?.status, '実施済み');
+  });
+
+  test('GO-23 unsupportedは入力待ちと分離し、全実行済み経路があっても完全実施としない', () => {
+    const unsupportedAssessments = resolveUnsupportedAssessments(['OWASP ASVS 5.0']);
+    const report = buildAssuranceReport({
+      reportId: 'go-23', modelHash: '0'.repeat(64), startUrl: 'https://example.test/',
+      forbiddenActions: [], profile: DEFAULT_REPORT_PROFILE, evidence: [], evidenceContents: {},
+      model: {
+        caseId: 'case-go-23', generatedAt: '2026-11-10T00:00:00Z', guidelines: ['OWASP ASVS 5.0'], findings: [],
+        assessmentScope: { caseName: 'GO-23', allowedOrigins: ['https://example.test'], deniedOrigins: [],
+          limits: { maxRequests: 100, maxPages: 10, maxDurationMinutes: 10 } },
+        coverage: {
+          exploredUrlCount: 1, scannedUrlCount: 1, delegatedSteps: [], limitations: [], unsupportedAssessments,
+          guidelineRoutes: [
+            { routeId: 'theme:17:unsupported', themeNo: '17', guidelineIds: ['OWASP ASVS 5.0'], status: 'unavailable', automationClass: 'unsupported', detail: 'skip' },
+            { routeId: 'zap-unsupported:30', themeNo: '30', guidelineIds: ['OWASP ASVS 5.0'], status: 'executed', detail: 'done', checkStatus: 'pass' },
+          ],
+        },
+      },
+    });
+    assert.equal(report.coverage.find((entry) => entry.controlId === 'COV-001')?.status, '一部実施');
+    assert.equal(report.coverage.filter((entry) => entry.status === '検査不能・スキップ').length, 2);
+    const scope = report.coverage.find((entry) => entry.controlId === 'asvs:10.2.3:unsupported')!;
+    assert.match(scope.method, /unsupported \/ Unsupported \/ not-assessed/u);
+    assert.match(scope.limitations, /OAUTH_SCOPE_POLICY_AND_COMPARISON_PRINCIPAL_MISSING/u);
+    assert.match(scope.limitations, /OAuthScopePolicy/u);
+    assert.match(scope.limitations, /再開条件/u);
+    assert.equal(report.coverage.filter((entry) => entry.title.includes('テーマ17')).length, 1);
+    const html = renderTechnicalAnnexHtml(report).toString('utf8');
+    assert.match(html, /ASVS 10.2.3/u);
+    assert.match(html, /検査不能・スキップ/u);
+    assert.match(html, /not-assessed/u);
+    assert.match(html, /OAUTH_SCOPE_POLICY_AND_COMPARISON_PRINCIPAL_MISSING/u);
   });
 
   test('前回と同じ所見とHTTP通信から具体的な説明・再現手順・対策を生成する', async () => {

@@ -208,6 +208,11 @@ interface GuidelineItemExecution {
 
 ## 4. テーマ17、ASVS 10.2.3、テーマ6の実adapter
 
+GO-23確定（2026-11-10）: §4.1・§4.2は現行bundleで「検査不能・スキップ」を維持する。
+限定実装せず、対象外（not-applicable）やpass/failへ読み替えない。
+コード正本、報告契約、再開条件は[43](43-unsupported-assessment-policy.md)。テーマ分類は[42](42-guideline-theme-automation-policy.md)に従う。
+§14の未決事項1・2はこの現行bundle方針で解決し、将来の機能公開は再開gateを満たす別実装とする。
+
 ### 4.1 テーマ17 request smuggling
 
 現行の「検査不能・スキップ」を維持する。通常のNode HTTP client、ZAP、Repeaterはheaderを正規化するため、

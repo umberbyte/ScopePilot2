@@ -18,7 +18,24 @@ export interface ReportAssessmentScope {
   };
 }
 
+/** 方針上の検査不能。入力待ちや対象外とは別で、合否を持たない。 */
+export interface UnsupportedAssessment {
+  readonly routeId: string;
+  readonly title: string;
+  readonly guidelineIds: readonly string[];
+  readonly themeNo?: string;
+  readonly itemId?: string;
+  readonly policyVersion: string;
+  readonly routeKind: 'unsupported';
+  readonly guarantee: 'Unsupported';
+  readonly assessment: 'not-assessed';
+  readonly reasonCode: string;
+  readonly detail: string;
+  readonly resumeConditions: readonly string[];
+}
+
 export interface ReportCoverage {
+  readonly unsupportedAssessments?: readonly UnsupportedAssessment[];
   readonly exploredUrlCount: number;
   readonly scannedUrlCount: number;
   /** 実際に観測したURL。件数だけでなく範囲を追跡できるようにする。 */

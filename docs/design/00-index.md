@@ -66,3 +66,10 @@
 - 10万件の通信索引、本文遅延読込、異常終了後の復旧。
 - Simple / Advanced が同じ契約・計画を使い、Simpleから非公開操作へ到達できないこと。
 - 診断項目Excelから生成した版付きcatalogのsource座標、hash、権限、実行route、復元要件の完全性。
+
+
+## ガイドライン方針の補足
+
+- [41 仕様ギャップ解消設計](41-spec-gap-resolution.md)
+- [42 テーマ自動化方針（GO-21）](42-guideline-theme-automation-policy.md)
+- [43 検査不能項目の最終方針・報告契約（GO-23）](43-unsupported-assessment-policy.md)

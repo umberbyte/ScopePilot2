@@ -1,3 +1,5 @@
+import { resolveUnsupportedAssessments } from '../domain/unsupported-assessment.ts';
+import type { UnsupportedAssessment } from '@scopepilot2/contracts';
 import type { GuidelineAutomationDisclosure } from '@scopepilot2/contracts';
 import { automaticGuidelineRequestCount, guidelineAutomationPolicy, GUIDELINE_AUTOMATION_POLICY_VERSION } from '../domain/guideline-automation.ts';
 /**
@@ -352,6 +354,7 @@ export interface ActiveScanRunResult {
   readonly requestCorpusEvidenceRef: string;
   readonly diagnosticRoutes: readonly DiagnosticRouteResult[];
   readonly guidelineRoutes: readonly GuidelineRouteResult[];
+  readonly unsupportedAssessments: readonly UnsupportedAssessment[];
   readonly workflow?: {
     readonly status: 'completed' | 'failed';
     readonly payloadSet: string;
@@ -554,6 +557,7 @@ export class BaselineFlowService {
   private assessmentEndedAt: string | undefined;
   private authenticationRole: string | null = null;
   private latestDiagnosticRoutes: readonly DiagnosticRouteResult[] = [];
+  private latestUnsupportedAssessments: readonly UnsupportedAssessment[] | undefined;
   private latestGuidelineRoutes: readonly GuidelineRouteResult[] = [];
   private delegatedSteps: {
     readonly stepId: string;
@@ -4468,6 +4472,8 @@ export class BaselineFlowService {
           : '案件の最大リクエスト数にZAP用の最低1件と自動検査分を確保できないため実行しません',
     }));
 
+    const unsupportedAssessments = resolveUnsupportedAssessments(plan.guidelineIds);
+
     // Theme 17 is an explicit non-sending route; it must never enter the probe loop.
     if (guidelineThemePlans.length > 0) {
       const policy = guidelineAutomationPolicy('17');
@@ -4942,9 +4948,10 @@ export class BaselineFlowService {
     this.latestDiagnosticRoutes = diagnosticRoutes;
     await this.deps.evidence.saveText(
       `guideline-routes:${runId}`,
-      canonicalJson({ runId, guidelineIds: plan.guidelineIds, routes: guidelineRoutes }),
+      canonicalJson({ runId, guidelineIds: plan.guidelineIds, routes: guidelineRoutes, unsupportedAssessments }),
     );
     this.latestGuidelineRoutes = guidelineRoutes;
+    this.latestUnsupportedAssessments = unsupportedAssessments;
 
     const nucleiStep = plan.steps.find((candidate) => candidate.kind === 'nuclei-scan');
     let nucleiSummary: ActiveScanRunResult['nuclei'];
@@ -5088,6 +5095,7 @@ export class BaselineFlowService {
       requestCorpusEvidenceRef: requestCorpusEvidence.evidenceId,
       diagnosticRoutes,
       guidelineRoutes,
+      unsupportedAssessments,
       ...(workflowSummary === undefined ? {} : { workflow: workflowSummary }),
       ...(nucleiSummary === undefined ? {} : { nuclei: nucleiSummary }),
       ...(payloadVerifications.length === 0 ? {} : { payloadVerifications }),
@@ -5220,6 +5228,7 @@ export class BaselineFlowService {
           status: route.status,
           detail: route.detail,
         })),
+        unsupportedAssessments: this.latestUnsupportedAssessments ?? resolveUnsupportedAssessments(input.guidelines),
         guidelineRoutes: this.latestGuidelineRoutes.map((route) => ({ ...route })),
         limitations: [
           '外部 engine (Delegated 経路) の個々の送信は送信前に拒否できない。入力 scope・停止・版ごとの実測で管理する。',

@@ -69,6 +69,16 @@ export function renderMarkdown(model: ReportModel, reportId: string): ReportArti
     }
     lines.push('');
   }
+  if ((model.coverage.unsupportedAssessments?.length ?? 0) > 0) {
+    lines.push('### 検査不能・スキップ（合否未判定）', '');
+    for (const entry of model.coverage.unsupportedAssessments ?? []) {
+      lines.push(`- ${entry.title}: 検査不能・スキップ / ${entry.assessment} / ${entry.guarantee}`);
+      lines.push(`  - 理由: ${entry.detail} (${entry.reasonCode})`);
+      lines.push(`  - 再開条件: ${entry.resumeConditions.join(' / ')}`);
+      lines.push(`  - 方針版: ${entry.policyVersion} / 経路: ${entry.routeId}`);
+    }
+    lines.push('');
+  }
   lines.push('### 限界と注意');
   lines.push('');
   for (const limitation of model.coverage.limitations) {

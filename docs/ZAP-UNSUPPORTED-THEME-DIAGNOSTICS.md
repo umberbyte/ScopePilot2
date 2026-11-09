@@ -144,3 +144,6 @@ Cookie付きhandshakeをsame-originとcross-originのOriginで比較する。sam
 ## 4. 結果を読む際の注意
 
 `pass` は実行した観点で拒否を確認できたことを示し、対象機能全体の安全性を保証するものではない。実装上 `skipped` が残るテーマは、検出がなければ全体を `inconclusive` に集約する。一方、いずれかの観点で明確な成立条件を満たした場合は、未実施観点が残っていても `fail` を優先する。診断者は結果一覧だけでなく、各probeのpattern、対象URL、ステータス、最終URL、本文ハッシュ、detail、skippedを確認し、必要な手動確認や追加ツールの利用を判断する。
+
+
+GO-23の最終方針: テーマ17およびASVS 10.2.3は現行bundleでは検査不能・スキップ（not-assessed / Unsupported）。理由コード・再開条件・レポート表現の正本は [設計43](design/43-unsupported-assessment-policy.md)。
