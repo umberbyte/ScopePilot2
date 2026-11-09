@@ -15,7 +15,9 @@
     "test": "npm run test:workspaces",
     "test:workspaces": "npm run test --workspaces --if-present",
     "test:simulation": "npm run test --workspace @scopepilot2/simulation --if-present",
-    "test:fixture": "npm run test:fixture --workspace @scopepilot2/simulation --if-present && npm run test:fixture --workspace @scopepilot2/guideline-catalog --if-present"
+    "test:fixture": "npm run test:fixture --workspace @scopepilot2/simulation --if-present && npm run test:fixture --workspace @scopepilot2/guideline-catalog --if-present",
+    "lint:docs": "node scripts/lint-design-docs.mjs",
+    "test:docs-lint": "node --test scripts/lint-design-docs.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
