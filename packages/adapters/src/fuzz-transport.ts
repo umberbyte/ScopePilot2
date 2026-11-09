@@ -1,11 +1,6 @@
-/**
- * Fuzzer の実 HTTP transport (design/f05)。現行の product/API 契約では position は
- * name/value の組なので、各組合せを target URL の query parameter へ適用して GET する。
- *
- * - redirect は自動追従しない（ZAP sendRequest 基準経路と同じく followRedirects 無効）。
- * - sessionCookies は core で対象 URL に適用可能と判定済みのものだけを受け取る。
- * - 応答本文は保存せず、cluster 集約に必要な byte length と SHA-256 だけを streaming 算出する。
- * - response 上限超過と timeout は成功応答として扱わない。
+/** Fuzzer HTTP transport: query insertions plus optional rendered body/method.
+ * Redirects are not followed. Session cookies are filtered by core for the target.
+ * Streams bounded response length/SHA-256 metadata; response bodies are not retained.
  */
 import { createHash } from 'node:crypto';
 import * as http from 'node:http';
@@ -60,10 +55,11 @@ export class NodeFuzzTransport implements FuzzTransportPort {
         {
           hostname: target.hostname,
           port: target.port === '' ? undefined : Number(target.port),
-          method: 'GET',
+          method: input.request?.method ?? 'GET',
           path: `${target.pathname}${target.search}`,
           headers: {
             Host: target.host,
+            ...(input.request === undefined ? {} : { 'Content-Type': input.request.contentType, 'Content-Length': Buffer.byteLength(input.request.body) }),
             ...(cookieHeader === undefined ? {} : { Cookie: cookieHeader }),
           },
           setHost: false,
@@ -101,7 +97,7 @@ export class NodeFuzzTransport implements FuzzTransportPort {
         request.destroy(new Error('fuzz transport timeout'));
       });
       request.on('error', reject);
-      request.end();
+      request.end(input.request?.body);
     });
   }
 }

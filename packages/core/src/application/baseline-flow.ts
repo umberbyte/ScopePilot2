@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import type { FuzzInput, FuzzRow, FuzzRunView, FuzzPayloadSource } from '@scopepilot2/contracts';
 /**
  * 基準シナリオ「案件作成→認可→探索→候補採用→能動診断→取込→所見→報告」の
  * application service seed。`docs/design/19-cli-automation.md` 5章、`docs/design/22-execution-control.md`。
@@ -510,6 +512,38 @@ export class BaselineFlowService {
   private readonly payloadCatalog = new PayloadCatalog();
   private readonly payloadSetNames: string[] = [];
   private readonly payloadRegistrations = new Map<string, PayloadSetRegistration>();
+  private readonly fuzzJobs = new Map<string, { view: FuzzRunView; cancelled: boolean }>();
+  fuzzerStatus(): { transport: 'fixture' | 'http' } {
+    return { transport: this.deps.fuzzTransport === undefined ? 'fixture' : 'http' };
+  }
+  getFuzzJob(runId: string): FuzzRunView {
+    const job = this.fuzzJobs.get(runId);
+    if (!job) throw domainError('ValidationFailed', 'unknown fuzz run');
+    return { ...job.view, rows: [...job.view.rows] };
+  }
+  stopFuzzJob(operator: OperatorProfile, runId: string): FuzzRunView {
+    this.requirePermission(operator, 'run.manage');
+    const job = this.fuzzJobs.get(runId);
+    if (!job) throw domainError('ValidationFailed', 'unknown fuzz run');
+    job.cancelled = true;
+    return this.getFuzzJob(runId);
+  }
+  startFuzzJob(operator: OperatorProfile, input: FuzzInput): FuzzRunView {
+    this.requirePermission(operator, 'run.manage');
+    if ([...this.fuzzJobs.values()].some(job => job.view.state === 'Running')) throw domainError('Conflict', 'a fuzzer run is already running');
+    const runId = this.deps.ids.next('fuzz-job');
+    const job = { view: { runId, targetUrl: input.targetUrl, transport: this.fuzzerStatus().transport, state: 'Running', total: 0, sent: 0, rows: [] } as FuzzRunView, cancelled: false };
+    this.fuzzJobs.set(runId, job);
+    if (this.fuzzJobs.size > 20) this.fuzzJobs.delete(this.fuzzJobs.keys().next().value!);
+    void this.runFuzzSession(operator, input, {
+      isCancelled: () => job.cancelled,
+      progress: (total, rows, payloadSources) => { job.view = { ...job.view, total, sent: rows.length, rows: [...rows], payloadSources }; },
+    }).then(result => { job.view = { ...job.view, payloadSources: result.payloadSources, state: job.cancelled ? 'Stopped' : 'Completed' }; }, (cause: unknown) => {
+      job.view = { ...job.view, state: 'Failed', error: cause instanceof Error ? cause.message : 'Fuzzer failed' };
+    });
+    return this.getFuzzJob(runId);
+  }
+
   private readonly fuzzRuns: readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] = [];
 
   /** OAST の attempt・観測 (design/f13)。token は発行時に一度だけ応答し、一覧には出さない。 */
@@ -2664,8 +2698,9 @@ export class BaselineFlowService {
    */
   async runFuzzSession(
     operator: OperatorProfile,
-    input: { readonly targetUrl: string; readonly positions: readonly FuzzPosition[]; readonly maxRequests?: number; readonly role?: string },
-  ): Promise<{ runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; sessionCookieNames?: readonly string[] }> {
+    input: FuzzInput,
+    control?: { isCancelled: () => boolean; progress: (total: number, rows: readonly FuzzRow[], sources: readonly FuzzPayloadSource[]) => void },
+  ): Promise<{ payloadSources: readonly FuzzPayloadSource[]; transport: 'fixture' | 'http'; rows: readonly FuzzRow[]; runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
@@ -2685,20 +2720,66 @@ export class BaselineFlowService {
       }
       appliedCookies = applicableSessionCookies([...session.cookies], canonical);
     }
-    const cap = input.maxRequests ?? Math.min(200, caseRecord.scope.limits.maxRequests);
-    const { total } = planCombinations(input.positions, cap);
-    // 実 transport 構成時は rate (2 req/s) を実時間で守る。fixture は仮想時計のまま。
+    const cap = Math.min(input.maxRequests ?? 200, caseRecord.scope.limits.maxRequests, 10000);
+    const rps = input.requestsPerSecond ?? 2;
+    if (!Number.isInteger(rps) || rps < 1 || rps > 2) throw domainError('ValidationFailed', 'fuzz rate must be 1..2 RPS');
+    const positions = input.positions.map(p => ({ ...p, values: p.payloadSet === undefined ? p.values : this.payloadCatalog.get(p.payloadSet) }));
+    const payloadSources = positions.map(p => {
+      const registration = p.payloadSet === undefined ? undefined : this.payloadRegistrations.get(p.payloadSet);
+      return { position: p.name, name: registration?.name ?? 'direct input', source: registration?.source ?? 'operator input',
+        version: registration?.version ?? 'content-addressed', sha256: createHash('sha256').update(JSON.stringify(p.values)).digest('hex') };
+    });
+    const { total } = planCombinations(positions, cap, input.attack);
+    const originals = positions.map(p => new URL(canonical).searchParams.get(p.name) ?? '');
+    const template = input.request?.bodyTemplate ?? '';
+    const markers = [...template.matchAll(/§([^§]*)§/g)];
+    if ((template.match(/§/g)?.length ?? 0) !== markers.length * 2) throw domainError('ValidationFailed', 'unpaired body marker');
+    if (input.request && (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(input.request.method) || /[\r\n]/.test(input.request.contentType))) throw domainError('ValidationFailed', 'invalid base request');
+    for (const p of positions) {
+      if (p.name.startsWith('body:') && !markers[Number(p.name.slice(5)) - 1]) throw domainError('ValidationFailed', 'invalid body position');
+    }
+    positions.forEach((p, i) => { if (p.name.startsWith('body:')) originals[i] = markers[Number(p.name.slice(5)) - 1]?.[1] ?? ''; });
+    const queryPositions = positions.filter(p => !p.name.startsWith('body:'));
+    const startedAtMs = Date.now();
+    const rows: FuzzRow[] = [];
+    control?.progress(total, rows, payloadSources);
     const realTransport = this.deps.fuzzTransport;
     let virtualNowMs = 0;
     const outcomes: FuzzResponseOutcome[] = [];
     const result = await runFuzz(
       {
-        send: async (_index, combination) => {
+        send: async (index, combination) => {
+          const started = Date.now();
+          const addRow = (outcome: FuzzResponseOutcome) => {
+            const baseline = rows[0];
+            rows.push({ ...outcome, index, payload: combination, elapsedMs: realTransport === undefined ? 0 : Date.now() - started,
+              lengthDiff: outcome.contentLength - (baseline?.contentLength ?? outcome.contentLength),
+              changed: baseline !== undefined && (baseline.status !== outcome.status || baseline.bodyHash !== outcome.bodyHash) });
+            control?.progress(total, rows, payloadSources);
+          };
+          const requestUrl = new URL(canonical);
+          positions.forEach((p, i) => { if (!p.name.startsWith('body:')) requestUrl.searchParams.set(p.name.trim(), combination[i] ?? ''); });
+          const latest = this.currentCase();
+          if (latest.caseId !== caseRecord.caseId) throw domainError('Conflict', 'case changed during fuzz run');
+          if (Date.now() - startedAtMs >= latest.scope.limits.maxDurationMinutes * 60000) throw domainError('ValidationFailed', 'fuzz exceeded case time limit');
+          if (!ScopePolicy.decide(latest.scope, requestUrl.toString()).allowed) throw domainError('OutOfScope', 'fuzz request is outside current scope');
+          if (index >= latest.scope.limits.maxRequests) throw domainError('ValidationFailed', 'fuzz exceeds current case request limit');
           if (realTransport !== undefined) {
             const response = await realTransport.send({
               targetUrl: canonical,
-              combination,
-              positions: input.positions,
+              combination: positions.flatMap((p, i) => p.name.startsWith('body:') ? [] : [combination[i] ?? '']),
+              positions: queryPositions,
+              ...(input.request === undefined ? {} : { request: {
+                method: input.request.method, contentType: input.request.contentType,
+                body: template.replace(/§([^§]*)§/g, (() => {
+                  let marker = 0;
+                  return (_match: string, original: string) => {
+                    marker++;
+                    const position = positions.findIndex(p => p.name === `body:${marker}`);
+                    return position < 0 ? original : combination[position] ?? '';
+                  };
+                })()),
+              } }),
               ...(appliedCookies === undefined
                 ? {}
                 : {
@@ -2711,8 +2792,9 @@ export class BaselineFlowService {
                   }),
             });
             outcomes.push({ status: response.status, contentLength: response.contentLength, bodyHash: response.bodyHash });
+            addRow(outcomes[outcomes.length - 1]!);
             this.recordObservedExchange(
-              { url: response.requestUrl, method: 'GET', status: response.status, contentType: response.contentType },
+              { url: response.requestUrl, method: input.request?.method ?? 'GET', status: response.status, contentType: response.contentType },
               this.deps.clock.now().toISOString(),
               'fuzzer',
             );
@@ -2720,17 +2802,20 @@ export class BaselineFlowService {
           }
           // fixture adapter: 応答は先頭 position の値だけで決まる (cluster 集約の実演)。
           const body = `resp:${combination[0] ?? ''}`;
-          outcomes.push({ status: 200, contentLength: body.length, bodyHash: hashStable('scopepilot2.fuzz.body', body) });
+          outcomes.push({ status: 200, contentLength: Buffer.byteLength(body), bodyHash: hashStable('scopepilot2.fuzz.body', body) });
+          addRow(outcomes[outcomes.length - 1]!);
         },
       },
-      input.positions,
+      positions,
       total,
       {
-        isCancelled: () => false,
+        isCancelled: () => control?.isCancelled() ?? false,
+        attack: input.attack ?? 'cluster-bomb', originals, requestsPerSecond: rps,
         now: () => (realTransport === undefined ? virtualNowMs : Date.now()),
         sleep: async (ms) => {
           if (realTransport === undefined) {
             virtualNowMs += ms;
+            await new Promise<void>(resolve => setImmediate(resolve));
           } else {
             await new Promise((resolve) => {
               setTimeout(resolve, ms);
@@ -2741,13 +2826,14 @@ export class BaselineFlowService {
     );
     const clusters = clusterResponses(outcomes).map((cluster) => ({
       ...cluster,
-      representative: combinationAt(input.positions, cluster.members[0] ?? 0),
+      representative: combinationAt(positions, cluster.members[0] ?? 0, input.attack, originals),
     }));
     const runId = this.deps.ids.next('fuzz');
     const record = { runId, targetUrl: canonical, total, sent: result.sent, clusters, executedAt: this.deps.clock.now().toISOString() };
     (this.fuzzRuns as { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[]).push(record);
     this.record({ type: 'FuzzRunCompleted', at: record.executedAt, runId, targetUrl: canonical, total, sent: result.sent });
     return {
+      payloadSources, transport: realTransport === undefined ? 'fixture' : 'http', rows,
       runId,
       targetUrl: canonical,
       total,
