@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""クロール観測 × challenge 対象経路の交差で「到達済み」を判定する (測定側ツール)。
+"""クロール観測と challenge 関連経路の交差を参考値として集計する。
 
 使用法:
   python docs/benchmark/judge-challenge-reach.py <routes-json> <crawl-log...> --out <md>
@@ -10,9 +10,13 @@
   "/score-board" を復元する (ハッシュルーティングの実訪問の痕跡)。
 
 判定:
-- endpoints のいずれかが観測形状に前方一致すれば 到達済み (API)。
+- endpoints のいずれかが観測形状に前方一致すれば「関連表面を観測」とする。
 - client-side challenge は復元したページルートから到達を判断できないため
-  「ページ要到達」候補として機械判定対象外とし、理由を記録する。
+  機械判定対象外とし、理由を記録する。
+
+この結果は challenge の到達、診断、検出、解決を意味しない。derive-challenge-routes.py
+の対応付けは、同じルートファイル内の solveIf と mount を粗く関連付けるため、一つの
+challenge に無関係な endpoint が含まれる場合がある。
 """
 import json
 import re
@@ -76,9 +80,9 @@ def main() -> None:
         elif not challenge["endpoints"]:
             status = "マッピング不足"
         elif evidence:
-            status = "到達済み"
+            status = "関連表面を観測"
         else:
-            status = "未到達"
+            status = "関連表面を未観測"
         rows.append({**challenge, "status": status, "evidence": sorted(set(evidence))[:3]})
 
     counts: dict[str, int] = {}
@@ -86,11 +90,13 @@ def main() -> None:
         counts[row["status"]] = counts.get(row["status"], 0) + 1
 
     lines = [
-        "# Juice Shop challenge 対象経路と到達判定 (機械導出)",
+        "# Juice Shop challenge 関連表面の観測状況 (参考値・機械導出)",
         "",
         f"- 導出ツール: `docs/benchmark/derive-challenge-routes.py` (solveIf 呼び出し位置×ルート定義)",
         f"- 判定ツール: `docs/benchmark/judge-challenge-reach.py` (クロール観測との交差)",
         f"- 観測ソース: クロール実測ログ ({', '.join(p.name for p in log_paths)})",
+        "",
+        "> この表は粗いソース対応付けと経路の前方一致による参考値です。challenge の到達・診断・検出・解決を証明しません。",
         "",
         f"判定結果: {json.dumps(counts, ensure_ascii=False)}",
         "",
@@ -102,8 +108,8 @@ def main() -> None:
         evidence = "<br>".join(row["evidence"]) or "-"
         lines.append(f"| {row['key']} | {row['category']} | {row['status']} | {endpoints} | {evidence} |")
     lines.append("")
-    lines.append("注意: solveIf の関連付けはミドルウェア経由になることがあり、endpoints がチャレンジの")
-    lines.append("本体表面と一致しない場合がある (verify.ts 系など)。それらは判定結果を参考値として扱う。")
+    lines.append("注意: solveIf とルートの対応付けはファイル単位の粗い推定を含むため、endpoints が challenge の")
+    lines.append("本体表面と一致しない場合がある。観測数を challenge 到達数として扱ってはならない。")
     out_path.write_text("\n".join(lines), encoding="utf-8")
     print(json.dumps(counts, ensure_ascii=False))
 

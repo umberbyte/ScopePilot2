@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""challenge 対象経路 × 探索候補 (診断トラック付き) の交差で「診断適用可能」を判定する。
+"""challenge 関連経路 × 探索候補の診断トラック付与状況を参考値として集計する。
 
 使用法:
   python docs/benchmark/judge-challenge-diagnosability.py <routes-json> <observations-json...> --out <md>
@@ -9,9 +9,12 @@
 
 判定:
 - challenge の各 endpoint に一致する候補 (パスの :param は任意セグメントとして一致) を探し、
-  候補の diagnosticTracks の和集合を「適用可能な診断トラック」とする。
+  候補の diagnosticTracks の和集合を「診断トラック候補」とする。
 - 一致する候補がない (または候補にトラックがない) 場合は「候補化されていない」とする。
 - client-side challenge は判定対象外。
+
+トラック名が付いているだけでは、必要な入力値・認証状態・操作列が揃って実行できることや、
+challenge を診断・検出できることを意味しない。入力の challenge→endpoint 対応も粗い推定を含む。
 """
 import json
 import re
@@ -58,7 +61,7 @@ def main() -> None:
                     tracks.update(candidate.get("diagnosticTracks", []))
                     if len(matched) < 3 and candidate["url"] not in matched:
                         matched.append(candidate["url"])
-        status = "診断適用可能" if tracks else "候補化されていない"
+        status = "診断トラック候補あり" if tracks else "トラック候補なし"
         rows.append({**challenge, "tracks": sorted(tracks), "status": status, "matched": matched})
 
     counts: dict[str, int] = {}
@@ -69,14 +72,16 @@ def main() -> None:
             track_totals[track] = track_totals.get(track, 0) + 1
 
     lines = [
-        "# Juice Shop challenge 診断適用判定 (機械導出)",
+        "# Juice Shop challenge 診断トラック候補の付与状況 (参考値・機械導出)",
         "",
         "- 入力: `juice-shop-challenge-routes.json` (challenge 対象経路) × クロール観測ダンプ (診断トラック付き候補)",
         f"- 判定ツール: `docs/benchmark/judge-challenge-diagnosability.py`",
         f"- 観測: {', '.join(p.name for p in log_paths)}",
         "",
+        "> この表は粗い経路対応と候補トラックの交差です。診断の実行可能性や challenge の検出を証明しません。",
+        "",
         f"判定結果: {json.dumps(counts, ensure_ascii=False)}",
-        f"トラック別適用challenge数: {json.dumps(dict(sorted(track_totals.items(), key=lambda x: -x[1])), ensure_ascii=False)}",
+        f"トラック別候補challenge数: {json.dumps(dict(sorted(track_totals.items(), key=lambda x: -x[1])), ensure_ascii=False)}",
         "",
         "| key | category | status | tracks | matched candidates |",
         "|---|---|---|---|---|",

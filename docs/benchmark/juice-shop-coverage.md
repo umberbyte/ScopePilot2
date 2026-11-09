@@ -4,17 +4,26 @@
 本表は明示されたベンチマーク依頼 (2026-11-02) に基づく測定記録であり、
 一般化実装に Juice Shop 固有の知識は含まない。
 
+> **2026-11-05 レビュー訂正:** 従来の「103/103 到達」「66/103 診断適用可能」は、
+> 粗い challenge→経路対応と候補トラックの交差を、実能力として強く表現しすぎていた。
+> 正しくは「関連表面を観測 103 件相当」「診断トラック候補あり 66 件相当」という参考値であり、
+> challenge の到達・診断実行・検出・解決を証明しない。ScopePilot の診断による新規 challenge
+> 解決確認は 0 件、製品所見として確認できた SQL injection は 2 経路である。
+
 ## 評価段階の定義
 
 | 段階 | 定義 | 判定根拠 |
 |---|---|---|
-| 到達済み | 対象の画面ルートまたは API が探索観測に存在する | 探索観測 (URL・観測リクエスト) |
-| 診断適用可能 | 到達済み経路に ScopePilot の診断 (workflow / ZAP / Nuclei 等) を適用できる状態 | 候補 (ScanCandidate) と診断トラック |
-| 検出確認済み | 診断を実行し、challenge 解決を確認した | 診断実行結果と `/api/Challenges` の solved |
+| 関連表面を観測 (参考値) | 粗く対応付けた画面ルートまたは API のいずれかが探索観測に存在する | 探索観測 (URL・観測リクエスト) |
+| 診断トラック候補あり (参考値) | 対応付けた探索候補に診断トラック名が付いている | 候補 (ScanCandidate) と診断トラック。実行可能性は別途検証が必要 |
+| challenge 解決確認済み | ScopePilot の診断を実行し、新規 challenge 解決を確認した | 診断前後の `/api/Challenges` の solved 差分と所見証拠 |
 
 ## 測定条件
 
 - Juice Shop v20.3.0 (image digest `sha256:cea5a4af...`, 公開範囲 127.0.0.1 のみ)
+- 追加確認: 公式 commit `717f5efa886b0417eeecb52378b03cf10567b7e2` を WSL/Linux arm64・
+  Node.js v24.21.0・非Dockerでビルドし、`127.0.0.1:53188` のみで起動。Docker無効指定18件に
+  対して Linux 無効指定は0件。外部APIを要するWeb3/LLM challengeは別途依存サービスが必要。
 - ScopePilot2: 2026-11-05 実装 (SPA 静的ルート抽出 + storage 認証継承 + 動的ルート具体化)
 - 深さ 2、上限 maxPages 300 / maxRequests 500、単一 Chromium、Cookie・localStorage・sessionStorage 継承
 - 実測ハーネス: `packages/adapters/test/juice-shop-crawl-measure.ts` (環境変数で対象・資格情報を指定)
@@ -29,6 +38,10 @@
 | ルートテンプレート (種) | - | 5 | 5 |
 | 動的ルート具体化 (訪問) | - | 45 | 45 |
 | 所要時間 | - | 419.8 秒 | 417.4 秒 |
+
+2026-11-05の非Docker・クリーン環境 (116件すべて未解決から開始) でも user ロールを再実測し、
+414.0秒、訪問300、HTTP 4xx以上0、API経路形状69種、動的ルート具体化45件、候補266件だった。
+これは探索量の再現確認であり、challenge到達数・検出数ではない。
 
 ### 観測されたルートテンプレート (全ロール共通)
 
@@ -56,10 +69,10 @@
 
 v20.3.0 既定構成で 116 challenge。カテゴリ別:
 
-| カテゴリ | 件数 | 到達済み | 診断適用可能 | 検出確認済み |
+| カテゴリ | 件数 | 関連表面を観測 (粗い推定) | トラック候補あり (粗い推定) | ScopePilot 診断で新規解決確認 |
 |---|---|---|---|---|
 | Sensitive Data Exposure | 17 | 14 (+3 client-side) | 9/14 | 0 |
-| Injection | 14 | 14 | 10/14 | 2 (SQLi @ /rest/products/search と POST /rest/user/login を high 所見として検出。challenge 自動解決ではなく製品所見ベース) |
+| Injection | 14 | 14 | 10/14 | 0 |
 | Improper Input Validation | 12 | 12 | 8/12 | 0 |
 | Broken Access Control | 12 | 12 | 9/12 | 0 |
 | XSS | 9 | 9 | 4/9 | 0 |
@@ -74,14 +87,17 @@ v20.3.0 既定構成で 116 challenge。カテゴリ別:
 | Insecure Deserialization | 3 | 3 | 1/3 | 0 |
 | Unvalidated Redirects | 2 | 2 | 0/2 | 0 |
 | XXE | 2 | 2 | 2/2 | 0 |
-| 計 | 116 | 103 (機械判定) + 13 client-side | 66/103 (zap-active 40・api-schema 39・authorization-differential 1) | 2 (製品所見ベース) |
+| 計 | 116 | 103 件相当 (粗い機械推定) + 13 client-side | 66/103 件相当 (トラック名の付与) | 0 |
 
-「診断適用可能」も機械判定 (2026-11-05): challenge 対象経路に一致する探索候補が診断トラック
+別指標として、ZAP が SQL injection の high 所見を `/rest/products/search` と `POST /rest/user/login`
+の 2 経路で報告した。ただし、これは challenge の新規解決確認ではない。
+
+「診断トラック候補あり」は機械集計 (2026-11-05): challenge 関連経路に一致する探索候補が診断トラック
 (zap-active / api-schema 等) を持つか。判定表: `docs/benchmark/juice-shop-challenge-diagnosability.md`
 (ツール `judge-challenge-diagnosability.py`、観測ダンプ付きクロール実測との交差)。
 
 2026-11-05 深夜の製品改善 (スクリプト内 API 呼び出し定義の抽出・トランスポート経路の候補化除外・
-候補の横断重複排除) により、**診断適用可能は 50 → 66/103** に増加 (zap-active 40・api-schema 39・
+候補の横断重複排除) により、**トラック候補ありは 50 → 66/103 件相当** に増加 (zap-active 40・api-schema 39・
 authorization-differential 1)。書き込み API (`POST /api/BasketItems`・`POST /rest/user/login`・
 `POST /rest/user/reset-password` 等) がフロントエンド bundle の定義から候補化されるようになった。
 候補総数は重複排除により 24,963 → 266 件に整理。
@@ -98,12 +114,13 @@ authorization-differential 1)。書き込み API (`POST /api/BasketItems`・`POS
 4. **一部の複合パス構築** (`/rest/products/reviews` 等の基底+suffix 結合): スクリプト解析の
    基底ペアリングで部分的に取りこぼし。→ 抽出規則の精密化が今後課題。
 
-「到達済み」は機械判定 (2026-11-05): challenge のサーバ側解決位置 (`solveIf` 呼び出し) ×
+「関連表面を観測」は粗い機械推定 (2026-11-05): challenge のサーバ側解決位置 (`solveIf` 呼び出し) ×
 ルート定義から導出した対象経路が、ロール別クロール実測 (user/admin) の観測と交差したか。
 導出・判定ツールとチャレンジ単位の対応表: `docs/benchmark/derive-challenge-routes.py`、
 `docs/benchmark/judge-challenge-reach.py`、`docs/benchmark/juice-shop-challenge-routes.md`。
 チャレンジと対象経路の対応は Juice Shop 側の実装知識であり、判定表は本表でのみ管理する。
-「検出確認済み」は challenge 自動解決と製品所見の両方を区別して記録する。
+同じファイル内の複数の `solveIf` とルートが広く関連付く場合があるため、この数値を challenge
+到達数として扱わない。challenge 解決確認と製品所見は別指標として記録する。
 
 ### client-side challenge (機械判定対象外 13 件) と必要な能力
 
