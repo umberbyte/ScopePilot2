@@ -3,9 +3,13 @@
  * draft (tab 上限 20) の作成・header/body 編集・表示 plan hash による確認送信を扱う。
  * 編集のたびに revision と plan hash が進み、表示時の hash と一致しない送信は行われない。
  * 実送信は fixture adapter (決定的応答)。実 adapter は後続増分。
+ *
+ * GO-8: FeaturePage 共通レイアウトでラップ。設計 40 §4.1。
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Button, Field, Input, makeStyles, Text, Textarea, tokens } from '@fluentui/react-components';
+import { FeaturePage } from '@scopepilot2/ui';
+import { REPEATER_SPEC } from '@scopepilot2/ui';
 import { t } from './resources.ts';
 
 interface DraftView {
@@ -128,13 +132,9 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
     [apiBase, run, selected, sessionRole],
   );
 
-  return (
+  // GO-8: FeaturePage の inputContent と resultsContent に分割。
+  const inputContent = (
     <div className={styles.section}>
-      {error !== '' && (
-        <MessageBar intent="error">
-          {`Error: ${error}`}
-        </MessageBar>
-      )}
       <Text className={styles.muted}>{t('a06.intro')}</Text>
       <Field label={t('common.targetUrlInScope')}>
         <Input value={newTargetUrl} onChange={(_, data) => setNewTargetUrl(data.value)} />
@@ -173,39 +173,45 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
           <Field label={t('a06.sessionRoleLabel')}>
             <Input value={sessionRole} onChange={(_, data) => setSessionRole(data.value)} />
           </Field>
-          <div className={styles.tabs}>
-            <Button appearance="primary" disabled={busy} onClick={() => void send(selected.planHash)}>
-              {t('a06.send')}
-            </Button>
-            {drafts.find((draft) => draft.draftId === selected.draftId)?.planHash !== undefined &&
-              selected.revision > 1 &&
-              (() => {
-                // 編集前の hash で送信を試みる導線 (hash 保護の実演) は持たせない。
-                // 不一致は API が拒否するだけで、UI からは常に現行 hash のみ送る。
-                return null;
-              })()}
-          </div>
-          {sendResult !== null && (
-            <div className={styles.section}>
-              {sendResult.sent ? (
-                <>
-                  <Text role="status">
-                    {t('a06.sent', { outcome: sendResult.attempt?.outcome, status: sendResult.response?.status, contentType: sendResult.response?.contentType, bodyBytes: sendResult.response?.bodyBytes })}
-                    {sendResult.sessionCookieNames !== undefined ? ` ${t('a06.sessionApplied', { cookies: sendResult.sessionCookieNames.join(', ') || '—' })}` : ''}
-                  </Text>
-                  {sendResult.response?.bodyPreview !== undefined && (
-                    <Text block style={{ whiteSpace: 'pre-wrap' }}>
-                      {sendResult.response.bodyPreview}
-                    </Text>
-                  )}
-                </>
-              ) : (
-                <MessageBar intent="error">{t('a06.notSent', { reason: sendResult.reason ?? '' })}</MessageBar>
-              )}
-            </div>
-          )}
         </div>
       )}
     </div>
+  );
+
+  const resultsContent = selected !== null && sendResult !== null ? (
+    <div className={styles.section}>
+      {sendResult.sent ? (
+        <>
+          <Text role="status">
+            {t('a06.sent', { outcome: sendResult.attempt?.outcome, status: sendResult.response?.status, contentType: sendResult.response?.contentType, bodyBytes: sendResult.response?.bodyBytes })}
+            {sendResult.sessionCookieNames !== undefined ? ` ${t('a06.sessionApplied', { cookies: sendResult.sessionCookieNames.join(', ') || '—' })}` : ''}
+          </Text>
+          {sendResult.response?.bodyPreview !== undefined && (
+            <Text block style={{ whiteSpace: 'pre-wrap' }}>
+              {sendResult.response.bodyPreview}
+            </Text>
+          )}
+        </>
+      ) : (
+        <MessageBar intent="error">{t('a06.notSent', { reason: sendResult.reason ?? '' })}</MessageBar>
+      )}
+    </div>
+  ) : (
+    <Text>送信結果がここに表示されます</Text>
+  );
+
+  return (
+    <FeaturePage
+      spec={REPEATER_SPEC}
+      groupLabel="手動検証"
+      title="Repeater"
+      purpose="HTTP 要求を編集・送信して、応答を確認します。送信先は許可 Origin 内に制限されます。"
+      inputContent={inputContent}
+      executeLabel={t('a06.send')}
+      onExecute={selected !== null ? () => void send(selected.planHash) : undefined}
+      executeDisabled={busy || selected === null}
+      resultsContent={resultsContent}
+      error={error !== '' ? error : undefined}
+    />
   );
 }

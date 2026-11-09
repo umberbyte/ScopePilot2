@@ -8,3 +8,6 @@ export * from './presenters/secret.ts';
 export * from './commands/plan-confirmation.ts';
 export * from './ai/proposal-reducer.ts';
 export * from './wizard/wizard-state.ts';
+export * from './features/feature-spec.ts';
+export * from './features/feature-page.tsx';
+export * from './features/repeater-spec.ts';
