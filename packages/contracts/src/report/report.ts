@@ -1,4 +1,5 @@
 /** 報告の正規 model と成果物。`docs/detailed-design/f19-organizer-reporting.md`。 */
+import type { GuidelineRunCoverage } from '../guidelines/coverage.ts';
 import type { EngineKind } from '../plan/plan.ts';
 import type { OperationClass, ScopeLimits } from '../case/case.ts';
 import type { Finding } from '../findings/findings.ts';
@@ -18,6 +19,8 @@ export interface ReportAssessmentScope {
 }
 
 export interface ReportCoverage {
+  /** Exact projection of GET /api/runs/{runId}/guideline-coverage. */
+  readonly guidelineCoverage?: GuidelineRunCoverage;
   readonly exploredUrlCount: number;
   readonly scannedUrlCount: number;
   /** 実際に観測したURL。件数だけでなく範囲を追跡できるようにする。 */

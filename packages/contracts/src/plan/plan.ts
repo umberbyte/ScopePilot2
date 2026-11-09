@@ -1,4 +1,5 @@
 /** ExecutionPlan と確認の契約型。`docs/design/22-execution-control.md` 2章。 */
+import type { GuidelineCoveragePlan } from '../guidelines/coverage.ts';
 import type { OperationClass } from '../case/case.ts';
 
 export const EngineKinds = ['node-http', 'playwright', 'zap', 'nuclei', 'oast'] as const;
@@ -41,6 +42,8 @@ export interface ExecutionPlan {
   readonly authorizationId: string;
   readonly operatorId: string;
   readonly targetRole: string;
+  /** Immutable item selection, route snapshots, resolved input references, and capabilities. */
+  readonly guidelineCoverage?: GuidelineCoveragePlan;
   /** 診断計画を構成したガイドライン。空配列は従来互換の全チェック実行を表す。 */
   readonly guidelineIds: readonly string[];
   readonly steps: readonly PlanStep[];
@@ -58,6 +61,7 @@ export interface PlanHashInput {
   readonly authorizationId: string;
   readonly operatorId: string;
   readonly targetRole: string;
+  readonly guidelineCoverage?: GuidelineCoveragePlan;
   readonly guidelineIds: readonly string[];
   readonly steps: readonly {
     readonly kind: PlanStepKind;

@@ -36,3 +36,5 @@ export * from './ports/engines.ts';
 export * from './application/baseline-flow.ts';
 export * from './application/api-error.ts';
 export * from './application/api-server.ts';
+
+export * from './domain/guideline-coverage.ts';

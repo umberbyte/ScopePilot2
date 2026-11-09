@@ -5085,6 +5085,68 @@
           }
         }
       }
+    },
+    "/api/guidelines/coverage": {
+      "get": {
+        "operationId": "getGuidelineCoverage",
+        "parameters": [
+          {
+            "name": "guidelineId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Item-level coverage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuidelineCoverageForecast"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown guideline or coverage run / invalid input"
+          }
+        }
+      }
+    },
+    "/api/runs/{runId}/guideline-coverage": {
+      "get": {
+        "operationId": "getRunGuidelineCoverage",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Item-level coverage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuidelineRunCoverage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown guideline or coverage run / invalid input"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5578,6 +5640,9 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "guidelineCoverage": {
+            "$ref": "#/components/schemas/GuidelineCoveragePlan"
           }
         }
       },
@@ -6737,6 +6802,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "guidelineCoverage": {
+            "$ref": "#/components/schemas/GuidelineRunCoverage"
           }
         }
       },
@@ -8285,6 +8353,446 @@
           },
           "status": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GuidelineCatalogIdentity": {
+        "type": "object",
+        "required": [
+          "catalogId",
+          "version",
+          "sha256"
+        ],
+        "properties": {
+          "catalogId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GuidelineCoverageRoute": {
+        "type": "object",
+        "required": [
+          "routeId",
+          "catalog",
+          "guidelineId",
+          "itemId",
+          "assertionIds",
+          "evidenceRequirements",
+          "guarantee",
+          "completionPolicy",
+          "limitationCodes",
+          "routeKind",
+          "inputSchemaRefs",
+          "targetSelectorId",
+          "applicabilityRuleId",
+          "reviewedBy",
+          "reviewedAt"
+        ],
+        "properties": {
+          "routeId": {
+            "type": "string"
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/GuidelineCatalogIdentity"
+          },
+          "guidelineId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "assertionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidenceRequirements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "guarantee": {
+            "$ref": "#/components/schemas/GuaranteeLevel"
+          },
+          "completionPolicy": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any",
+              "manual"
+            ]
+          },
+          "limitationCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "routeKind": {
+            "type": "string",
+            "enum": [
+              "workflow",
+              "theme",
+              "zap-rule",
+              "nuclei-template",
+              "browser",
+              "manual-review",
+              "unsupported"
+            ]
+          },
+          "inputSchemaRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "targetSelectorId": {
+            "type": "string"
+          },
+          "applicabilityRuleId": {
+            "type": "string"
+          },
+          "reviewedBy": {
+            "type": "string"
+          },
+          "reviewedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GuidelineRouteSnapshot": {
+        "type": "object",
+        "required": [
+          "routeId",
+          "catalog",
+          "guidelineId",
+          "itemId",
+          "assertionIds",
+          "evidenceRequirements",
+          "guarantee",
+          "completionPolicy",
+          "limitationCodes",
+          "routeHash",
+          "label"
+        ],
+        "properties": {
+          "routeId": {
+            "type": "string"
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/GuidelineCatalogIdentity"
+          },
+          "guidelineId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "assertionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidenceRequirements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "guarantee": {
+            "$ref": "#/components/schemas/GuaranteeLevel"
+          },
+          "completionPolicy": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any",
+              "manual"
+            ]
+          },
+          "limitationCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "routeHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GuidelineItemExecution": {
+        "type": "object",
+        "required": [
+          "runId",
+          "itemId",
+          "routeId",
+          "executionStatus",
+          "assessment",
+          "guarantee",
+          "evidenceRefs",
+          "missingInputCodes",
+          "limitationCodes"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "routeId": {
+            "type": "string"
+          },
+          "executionStatus": {
+            "type": "string",
+            "enum": [
+              "not-planned",
+              "needs-input",
+              "unavailable",
+              "queued",
+              "running",
+              "completed",
+              "prohibited",
+              "stopped",
+              "failed"
+            ]
+          },
+          "assessment": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "inconclusive",
+              "not-applicable",
+              "not-assessed"
+            ]
+          },
+          "guarantee": {
+            "$ref": "#/components/schemas/GuaranteeLevel"
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "missingInputCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limitationCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "GuidelineRunCoverage": {
+        "type": "object",
+        "required": [
+          "runId",
+          "snapshots",
+          "executions",
+          "items"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuidelineRouteSnapshot"
+            }
+          },
+          "executions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuidelineItemExecution"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "guidelineId",
+                "itemId",
+                "assessment"
+              ],
+              "properties": {
+                "guidelineId": {
+                  "type": "string"
+                },
+                "itemId": {
+                  "type": "string"
+                },
+                "assessment": {
+                  "type": "string",
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "inconclusive",
+                    "not-applicable",
+                    "not-assessed"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "GuidelineCoverageForecast": {
+        "type": "object",
+        "required": [
+          "guidelineId",
+          "items"
+        ],
+        "properties": {
+          "guidelineId": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "itemId",
+                "routes",
+                "executionStatus",
+                "missingInputCodes"
+              ],
+              "properties": {
+                "itemId": {
+                  "type": "string"
+                },
+                "routes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GuidelineRouteSnapshot"
+                  }
+                },
+                "executionStatus": {
+                  "type": "string",
+                  "enum": [
+                    "not-planned",
+                    "needs-input",
+                    "unavailable",
+                    "queued",
+                    "running",
+                    "completed",
+                    "prohibited",
+                    "stopped",
+                    "failed"
+                  ]
+                },
+                "missingInputCodes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "GuidelineCoveragePlan": {
+        "type": "object",
+        "required": [
+          "selectedItems",
+          "snapshots",
+          "inputResolution",
+          "capabilities"
+        ],
+        "properties": {
+          "selectedItems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "guidelineId",
+                "itemId"
+              ],
+              "properties": {
+                "guidelineId": {
+                  "type": "string"
+                },
+                "itemId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuidelineRouteSnapshot"
+            }
+          },
+          "inputResolution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "routeId",
+                "resolvedInputRefs",
+                "missingInputCodes"
+              ],
+              "properties": {
+                "routeId": {
+                  "type": "string"
+                },
+                "resolvedInputRefs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "missingInputCodes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EngineCapabilitySnapshot"
+            }
           }
         },
         "additionalProperties": false

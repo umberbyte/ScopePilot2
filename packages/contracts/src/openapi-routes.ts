@@ -3,6 +3,8 @@
  * `packages/contracts/openapi/core-api.json` の paths と一致させる。
  */
 export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonly path: string; readonly operationId: string }[] = [
+  { method: 'GET', path: '/api/guidelines/coverage', operationId: 'getGuidelineCoverage' },
+  { method: 'GET', path: '/api/runs/{runId}/guideline-coverage', operationId: 'getRunGuidelineCoverage' },
   { method: 'GET', path: '/api/health', operationId: 'getHealth' },
   { method: 'GET', path: '/api/case', operationId: 'getCurrentCase' },
   { method: 'POST', path: '/api/case', operationId: 'createCase' },
