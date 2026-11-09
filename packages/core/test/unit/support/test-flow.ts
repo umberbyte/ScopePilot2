@@ -142,6 +142,7 @@ function testCapabilities(zapVersion = 'fake-zap-1', nucleiVersion?: string): re
 }
 
 export interface BootstrapOptions {
+  readonly evidenceStore?: import('../../../src/ports/infra.ts').EvidenceStorePort;
   readonly allowedOrigins?: readonly string[];
   readonly caseLimits?: ScopeLimits;
   readonly allowedOperationClasses?: readonly OperationClass[];
@@ -189,7 +190,7 @@ export interface TestFlow {
 
 /** 案件作成前の状態から使える service を組み立てる。 */
 export function createTestService(
-  options: Pick<BootstrapOptions, 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'loginProxyServer' | 'explorer' | 'scanEngine' | 'repeaterTransport' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver' | 'interactiveBrowser' | 'nucleiRunner' | 'workflowScanTransportFactory' | 'otpInbox' | 'samlFixture' | 'sleep'> & {
+  options: Pick<BootstrapOptions, 'evidenceStore' | 'operatorPermissions' | 'evidenceFailure' | 'zapCapabilityVersion' | 'loginExecutor' | 'loginProxyServer' | 'explorer' | 'scanEngine' | 'repeaterTransport' | 'fuzzTransport' | 'sequencerTransport' | 'oastProvider' | 'webSocketTransport' | 'advancedTransport' | 'domObserver' | 'interactiveBrowser' | 'nucleiRunner' | 'workflowScanTransportFactory' | 'otpInbox' | 'samlFixture' | 'sleep'> & {
     runSink?: import('../../../src/ports/infra.ts').RunSinkPort;
     caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
   } = {},
@@ -199,7 +200,7 @@ export function createTestService(
   const service = new BaselineFlowService({
     clock: new FixedClock([TEST_NOW]),
     ids: new SequentialIdGenerator(),
-    evidence: options.evidenceFailure === true ? new FailingAlertEvidenceStore() : new InMemoryEvidenceStore(),
+    evidence: options.evidenceStore ?? (options.evidenceFailure === true ? new FailingAlertEvidenceStore() : new InMemoryEvidenceStore()),
     explorer,
     scanEngine,
     capabilities: testCapabilities(options.zapCapabilityVersion, options.nucleiRunner?.engineVersion),

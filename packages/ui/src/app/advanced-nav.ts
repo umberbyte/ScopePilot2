@@ -30,6 +30,7 @@ const ADVANCED_SCREENS: readonly AdvancedScreen[] = [
   { screenId: 'A06', route: 'repeater', label: 'Repeater' },
   { screenId: 'A07', route: 'fuzzer', label: 'Fuzzer' },
   { screenId: 'A08', route: 'scan-plans', label: 'Scan plans' },
+  { screenId: 'A41', route: 'passive', label: '自動診断 / 受動診断・Alerts' },
   { screenId: 'A09', route: 'advanced.sessions', label: 'Sessions / Roles / Business logic' },
   { screenId: 'A10', route: 'decoder', label: 'Decoder / Comparer / Sequencer' },
   { screenId: 'A11', route: 'findings', label: 'Findings / Organizer / Report' },

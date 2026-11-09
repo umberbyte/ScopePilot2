@@ -53,6 +53,7 @@ export interface ObservationFindingCandidate {
   readonly method?: string;
   readonly param?: string;
   readonly severity: FindingSeverity;
+  readonly passive?: Finding['passive'];
 }
 
 export class FindingImporter {
@@ -173,6 +174,7 @@ export class FindingImporter {
           findingId: context.makeFindingId(),
           title: candidate.title,
           source: { kind: 'observation', engineVersion: context.engineVersion, unverified: true },
+          ...(candidate.passive === undefined ? {} : { passive: candidate.passive }),
           url: candidate.url,
           ...(candidate.method === undefined ? {} : { method: candidate.method }),
           ...(candidate.param === undefined ? {} : { param: candidate.param }),
@@ -188,7 +190,7 @@ export class FindingImporter {
         created.push(finding);
       } else {
         duplicateCount += 1;
-        const updated: Finding = { ...existing, occurrences: existing.occurrences + 1, lastSeenAt: context.now };
+        const updated: Finding = { ...existing, occurrences: existing.occurrences + 1, lastSeenAt: context.now, evidenceRefs: [...new Set([...existing.evidenceRefs, context.evidenceRef])] };
         this.findingsByDedupeKey.set(key, updated);
         reobserved.push(updated);
       }

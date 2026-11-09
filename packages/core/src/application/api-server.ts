@@ -387,6 +387,20 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (method === 'GET' && url.pathname.startsWith('/api/passive/')) {
+      try {
+        if (route === 'GET /api/passive/rules') return respondJson(response, 200, { rules: service.listPassiveRules(operator) });
+        if (route === 'GET /api/passive/status') return respondJson(response, 200, service.passiveStatus(operator));
+        if (route === 'GET /api/passive/alerts') return respondJson(response, 200, { alerts: service.listPassiveAlerts(operator) });
+        if (route === 'GET /api/passive/evidence') {
+          const finding = service.listPassiveAlerts(operator).find((entry) => entry.findingId === url.searchParams.get('findingId'));
+          if (finding === undefined) return respondError(response, 404, 'NotFound', 'passive finding not found', false);
+          // Sanitised observation summary only. Never expose stored raw evidence or secrets.
+          return respondJson(response, 200, { findingId: finding.findingId, evidenceRefs: finding.evidenceRefs,
+            observation: finding.passive, reproduction: { method: finding.method ?? 'GET', url: finding.url } });
+        }
+      } catch (cause) { return respondDomainError(response, cause); }
+    }
     if (route === 'GET /api/findings') {
       return respondJson(response, 200, { findings: service.listFindings() });
     }

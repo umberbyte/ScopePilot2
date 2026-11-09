@@ -55,6 +55,7 @@ import {
   planHashOf,
   validatePlan,
 } from '../domain/plan-service.ts';
+import { PASSIVE_RULES, passiveObservationCandidates } from '../domain/passive-observation.ts';
 import { dedupeKeyOf, FindingImporter } from '../domain/finding-importer.ts';
 import { BreakQueue, decideIntercept, type BreakItem, type BreakQueueEvent, type InterceptDecision } from '../domain/proxy-intercept.ts';
 import { SiteMapProjector, planTrafficQuery } from '../domain/target-logger.ts';
@@ -479,6 +480,9 @@ export class BaselineFlowService {
   private authorization: AuthorizationRecord | null = null;
   private readonly eventsLog: BaselineFlowEvent[] = [];
   private readonly importer: FindingImporter;
+  private passiveQueued = 0;
+  private passiveProcessed = 0;
+  private passiveFailed = 0;
   /** proxy の break queue (design/f02)。deadline 経過は既定で drop (暗黙 forward しない)。 */
   private readonly breakQueue = new BreakQueue(100);
 
@@ -633,6 +637,48 @@ export class BaselineFlowService {
   /** 現在の全所見 (作成順)。UI/CLI の organizer 表示用。 */
   listFindings(): readonly Finding[] {
     return this.importer.list();
+  }
+
+  listPassiveRules(operator: OperatorProfile): readonly import('@scopepilot2/contracts').PassiveRule[] {
+    this.requirePermission(operator, 'case.read');
+    return PASSIVE_RULES.map((rule) => ({ ...rule }));
+  }
+
+  listPassiveAlerts(operator: OperatorProfile): readonly Finding[] {
+    this.requirePermission(operator, 'case.read');
+    return this.importer.list().filter((finding) => finding.passive !== undefined);
+  }
+
+  passiveStatus(operator: OperatorProfile): import('@scopepilot2/contracts').PassiveStatus {
+    this.requirePermission(operator, 'case.read');
+    return { source: 'scopepilot-observation', queued: this.passiveQueued, processed: this.passiveProcessed,
+      failed: this.passiveFailed, alerts: this.listPassiveAlerts(operator).length,
+      limitations: ['件数はこのセッションの探索観測単位です。ZAP pscan のキューではありません。',
+        '観測したフォームのメタデータのみを検査します。HTTP ヘッダー・本文全体や未観測ページは対象外です。ルールは現在参照のみです。'] };
+  }
+
+  private async processPassiveObservation(observation: PageObservation): Promise<void> {
+    this.passiveQueued += 1;
+    try {
+      const candidates = passiveObservationCandidates(observation);
+      if (candidates.length > 0) {
+        const evidence = await this.deps.evidence.saveText('passive-observation', canonicalJson({
+          url: observation.finalUrl ?? observation.url, status: observation.status,
+          candidates: candidates.map((candidate) => candidate.passive),
+        }));
+        const result = this.importer.importObservationCandidates(candidates, {
+          now: this.deps.clock.now().toISOString(), engineVersion: 'scopepilot-passive-1',
+          makeFindingId: () => this.deps.ids.next('finding'), evidenceRef: evidence.evidenceId,
+        });
+        this.persistFindings([...result.created, ...result.reobserved]);
+      }
+      this.passiveProcessed += 1;
+    } catch {
+      // Failed evidence storage must not manufacture candidates or stop exploration.
+      this.passiveFailed += 1;
+    } finally {
+      this.passiveQueued -= 1;
+    }
   }
 
   private persistFindings(findings: readonly Finding[]): void {
@@ -4109,6 +4155,7 @@ export class BaselineFlowService {
       // 探索の追跡情報 (depth・発見元・由来) は core 側の値で上書きして記録する。
       const observation: PageObservation = { ...observed, url: canonical, finalUrl, depth: entry.depth, discoveredFrom: entry.discoveredFrom, originType: entry.origin };
       observations.push(observation);
+      await this.processPassiveObservation(observation);
       this.recordObservedExchange({ url: finalUrl, method: 'GET', status: observation.status, contentType: observation.contentType }, this.deps.clock.now().toISOString(), 'explore');
 
       if (entry.depth + 1 <= input.maxDepth) {

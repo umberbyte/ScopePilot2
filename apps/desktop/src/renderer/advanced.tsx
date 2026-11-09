@@ -17,6 +17,7 @@ import { DecoderComparerScreen } from './decoder-comparer-screen.tsx';
 import { ProxyInterceptScreen } from './proxy-intercept-screen.tsx';
 import { RepeaterScreen } from './repeater-screen.tsx';
 import { FuzzerScreen } from './fuzzer-screen.tsx';
+import { PassiveScreen } from './passive-screen.tsx';
 import { SessionsScreen } from './sessions-screen.tsx';
 
 /** ローカル desktop operator。operator 照会 API は後続増分で追加する。 */
@@ -1186,6 +1187,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
           </div>
         )}
         {activeRoute === 'advanced.scope' && <ScopeAuthorizationScreen apiBase={apiBase} />}
+        {activeRoute === 'passive' && <PassiveScreen apiBase={apiBase} onFindings={() => setActiveRoute('findings')} />}
         {activeRoute === 'findings' && <FindingsOrganizerScreen apiBase={apiBase} />}
         {activeRoute === 'scan-plans' && <ScanPlansScreen apiBase={apiBase} />}
         {activeRoute === 'browser.site-map' && <SiteMapScreen apiBase={apiBase} />}
@@ -1196,7 +1198,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {activeRoute === 'advanced.sessions' && <SessionsScreen apiBase={apiBase} />}
         {activeRoute === 'decoder' && <DecoderComparerScreen apiBase={apiBase} />}
         {activeRoute === 'settings' && <SettingsScreen apiBase={apiBase} />}
-        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'advanced.sessions' && (
+        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'passive' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'advanced.sessions' && (
           <Text className={styles.muted}>{t('common.unimplemented')}</Text>
         )}
       </div>

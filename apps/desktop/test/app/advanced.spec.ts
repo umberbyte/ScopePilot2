@@ -20,10 +20,10 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test('A01〜A13 のナビが表示され、A01 が既定の着地画面', async () => {
+test('A01〜A13 と A41 のナビが表示され、A01 が既定の着地画面', async () => {
   const nav = page.getByRole('navigation', { name: 'Advanced 画面ナビ' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('button')).toHaveCount(13);
+  await expect(nav.getByRole('button')).toHaveCount(14);
   await expect(page.getByText('A13 Settings / Certificates / Engines / AI')).toBeVisible();
   await expect(page.getByText('外部 engine 能力 (保証等級)')).toBeVisible();
 });

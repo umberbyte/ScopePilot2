@@ -9,6 +9,7 @@
     "build:renderer": "esbuild src/renderer/index.tsx --bundle --format=iife --jsx=automatic --outfile=dist/renderer.js && esbuild src/renderer/index.html --loader:.html=copy --outfile=dist/index.html",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
     "start": "npm run build && electron .",
+    "typecheck:passive": "tsc --noEmit -p tsconfig.passive.json",
     "test": "node --test \"test/unit/**/*.test.ts\"",
     "test:app": "npm run build && playwright test"
   },

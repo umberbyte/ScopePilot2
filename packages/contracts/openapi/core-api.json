@@ -5085,6 +5085,103 @@
           }
         }
       }
+    },
+    "/api/passive/rules": {
+      "get": {
+        "operationId": "listPassiveRules",
+        "summary": "PassiveRules",
+        "responses": {
+          "200": {
+            "description": "PassiveRules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassiveRules"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/passive/status": {
+      "get": {
+        "operationId": "getPassiveStatus",
+        "summary": "PassiveStatus",
+        "responses": {
+          "200": {
+            "description": "PassiveStatus",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassiveStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/passive/alerts": {
+      "get": {
+        "operationId": "listPassiveAlerts",
+        "summary": "PassiveAlerts",
+        "responses": {
+          "200": {
+            "description": "PassiveAlerts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassiveAlerts"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/passive/evidence": {
+      "get": {
+        "operationId": "getPassiveEvidence",
+        "summary": "PassiveEvidence",
+        "responses": {
+          "200": {
+            "description": "PassiveEvidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassiveEvidence"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "Passive finding not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "findingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -6432,6 +6529,9 @@
           },
           "enginePluginId": {
             "type": "string"
+          },
+          "passive": {
+            "$ref": "#/components/schemas/PassiveObservation"
           }
         }
       },
@@ -8287,6 +8387,168 @@
             "type": "string"
           }
         },
+        "additionalProperties": false
+      },
+      "PassiveObservation": {
+        "type": "object",
+        "properties": {
+          "ruleId": {
+            "type": "string"
+          },
+          "ruleVersion": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "observationUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ruleId",
+          "ruleVersion",
+          "detail",
+          "observationUrl"
+        ],
+        "additionalProperties": false
+      },
+      "PassiveRule": {
+        "type": "object",
+        "properties": {
+          "ruleId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ruleId",
+          "name",
+          "description",
+          "enabled",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "PassiveRules": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PassiveRule"
+            }
+          }
+        },
+        "required": [
+          "rules"
+        ],
+        "additionalProperties": false
+      },
+      "PassiveStatus": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "const": "scopepilot-observation",
+            "type": "string"
+          },
+          "queued": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "processed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "alerts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "source",
+          "queued",
+          "processed",
+          "failed",
+          "alerts",
+          "limitations"
+        ],
+        "additionalProperties": false
+      },
+      "PassiveAlerts": {
+        "type": "object",
+        "properties": {
+          "alerts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            }
+          }
+        },
+        "required": [
+          "alerts"
+        ],
+        "additionalProperties": false
+      },
+      "PassiveEvidence": {
+        "type": "object",
+        "properties": {
+          "findingId": {
+            "type": "string"
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "observation": {
+            "$ref": "#/components/schemas/PassiveObservation"
+          },
+          "reproduction": {
+            "type": "object",
+            "properties": {
+              "method": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "method",
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "findingId",
+          "evidenceRefs",
+          "observation",
+          "reproduction"
+        ],
         "additionalProperties": false
       }
     },
