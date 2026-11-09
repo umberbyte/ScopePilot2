@@ -59,4 +59,6 @@ export interface Finding {
   readonly occurrences: number;
   readonly enginePluginId?: string;
   readonly humanReview?: FindingHumanReview;
+  /** Explicit human duplicate resolution; original evidence and review remain on both records. */
+  readonly merge?: { readonly intoFindingId: string; readonly reason: string; readonly mergedBy: string; readonly mergedAt: string };
 }

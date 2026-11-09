@@ -19,6 +19,8 @@ export interface StoredEvidence {
 
 /** 証跡の保存 port。原本は hash 参照し、保存成功後だけ event を公開する (SYS-UT-005)。 */
 export interface EvidenceStorePort {
+  list?(): readonly StoredEvidence[];
+  readText?(evidenceId: string): Promise<string | null>;
   saveText(label: string, content: string, metadata?: Readonly<Record<string, string>>): Promise<StoredEvidence>;
 }
 
@@ -70,6 +72,9 @@ export class SequentialIdGenerator implements IdGenerator {
 export class InMemoryEvidenceStore implements EvidenceStorePort {
   private sequence = 0;
   private readonly records: StoredEvidence[] = [];
+  private readonly contents = new Map<string, string>();
+
+  async readText(evidenceId: string): Promise<string | null> { return this.contents.get(evidenceId) ?? null; }
 
   async saveText(label: string, content: string, metadata?: Readonly<Record<string, string>>): Promise<StoredEvidence> {
     this.sequence += 1;
@@ -81,6 +86,7 @@ export class InMemoryEvidenceStore implements EvidenceStorePort {
       ...(metadata === undefined || Object.keys(metadata).length === 0 ? {} : { metadata }),
     };
     this.records.push(record);
+    this.contents.set(record.evidenceId, content);
     return record;
   }
 

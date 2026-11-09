@@ -1,13 +1,13 @@
 /**
- * Advanced モードの画面ナビゲーション (A01〜A13)。`docs/detailed-design/02-ui-information-architecture.md` §3。
- * 並び・構成は設計の A01〜A13 と一致させ、権限不足の画面はナビから隠す
+ * Advanced ナビ。P6 の結果・報告は A60〜A62、その他は既存 ID を維持する。
+ * 権限不足の画面は選択不可にする
  * (mode-policy の route 判定と同じ根拠。見た目だけ隠して command は出る、にしない)。
  */
 import { resolveRoute, type UiRoute } from './mode-policy.ts';
 import type { OperatorPermission } from '@scopepilot2/contracts';
 
 export interface AdvancedNavItem {
-  /** 設計文書の画面番号 (A01〜A13)。 */
+  /** 設計文書の画面番号。 */
   readonly screenId: string;
   readonly route: UiRoute;
   readonly label: string;
@@ -32,12 +32,14 @@ const ADVANCED_SCREENS: readonly AdvancedScreen[] = [
   { screenId: 'A08', route: 'scan-plans', label: 'Scan plans' },
   { screenId: 'A09', route: 'advanced.sessions', label: 'Sessions / Roles / Business logic' },
   { screenId: 'A10', route: 'decoder', label: 'Decoder / Comparer / Sequencer' },
-  { screenId: 'A11', route: 'findings', label: 'Findings / Organizer / Report' },
-  { screenId: 'A12', route: 'advanced.jobs', label: 'Jobs / Evidence / Audit' },
+  { screenId: 'A60', route: 'adv.results.findings', label: 'Findings' },
+  { screenId: 'A61', route: 'adv.results.evidence', label: 'Evidence' },
+  { screenId: 'A62', route: 'adv.results.report', label: 'Report' },
+  { screenId: 'A12', route: 'advanced.jobs', label: 'Jobs / Audit' },
   { screenId: 'A13', route: 'settings', label: 'Settings / Certificates / Engines / AI' },
 ];
 
-/** 権限に応じた A01〜A13 のナビ一覧。順序は設計どおり A01→A13。 */
+/** 権限に応じたナビ一覧。結果・報告は独立した A60〜A62。 */
 export function advancedNavItems(permissions: readonly OperatorPermission[]): readonly AdvancedNavItem[] {
   return ADVANCED_SCREENS.map((screen) => ({
     ...screen,

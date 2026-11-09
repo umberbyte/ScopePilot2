@@ -89,6 +89,14 @@ export function renderMarkdown(model: ReportModel, reportId: string): ReportArti
     lines.push(`- 実影響: ${finding.source.unverified ? '未確認 (engine 由来の警告)' : '確認済み'}`);
     lines.push(`- 出典: ${finding.source.kind}${finding.source.engineVersion === undefined ? '' : ` (${finding.source.engineVersion})`}`);
     lines.push(`- 証拠: ${finding.evidenceRefs.join(', ')}`);
+    if (finding.humanReview !== undefined) {
+      const review = finding.humanReview;
+      lines.push(`- 人の検証: ${review.result} / ${review.reproduction} (${review.reviewedBy}, ${review.reviewedAt})`);
+      lines.push(`- 検証記録: ${review.notes}`);
+      lines.push(`- 重要度の根拠: ${review.severityRationale}`);
+      if (review.cvss !== undefined) lines.push(`- CVSS ${review.cvss.version}: ${review.cvss.vector} (${review.cvss.score})`);
+    }
+    if (finding.merge !== undefined) lines.push(`- 統合先: ${finding.merge.intoFindingId} (${finding.merge.reason}; ${finding.merge.mergedBy}, ${finding.merge.mergedAt})`);
     lines.push('');
   });
   return {

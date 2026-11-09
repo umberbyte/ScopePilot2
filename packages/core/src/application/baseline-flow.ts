@@ -181,6 +181,7 @@ import {
 import { resolveGuidelineThemeRoutes } from '../domain/guideline-execution.ts';
 import { checkCompatibility, respondToSecretRead, verifyExtensionManifest, type ExtensionManifest } from '../domain/product-api.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
+import { projectEvidence } from '../domain/evidence-view.ts';
 import type { Clock, EvidenceStorePort, IdGenerator } from '../ports/infra.ts';
 import type { ActiveScanEnginePort, BrowserSessionState, ExplorationPort, InteractiveBrowserFile, InteractiveBrowserPort, InteractiveBrowserStep, LoginExecutorPort, LoginSessionCookie, NucleiScanPort, OastProviderEvent } from '../ports/engines.ts';
 
@@ -633,6 +634,26 @@ export class BaselineFlowService {
   /** 現在の全所見 (作成順)。UI/CLI の organizer 表示用。 */
   listFindings(): readonly Finding[] {
     return this.importer.list();
+  }
+
+  mergeFindings(operator: OperatorProfile, findingId: string, intoFindingId: string, reason: string): readonly Finding[] {
+    this.requirePermission(operator, 'finding.confirm');
+    const before = this.listFindings().find(f => f.findingId === findingId);
+    const at = this.deps.clock.now().toISOString();
+    const updated = this.importer.merge(findingId, intoFindingId, reason, operator.operatorId, at);
+    this.persistFindings(updated);
+    this.record({ type: 'FindingStatusChanged', at, findingId, from: before!.status, to: 'merged', changedBy: operator.operatorId });
+    return updated;
+  }
+
+  async listEvidence(operator: OperatorProfile, evidenceId?: string): Promise<readonly import('@scopepilot2/contracts').EvidenceView[]> {
+    this.requirePermission(operator, 'case.read');
+    this.currentCase();
+    if (this.deps.evidence.list === undefined) throw domainError('CapabilityUnavailable', 'evidence listing is unavailable');
+    const records = this.deps.evidence.list().filter(r => evidenceId === undefined || r.evidenceId === evidenceId);
+    if (evidenceId !== undefined && records.length === 0) throw domainError('ValidationFailed', 'evidence does not exist');
+    return Promise.all(records.map(async record => projectEvidence(record, this.listFindings(),
+      evidenceId === undefined ? null : await this.deps.evidence.readText?.(record.evidenceId) ?? null)));
   }
 
   private persistFindings(findings: readonly Finding[]): void {

@@ -387,6 +387,11 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/evidence') {
+      try {
+        return respondJson(response, 200, { evidence: await service.listEvidence(operator, url.searchParams.get('evidenceId') ?? undefined) });
+      } catch (cause) { return respondDomainError(response, cause); }
+    }
     if (route === 'GET /api/findings') {
       return respondJson(response, 200, { findings: service.listFindings() });
     }
@@ -788,6 +793,13 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       } catch (cause) {
         return respondDomainError(response, cause);
       }
+    }
+    if (route === 'POST /api/findings/merge') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) return;
+      try {
+        return respondJson(response, 200, { findings: service.mergeFindings(operator, stringField(body, 'findingId'), stringField(body, 'intoFindingId'), stringField(body, 'reason')) });
+      } catch (cause) { return respondDomainError(response, cause); }
     }
     if (route === 'POST /api/findings/status') {
       const body = await readJsonBody(request, response);

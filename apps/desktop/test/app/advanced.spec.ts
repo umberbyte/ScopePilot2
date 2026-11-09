@@ -23,7 +23,7 @@ test.afterAll(async () => {
 test('A01〜A13 のナビが表示され、A01 が既定の着地画面', async () => {
   const nav = page.getByRole('navigation', { name: 'Advanced 画面ナビ' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('button')).toHaveCount(13);
+  await expect(nav.getByRole('button')).toHaveCount(15);
   await expect(page.getByText('A13 Settings / Certificates / Engines / AI')).toBeVisible();
   await expect(page.getByText('外部 engine 能力 (保証等級)')).toBeVisible();
 });
@@ -40,7 +40,7 @@ test('A01: 案件を作成すると案件情報と能力表 (保証等級) が�
 });
 
 test('A12: 監査 event に案件作成が記録されている', async () => {
-  await page.getByRole('button', { name: /A12 Jobs \/ Evidence \/ Audit/ }).click();
+  await page.getByRole('button', { name: /A12 Jobs \/ Audit/ }).click();
   await expect(page.getByText(/監査 event \(\d+ 件\)/)).toBeVisible();
   await expect(page.getByText(/CaseCreated/)).toBeVisible();
 });
@@ -83,48 +83,7 @@ test('A02: scope を編集して保存し、競合時は再読込を案内する
   await expect(page.getByText(/Scope \(現在 revision 3\)/)).toBeVisible({ timeout: 30_000 });
 });
 
-test('A11: 所見一覧から確定/棄却でき、報告書を生成できる', async () => {
-  // 探索→採用→診断 (S03〜S06 と同じ API 連鎖) を実行して所見を作る。
-  // engine は探索で観測済みの URL しか診断できない (URL Does not Exist 回避) ため、
-  // 探索から実行する。
-  await page.evaluate(async () => {
-    const base = (window as { scopepilotDesktop?: { apiBase: string } }).scopepilotDesktop?.apiBase ?? '';
-    const post = async <T>(path: string, body: unknown): Promise<T> => {
-      const response = await fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!response.ok) {
-        throw new Error(`${path}: HTTP ${response.status} ${await response.text()}`);
-      }
-      return (await response.json()) as T;
-    };
-    const explore = await post<{ plan: unknown }>('/api/plan/explore', { seeds: ['http://fixture.target.test/'] });
-    const exploreConfirmation = await post<{ confirmationId: string }>('/api/plan/confirm', { plan: explore.plan });
-    const exploreRun = await post<{ candidates: readonly { candidateId: string; url: string; method: string; category: string; guidelineBasis: readonly string[]; confidence: number; observationUrl: string }[] }>('/api/run/explore', {
-      plan: explore.plan,
-      confirmation: exploreConfirmation,
-      maxDepth: 5,
-    });
-    const adopted = await post<{ adopted: readonly unknown[] }>('/api/candidates/adopt', { candidates: exploreRun.candidates });
-    void adopted;
-    const targets = exploreRun.candidates.map((candidate) => candidate.url);
-    const scan = await post<{ plan: unknown }>('/api/plan/scan', { targets });
-    const scanConfirmation = await post<{ confirmationId: string }>('/api/plan/confirm', { plan: scan.plan });
-    await post('/api/run/scan', { plan: scan.plan, confirmation: scanConfirmation, adopted: exploreRun.candidates });
-  });
-  await page.getByRole('button', { name: /A11 Findings \/ Organizer \/ Report/ }).click();
-  await expect(page.getByText(/所見 \(\d+ 件\)/)).toBeVisible();
-  // engine 由来の所見は実影響未確認ラベルと候補状態で出る。
-  await expect(page.getByText(/\[実影響未確認\]/).first()).toBeVisible();
-  await expect(page.getByText('候補 (未確認)').first()).toBeVisible();
-
-  // 先頭行を確定するとその行の状態が変わる (他の候補はそのまま)。
-  const firstRow = page.getByRole('row', { name: /実影響未確認/ }).first();
-  await firstRow.getByRole('button', { name: '確定' }).click();
-  await expect(firstRow.getByText('確定済み')).toBeVisible({ timeout: 30_000 });
-
-  // 報告書を生成できる (限界開示を含む markdown)。
-  await page.getByRole('button', { name: '報告書を生成する' }).click();
-  await expect(page.getByText(/診断報告書/)).toBeVisible({ timeout: 30_000 });
-});
+// Results navigation, verification and exports are covered by advanced-results.spec.ts.
 
 test('A08: 上限を狭めた探索計画を構築・確認・実行し、診断まで実行できる', async () => {
   await page.getByRole('button', { name: /A08 Scan plans/ }).click();

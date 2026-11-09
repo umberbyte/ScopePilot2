@@ -5085,6 +5085,112 @@
           }
         }
       }
+    },
+    "/api/evidence": {
+      "get": {
+        "operationId": "listEvidence",
+        "summary": "Original evidence metadata and conservative display derivatives; never original content or storage paths",
+        "parameters": [
+          {
+            "name": "evidenceId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Evidence projections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "evidence"
+                  ],
+                  "properties": {
+                    "evidence": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EvidenceView"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "case.read required"
+          }
+        }
+      }
+    },
+    "/api/findings/merge": {
+      "post": {
+        "operationId": "mergeFindings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "findingId",
+                  "intoFindingId",
+                  "reason"
+                ],
+                "properties": {
+                  "findingId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "intoFindingId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Merged source and destination; no automatic verification transfer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "findings"
+                  ],
+                  "properties": {
+                    "findings": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Finding"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid merge"
+          },
+          "403": {
+            "description": "finding.confirm required"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6432,6 +6538,93 @@
           },
           "enginePluginId": {
             "type": "string"
+          },
+          "merge": {
+            "type": "object",
+            "required": [
+              "intoFindingId",
+              "reason",
+              "mergedBy",
+              "mergedAt"
+            ],
+            "properties": {
+              "intoFindingId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "mergedBy": {
+                "type": "string"
+              },
+              "mergedAt": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "humanReview": {
+            "type": "object",
+            "required": [
+              "result",
+              "reproduction",
+              "reviewedBy",
+              "reviewedAt",
+              "notes",
+              "severityRationale"
+            ],
+            "properties": {
+              "result": {
+                "enum": [
+                  "confirmed",
+                  "false-positive"
+                ]
+              },
+              "reproduction": {
+                "enum": [
+                  "reproduced",
+                  "not-reproduced"
+                ]
+              },
+              "reviewedBy": {
+                "type": "string"
+              },
+              "reviewedAt": {
+                "type": "string"
+              },
+              "notes": {
+                "type": "string"
+              },
+              "severityRationale": {
+                "type": "string"
+              },
+              "cvss": {
+                "type": "object",
+                "required": [
+                  "version",
+                  "vector",
+                  "score"
+                ],
+                "properties": {
+                  "version": {
+                    "enum": [
+                      "3.1",
+                      "4.0"
+                    ]
+                  },
+                  "vector": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 10
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
           }
         }
       },
@@ -8285,6 +8478,91 @@
           },
           "status": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EvidenceView": {
+        "type": "object",
+        "required": [
+          "evidenceId",
+          "sha256",
+          "savedAt",
+          "kind",
+          "findingIds",
+          "source",
+          "sourceRunId",
+          "sourceJobId",
+          "display",
+          "sharing"
+        ],
+        "properties": {
+          "evidenceId": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "savedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "const": "original"
+          },
+          "findingIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source": {
+            "type": "string"
+          },
+          "sourceRunId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceJobId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display": {
+            "type": "object",
+            "required": [
+              "kind",
+              "request",
+              "response",
+              "bodies"
+            ],
+            "properties": {
+              "kind": {
+                "const": "display"
+              },
+              "request": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "response": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bodies": {
+                "const": "omitted"
+              }
+            },
+            "additionalProperties": false
+          },
+          "sharing": {
+            "const": "not-generated"
           }
         },
         "additionalProperties": false
