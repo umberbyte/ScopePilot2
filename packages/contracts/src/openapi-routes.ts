@@ -76,4 +76,6 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'GET', path: '/api/capabilities', operationId: 'listCapabilities' },
   { method: 'GET', path: '/api/runs/interrupted', operationId: 'listInterruptedRuns' },
   { method: 'GET', path: '/api/events', operationId: 'listEvents' },
+  { method: 'GET', path: '/api/guidelines/coverage', operationId: 'getGuidelineCoverage' },
+  { method: 'GET', path: '/api/runs/{runId}/guideline-coverage', operationId: 'getRunGuidelineCoverage' },
 ];

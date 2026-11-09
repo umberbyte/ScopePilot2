@@ -11,4 +11,5 @@ export * from './findings/findings.ts';
 export * from './report/report.ts';
 export * from './documents/documents.ts';
 export * from './events/events.ts';
+export * from './guidelines/coverage.ts';
 export * from './openapi-routes.ts';
