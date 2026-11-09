@@ -1,13 +1,12 @@
 /**
  * Advanced モード画面。`docs/detailed-design/02-ui-information-architecture.md` §3。
- * A01〜A13 のナビは packages/ui の advancedNavItems (権限で隠す規則は mode-policy と同一)。
- * まず読取系の A01 Dashboard / Case と A12 Jobs / Evidence / Audit を実装し、
- * 他画面は「未実装」プレースホルダで明示する (空画面にしない)。
- * 編集系 (crawl 計画・テンプレート選択など) は後続増分で、API は読取 endpoint のみ使う。
+ * ナビは packages/ui の advancedNavGroups (design/40 §3 の目的別 9 グループ。権限で隠す規則は mode-policy と同一)。
+ * 再編 P1 では既存画面の中身は変えず、新 route から既存画面へ接続する (SCREEN_HOSTS)。
+ * 既存画面がまだない route は「後続段階で提供」を明示する (空画面にしない)。
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Badge, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
-import { advancedDefaultRoute, advancedNavItems, type AdvancedNavItem } from '@scopepilot2/ui';
+import { advancedDefaultRoute, advancedNavGroups, normalizeRoute, type AdvancedNavGroup, type AdvancedRoute } from '@scopepilot2/ui';
 import { revisionConflictDecision } from '@scopepilot2/ui';
 import type { AuthorizationRecord, CaseRecord, EngineCapabilitySnapshot, OperatorPermission, RunRecord } from '@scopepilot2/contracts';
 import { GuidelinesCatalogScreen } from './guidelines-catalog.tsx';
@@ -21,6 +20,56 @@ import { SessionsScreen } from './sessions-screen.tsx';
 
 /** ローカル desktop operator。operator 照会 API は後続増分で追加する。 */
 const OPERATOR_PERMISSIONS: readonly OperatorPermission[] = ['case.manage', 'case.read', 'run.manage', 'finding.confirm', 'report.export'];
+
+/** 再編前の画面 (旧 A01〜A13 の中身)。新 route はこのいずれかに接続する (design/40 付録 A)。 */
+type ScreenHost =
+  | 'dashboard'
+  | 'scope'
+  | 'guidelines'
+  | 'sessions'
+  | 'siteMap'
+  | 'scanPlans'
+  | 'proxy'
+  | 'repeater'
+  | 'fuzzer'
+  | 'decoder'
+  | 'findings'
+  | 'audit'
+  | 'settings';
+
+/** 新 route → 既存画面。未登録の route は既存画面がなく、後続段階で提供する。 */
+const SCREEN_HOSTS: Partial<Record<AdvancedRoute, ScreenHost>> = {
+  'adv.case.overview': 'dashboard',
+  'adv.case.scope': 'scope',
+  'adv.case.guidelines': 'guidelines',
+  'adv.auth.login': 'sessions',
+  'adv.auth.session': 'sessions',
+  'adv.recon.site-map': 'siteMap',
+  'adv.recon.history': 'siteMap',
+  'adv.recon.crawl': 'scanPlans',
+  'adv.recon.api': 'scanPlans',
+  'adv.recon.hints': 'scanPlans',
+  'adv.manual.proxy': 'proxy',
+  'adv.manual.repeater': 'repeater',
+  'adv.manual.fuzzer': 'fuzzer',
+  'adv.manual.websocket': 'decoder',
+  'adv.manual.oast': 'decoder',
+  'adv.manual.dom': 'decoder',
+  'adv.scan.active': 'scanPlans',
+  'adv.scan.templates': 'guidelines',
+  'adv.tools.decoder': 'decoder',
+  'adv.tools.comparer': 'decoder',
+  'adv.tools.sequencer': 'decoder',
+  'adv.results.findings': 'findings',
+  'adv.results.report': 'findings',
+  'adv.ops.jobs': 'audit',
+  'adv.ops.audit': 'audit',
+  'adv.settings.engines': 'settings',
+  'adv.settings.certificates': 'settings',
+  'adv.settings.library': 'settings',
+  'adv.settings.extensions': 'settings',
+  'adv.settings.ai': 'settings',
+};
 
 const CONTROL_ASPECTS = ['preSendScopeEnforcement', 'stopControl', 'budgetLease', 'rateLimit'] as const;
 const CONTROL_ASPECT_LABELS: Record<(typeof CONTROL_ASPECTS)[number], string> = {
@@ -76,6 +125,15 @@ const useStyles = makeStyles({
     backgroundColor: 'transparent',
     cursor: 'pointer',
   },
+  navGroup: { display: 'flex', flexDirection: 'column', gap: '3px', paddingBottom: '10px' },
+  navFooter: { marginTop: 'auto', paddingTop: '10px', borderTop: `1px solid ${tokens.colorNeutralStroke2}` },
+  navGroupLabel: {
+    padding: '4px 10px',
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  navEgress: { marginLeft: '6px', color: tokens.colorNeutralForeground3 },
   navActive: {
     color: tokens.colorNeutralForeground1,
     fontWeight: 600,
@@ -1000,8 +1058,20 @@ function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
 
 export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElement {
   const styles = useStyles();
-  const [items] = useState<readonly AdvancedNavItem[]>(() => advancedNavItems(OPERATOR_PERMISSIONS));
-  const [activeRoute, setActiveRoute] = useState<string>(() => advancedDefaultRoute(OPERATOR_PERMISSIONS) ?? 'advanced.dashboard');
+  const [groups] = useState<readonly AdvancedNavGroup[]>(() => advancedNavGroups(OPERATOR_PERMISSIONS));
+  const [activeRoute, setActiveRoute] = useState<AdvancedRoute>(() => advancedDefaultRoute(OPERATOR_PERMISSIONS) ?? 'adv.case.overview');
+  const items = groups.flatMap((group) => group.items);
+  /** 旧 route (保存済み状態・外部参照) も受け取り、新 route へ写像して開く (design/40 §7.3)。権限外・未知は無視。 */
+  const openRoute = useCallback(
+    (route: string) => {
+      const next = normalizeRoute(route);
+      const visible = groups.flatMap((group) => group.items).find((item) => item.route === next);
+      if (visible !== undefined) {
+        setActiveRoute(visible.route);
+      }
+    },
+    [groups],
+  );
   const [caseRecord, setCaseRecord] = useState<CaseRecord | null>(null);
   const [caseMissing, setCaseMissing] = useState(false);
   const [capabilities, setCapabilities] = useState<readonly EngineCapabilitySnapshot[]>([]);
@@ -1073,6 +1143,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
   }, [apiBase, newCaseOrigin, refreshAudit, refreshCase]);
 
   const activeItem = items.find((item) => item.route === activeRoute);
+  const host = SCREEN_HOSTS[activeRoute];
   return (
     <div className={styles.root}>
       <nav className={styles.nav} aria-label={t('nav.aria')}>
@@ -1081,15 +1152,37 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
           <Text size={400} weight="semibold">{t('advanced.workspace')}</Text>
           <Text size={200} className={styles.muted}>{t('advanced.workspaceHint')}</Text>
         </div>
-        {items.map((item) => (
-          <button
-            key={item.screenId}
-            type="button"
-            className={item.route === activeRoute ? `${styles.navItem} ${styles.navActive}` : styles.navItem}
-            onClick={() => setActiveRoute(item.route)}
+        {groups.map((group) => (
+          <div
+            key={group.groupId}
+            role="group"
+            aria-labelledby={`adv-nav-group-${group.groupId}`}
+            className={group.placement === 'footer' ? `${styles.navGroup} ${styles.navFooter}` : styles.navGroup}
           >
-            {item.screenId} {item.label}
-          </button>
+            <span id={`adv-nav-group-${group.groupId}`} className={styles.navGroupLabel}>
+              {group.label}
+            </span>
+            {group.items.map((item) => {
+              const egressTitle = item.egress === 'sends' ? t('nav.egress') : item.egress === 'live' ? t('nav.egressLive') : undefined;
+              return (
+                <button
+                  key={item.screenId}
+                  type="button"
+                  title={egressTitle}
+                  aria-current={item.route === activeRoute ? 'page' : undefined}
+                  className={item.route === activeRoute ? `${styles.navItem} ${styles.navActive}` : styles.navItem}
+                  onClick={() => openRoute(item.route)}
+                >
+                  {item.screenId} {item.label}
+                  {egressTitle !== undefined && (
+                    <span className={styles.navEgress} aria-hidden="true">
+                      {'\u21C5'}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         ))}
       </nav>
       <div className={styles.content}>
@@ -1104,7 +1197,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
             {`Error: ${error}`}
           </MessageBar>
         )}
-        {activeRoute === 'advanced.dashboard' && (
+        {host === 'dashboard' && (
           <>
             <div className={styles.section}>
               <Text weight="semibold">{t('a01.caseTitle')}</Text>
@@ -1171,7 +1264,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
             </div>
           </>
         )}
-        {activeRoute === 'advanced.jobs' && (
+        {host === 'audit' && (
           <div className={styles.section}>
             <Text weight="semibold">{t('audit.title', { count: events.length })}</Text>
             {events.length === 0 ? (
@@ -1185,20 +1278,18 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
             )}
           </div>
         )}
-        {activeRoute === 'advanced.scope' && <ScopeAuthorizationScreen apiBase={apiBase} />}
-        {activeRoute === 'findings' && <FindingsOrganizerScreen apiBase={apiBase} />}
-        {activeRoute === 'scan-plans' && <ScanPlansScreen apiBase={apiBase} />}
-        {activeRoute === 'browser.site-map' && <SiteMapScreen apiBase={apiBase} />}
-        {activeRoute === 'advanced.guidelines' && <GuidelinesCatalogScreen apiBase={apiBase} />}
-        {activeRoute === 'proxy.intercept' && <ProxyInterceptScreen apiBase={apiBase} />}
-        {activeRoute === 'repeater' && <RepeaterScreen apiBase={apiBase} />}
-        {activeRoute === 'fuzzer' && <FuzzerScreen apiBase={apiBase} />}
-        {activeRoute === 'advanced.sessions' && <SessionsScreen apiBase={apiBase} />}
-        {activeRoute === 'decoder' && <DecoderComparerScreen apiBase={apiBase} />}
-        {activeRoute === 'settings' && <SettingsScreen apiBase={apiBase} />}
-        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'advanced.sessions' && (
-          <Text className={styles.muted}>{t('common.unimplemented')}</Text>
-        )}
+        {host === 'scope' && <ScopeAuthorizationScreen apiBase={apiBase} />}
+        {host === 'findings' && <FindingsOrganizerScreen apiBase={apiBase} />}
+        {host === 'scanPlans' && <ScanPlansScreen apiBase={apiBase} />}
+        {host === 'siteMap' && <SiteMapScreen apiBase={apiBase} />}
+        {host === 'guidelines' && <GuidelinesCatalogScreen apiBase={apiBase} />}
+        {host === 'proxy' && <ProxyInterceptScreen apiBase={apiBase} />}
+        {host === 'repeater' && <RepeaterScreen apiBase={apiBase} />}
+        {host === 'fuzzer' && <FuzzerScreen apiBase={apiBase} />}
+        {host === 'sessions' && <SessionsScreen apiBase={apiBase} />}
+        {host === 'decoder' && <DecoderComparerScreen apiBase={apiBase} />}
+        {host === 'settings' && <SettingsScreen apiBase={apiBase} />}
+        {host === undefined && <Text className={styles.muted}>{t('nav.pendingScreen')}</Text>}
       </div>
     </div>
   );

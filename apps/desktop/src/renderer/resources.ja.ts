@@ -670,6 +670,9 @@ export const jaStrings = {
 
   'nav.aria': 'Advanced 画面ナビ',
 
+  'nav.egress': '対象へ通信を送信します',
+  'nav.egressLive': 'live 観測時に対象へ通信を送信します',
+  'nav.pendingScreen': 'この画面は Advanced 再設計 (design/40) の後続段階で提供します。',
   'a01.caseTitle': '案件',
   'a01.caseMissing': '案件が未作成です。',
   'a01.createCase': '案件を作成する',
