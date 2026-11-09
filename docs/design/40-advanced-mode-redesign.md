@@ -2,7 +2,7 @@
 
 対応要件: 仕様書 8章・6.5、AGENTS.md「UI はアドバンスドモードとシンプルモードの2つ」、[23 UI 2モード・移行](23-ui-and-migration.md)、[28 Windows UI 原則](28-windows-ui-guidelines.md)、[22 実行制御](22-execution-control.md)、[18 拡張 API](18-extension-api.md)、[20 保存モデル・証拠](20-storage-evidence.md)
 
-状態: **設計案（オーナー確認待ち）**。承認後、[詳細設計 02](../detailed-design/02-ui-information-architecture.md) §3 の A01〜A13 一覧と `packages/ui/src/app/advanced-nav.ts` を本書の構成に置き換える。承認までは詳細設計 02 が正本である。
+状態: **設計案（オーナー確認中）**。§8 の Q4〜Q12 は 2026-11-10 にオーナー回答済み。Q1〜Q3 は未決。承認後、[詳細設計 02](../detailed-design/02-ui-information-architecture.md) §3 の A01〜A13 一覧と `packages/ui/src/app/advanced-nav.ts` を本書の構成に置き換える。承認までは詳細設計 02 が正本である。
 
 調査基準: `C:\Users\GoSugawara\src\ScopePilot2`（`main`、2026-11-10 時点の未コミット 28 ファイルを含む作業状態）。本書の行番号はこの時点の値である。
 
@@ -77,7 +77,7 @@
 | DOM 調査 | DOM XSS add-on | DOM Invader | source/sink 解析（A10 内） | Enforced | 独立画面、観測結果の証拠リンク | A35 |
 | 受動診断 | Passive Scan rules、pscan 進捗 | Passive scanning | 内部で `passive` route を記録（`baseline-flow.ts:5129`）、UI なし | — | 受動ルール一覧（有効/無効）、受動所見の表示、処理待ち件数 | A41 |
 | 能動診断 | Active Scan（policy・強度・閾値） | Active scan（scan configuration） | 計画作成→確認→実行（同期、A08）。ZAP 強度は Medium 固定 | Delegated（ZAP/Nuclei）/ Enforced（汎用 HTTP） | 非同期ジョブ、経路（ZAP/Nuclei/汎用 HTTP/テーマ）選択、ポリシー選択、対象の候補表からの選択、進捗（ZAP %・messages・経路別状態） | A40 |
-| 診断ポリシー | Scan Policy Manager（rule ごと strength/threshold） | Scan configurations | なし | — | 案件単位の**診断ポリシー**（経路・ルール群・強度・閾値・既定）を保存し、計画へ hash 付きで含める | A43 |
+| 診断ポリシー | Scan Policy Manager（rule ごと strength/threshold） | Scan configurations | なし | ? | 案件単位の**診断ポリシー**（経路・ルール群・強度・閾値・既定）を保存し、計画へ hash 付きで含める。ZAP の個別 rule ID 単位の強度・閾値は扱わない（§8 Q6） | A43 |
 | ZAP 非対応項目の検証 | Scripts / 手動 | BApp・手動 | テーマ実行 25 種・認証回避・業務ロジック（A03・A09 に分散） | Enforced | 一か所にまとめ、目的別（ガイドライン項目）に検索し、入力フォーム・非同期実行・ログを共通化 | A42 |
 | 既知脆弱性 | （Nuclei 連携なし） | BApp | Nuclei 経路（設定時のみ計画に含む） | Delegated | テンプレート manifest の版・件数表示、診断ポリシーでの選択 | A40 / A43 |
 | 認証 | Contexts > Authentication、Users、Forced User、logged-in/out indicator | Session handling rules、macros | login flow（JSON 手書き）・login 実行・refresh（A09） | Enforced（Playwright） | **フロー作成支援**（記録・AI 推定・フォーム推定）、ログイン状態判定条件（indicator）、role ごとの状態表示、再ログイン方針 | A10 / A11 |
@@ -147,7 +147,7 @@
 | **自動診断** | A40 | 能動診断 | 対象選択（候補表）、ポリシー選択、経路別の内容、確認、実行、経路別進捗 | 送信 | run.manage | A08（診断部） |
 | | A41 | 受動診断 | 受動ルール一覧、処理状況、受動所見 | — | case.read | なし（新規） |
 | | A42 | 個別検証（テンプレート） | ガイドライン項目・目的から検証テンプレートを選び、入力して実行（ZAP 非対応テーマ、認証回避、role 比較・業務ロジック） | 送信 | run.manage | A03（実行部）、A09（業務ロジック） |
-| | A43 | 診断ポリシー | 経路・ルール群・強度・閾値・Nuclei テンプレートの組を名前付きで保存 | — | case.manage | なし（新規） |
+| | A43 | 診断ポリシー | 経路・ルール群・強度・閾値・Nuclei テンプレートの組を名前付きで保存（ZAP 個別 rule ID 単位の設定は扱わない） | — | case.manage | なし（新規） |
 | **解析ツール** | A50 | Decoder | codec chain、hash | — | case.read | A10 |
 | | A51 | Comparer | テキスト/バイト差分、履歴 2 件の比較 | — | case.read | A10 |
 | | A52 | Sequencer | token 収集（送信）と統計 | 送信 | run.manage | A10 |
@@ -163,6 +163,8 @@
 | | A94 | AI 支援 | provider/model、認証状態、利用範囲 | — | case.manage | A13（説明のみ）、Simple |
 
 HTTP/2 交渉（旧 A10）は独立画面にせず、Repeater の送信オプション（protocol）と A90 の能力表示に統合する。
+
+画面名（ja）は日本語を正とし、Burp/ZAP の慣用語がある画面は英語名を括弧で併記する（例: 「能動診断（Active Scan）」「Proxy・Intercept」）。en UI では Burp/ZAP の慣用語を主に用いる（§8 Q11、2026-11-10 決定）。
 
 ### 3.3 ナビゲーションの見え方
 
@@ -295,8 +297,8 @@ flowchart LR
 
 | 領域 | 内容 | 規則 |
 |---|---|---|
-| 見出し | パンくず（グループ › 画面）、画面名、目的 1〜2 文、送信の有無、保証等級、`[? 使い方]` | 目的は「何をして、何が得られるか」を書く。等級は文言＋アイコン（Enforced: 盾、Delegated: 外部矢印） |
-| 使い方パネル | 右側 Drawer。「何をする機能か」「入力」「結果の見方」「Burp/ZAP では何に当たるか」「よくある失敗」 | FeatureSpec の `help` から生成（§4.3）。AI 支援 drawer と同じ位置を共有 |
+| 見出し | パンくず（グループ › 画面）、画面名（ja に英語名併記）、目的 1〜2 文、送信の有無、保証等級、`[? 使い方]` | 目的は「何をして、何が得られるか」を書く。等級は文言＋アイコン（Enforced: 盾、Delegated: 外部矢印）。画面名の英語併記は §3.2・§8 Q11 |
+| 使い方パネル | 右側 Drawer。「何をする機能か」「入力」「結果の見方」「Burp/ZAP では何に当たるか」「よくある失敗」 | FeatureSpec の `help` から生成（§4.3）。AI 支援 drawer と同じ位置を共有。画面ごとの AI 提案（TemplateSuggest、RequestDraft 等）は P1〜P2 に含める（§8 Q10、2026-11-10 決定） |
 | 入力 | Field（label・説明・既定値・単位・検証メッセージ）。基本項目を上に、詳細は折りたたみ | 既定値は表示し、変更した項目に「既定から変更」マーカー。`[既定に戻す]` |
 | 推定 | 計画の推定通信数・ページ数・時間と案件残予算 | 入力変更から 300ms 後に plan preview を取得（§4.4） |
 | 実行 | 主要ボタン 1 つ（具体的な動詞）、確認ダイアログ | §4.4 |
@@ -697,7 +699,7 @@ export interface JobEvent {
 | 配信 | `GET /api/jobs/events`（全ジョブ）と `GET /api/jobs/{jobId}/events` を **streaming SSE** にする。接続を保持し、新しい event を逐次 `write`。`Last-Event-ID`（= `seq`）で再接続時に欠落分を再送。15 秒ごとに `: keep-alive` コメント。NDJSON（`Accept: application/x-ndjson`）は CLI 向けに一括取得を残す |
 | 監査 event | `GET /api/events` も同様に streaming 化し、[18 §6](18-extension-api.md) の `/v1/events` 方針に合わせる |
 | 保存 | SQLite に `jobs`（JobSummary）・`job_events`（seq・jobId・category・level・JSON）・`audit_events` を追加。`runs/<run-id>/engine/` に外部エンジンの stdout/stderr 原本（上限付き、[20 §2](20-storage-evidence.md)） |
-| 上限 | 1 ジョブあたり `job_events` は既定 50,000 行。超過分は `request` を集約 event に置き換え、`warning`・`error`・`egress-denied`・`finding`・`lifecycle` は捨てない。切り捨てた事実を `job.events.truncated` で記録 |
+| 上限 | 1 ジョブあたり `job_events` は既定 50,000 行。超過分は `request` を集約 event に置き換え、`warning`・`error`・`egress-denied`・`finding`・`lifecycle` は捨てない。切り捨てた事実を `job.events.truncated` で記録。監査上の保存期間の決まりはなく、案件削除まで保持する（§8 Q8、2026-11-10 決定） |
 | renderer | メモリには表示窓＋ 5,000 行のリングバッファのみ。それ以前はスクロール時に `?before=seq&limit=500` で取得 |
 | 復元 | renderer の再読込・モード切替でジョブは止まらない（[23 §4](23-ui-and-migration.md)）。起動時に `GET /api/jobs?state=active` で復元し、`lastEventSeq` から購読を再開 |
 | 頻度 | counters 更新は 1 秒に 1 回まで集約（`job.updated`）。UI の再描画も同頻度 |
@@ -764,7 +766,7 @@ export interface JobEvent {
 
 | 対象 | 変更 |
 |---|---|
-| `packages/core/src/application/job-registry.ts`（新設） | ジョブの起動・状態遷移・停止（AbortController）・counters 集約・JobEvent 発行・永続化 port 呼出し。同時実行上限（既定 2、案件設定）と `Queued` |
+| `packages/core/src/application/job-registry.ts`（新設） | ジョブの起動・状態遷移・停止（AbortController）・counters 集約・JobEvent 発行・永続化 port 呼出し。同時実行上限（既定 2、案件設定。クロールと能動診断の同時実行を既定で許可、§8 Q9）と `Queued` |
 | `BaselineFlowService` | 送信系メソッドに `control?: { signal, onEvent, jobId }` を統一して追加（`runActiveScan` の `ActiveScanExecutionControl` を一般化）。`record()` に jobId を伝える。巨大クラスの分割（仕様把握レポート 7 章 7）とは独立に、まず引数追加で対応する |
 | `packages/core/src/ports/infra.ts` | `JobStorePort`（jobs・job_events・audit_events の保存と照会） |
 | `packages/core/src/ports/engines.ts` | explorer port に進捗 callback、transport 系 port に `kind: 'live' \| 'fixture'` の自己申告 |
@@ -781,7 +783,7 @@ renderer→Core は loopback HTTP のままとし、IPC は OS 連携に限る�
 | `scopepilot:save-job-log` | ログ書出し（保存先選択ダイアログ） | P2 |
 | `scopepilot:show-notification` | 背面時の長時間ジョブ完了通知（[28 §4.1](28-windows-ui-guidelines.md) Toast） | P2 |
 
-ランタイム設定の別ウィンドウ（`scopepilot:open-settings` 等）は A90 に統合した後も、Simple からの導線として残す（**未決事項 Q7**）。
+ランタイム設定の別ウィンドウ（`scopepilot:open-settings` 等）は A90 に統合した後も、Simple からの導線として残す（廃止しない。§8 Q7、2026-11-10 決定）。
 
 ---
 
@@ -794,11 +796,11 @@ renderer→Core は loopback HTTP のままとし、IPC は OS 連携に限る�
 | 段階 | 内容 | 主な変更ファイル | 完了条件（追加テスト） |
 |---|---|---|---|
 | **P0 ジョブ基盤** | contracts（jobs・job-events）、`JobRegistry`、jobs/job_events/audit_events の migration、streaming SSE、`/api/jobs*`、`/api/run/scan/*` の契約化と JobRegistry 移行。UI 変更なし | contracts、core application、storage、api-server、openapi | JobRegistry の状態遷移・停止・counters 集約の unit。SSE の再接続（Last-Event-ID で欠落なし）の API test。`/api/run/scan/*` が parity 検査に含まれる。Simple S06 の既存 E2E が無変更で通る |
-| **P1 シェルとナビ再編** | 共通シェル（案件・認可・実行状態・停止）、`/api/operator`・`/api/workspace/status`、9 グループの左ナビ、`FeaturePage`・`FeatureSpec`、使い方パネル、ステータスバー、アクティビティパネル（監査 event と既存ジョブの表示）。既存画面の中身は FeaturePage に包んで移設（機能は不変）。A08・A10 の分割、A01 の認可ハードコード廃止（A02 で作成） | packages/ui（nav・mode-policy・features）、renderer の各画面、resources | nav の unit（全 route が 1 グループに属し、権限外を隠し、旧 route が写像される）。FeatureSpec 完全性の unit。E2E: 全画面に到達でき、各画面に目的文がある。キーボードのみでナビ・停止に到達できる |
-| **P2 クロールと能動診断の非同期化** | `POST /api/jobs`（crawl・active-scan）、explorer の進捗 callback、plan preview の estimate、確認ダイアログ、A22・A40 の新画面、`GET /api/candidates`、ジョブ詳細（A70）、Simple S06 の `/api/jobs` 移行 | core（runExploration に control）、adapters（playwright-explorer）、renderer | E2E（fixture）: クロール開始→ライブログに訪問行が流れる→scope 外が「拒否」に出る→停止で `Stopped`/`user-request`。能動診断で経路表が進む。renderer 再読込後に進捗が復元される |
+| **P1 シェルとナビ再編** | 共通シェル（案件・認可・実行状態・停止）、`/api/operator`・`/api/workspace/status`、9 グループの左ナビ、`FeaturePage`・`FeatureSpec`、使い方パネル、ステータスバー、アクティビティパネル（監査 event と既存ジョブの表示）。既存画面の中身は FeaturePage に包んで移設（機能は不変）。A08・A10 の分割、A01 の認可ハードコード廃止（A02 で作成）。画面ごとの AI 提案 Drawer（TemplateSuggest 等）の枠組み | packages/ui（nav・mode-policy・features）、renderer の各画面、resources | nav の unit（全 route が 1 グループに属し、権限外を隠し、旧 route が写像される）。FeatureSpec 完全性の unit。E2E: 全画面に到達でき、各画面に目的文がある。キーボードのみでナビ・停止に到達できる |
+| **P2 クロールと能動診断の非同期化** | `POST /api/jobs`（crawl・active-scan）、explorer の進捗 callback、plan preview の estimate、確認ダイアログ、A22・A40 の新画面（ZAP Spider / AJAX Spider をエンジン選択に公開、選択時のみ有効）、`GET /api/candidates`、ジョブ詳細（A70）、Simple S06 の `/api/jobs` 移行。クロール画面等への RequestDraft など AI 提案の接続 | core（runExploration に control）、adapters（playwright-explorer）、renderer | E2E（fixture）: クロール開始→ライブログに訪問行が流れる→scope 外が「拒否」に出る→停止で `Stopped`/`user-request`。能動診断で経路表が進む。renderer 再読込後に進捗が復元される |
 | **P3 通信履歴とサイトマップ** | 通信索引の永続化、`/api/traffic` の cursor・filter、`/api/traffic/{id}`、site map 木、list/details、「〜に送る」コンテキスト操作 | storage、core、renderer（A20・A21） | 10 万件 fixture で scroll・filter・本文表示中に操作可能（[23 §10-1](23-ui-and-migration.md)）。履歴→Repeater で request が複製される E2E |
-| **P4 手動検証ツール** | Repeater（raw 編集・応答・履歴比較）、Fuzzer（position・攻撃方式・payload 選択・非同期）、Proxy 実 listener、WebSocket・OAST・DOM の独立画面、transport 種別表示 | core、adapters（zap-proxy の接続）、renderer（A30〜A35） | Fuzzer の組合せ上限超過が送信前に拒否される unit/E2E。fixture transport の機能に「fixture」表示が出る E2E。proxy listener の gated integration test |
-| **P5 自動診断の拡充** | 診断ポリシー（A43、plan hash への反映）、受動診断（A41）、個別検証の統合（A42、テンプレート schema の Core 移管）、カバレッジ（A03） | contracts（scan-policy）、core、renderer | ポリシー変更で確認が失効する unit（UI-UT-005 拡張）。`theme-schema.ts` と Core のテーマ一覧の同期 test を Core 正本に移す |
+| **P4 手動検証ツール** | Repeater（raw 編集・応答・履歴比較）、Fuzzer（position・攻撃方式・payload 選択・非同期）、Proxy 実 listener（Playwright 管理ブラウザ＋管理 proxy を主、ZAP proxy は従。段階は P4 のまま前倒ししない）、WebSocket・OAST・DOM の独立画面、transport 種別表示 | core、adapters（zap-proxy の接続）、renderer（A30〜A35） | Fuzzer の組合せ上限超過が送信前に拒否される unit/E2E。fixture transport の機能に「fixture」表示が出る E2E。proxy listener の gated integration test |
+| **P5 自動診断の拡充** | 診断ポリシー（A43、plan hash への反映。経路単位＋強度/閾値＋汎用 HTTP 観点＋Nuclei 条件。ZAP 個別 rule ID は扱わない）、受動診断（A41）、個別検証の統合（A42、テンプレート schema の Core 移管）、カバレッジ（A03） | contracts（scan-policy）、core、renderer | ポリシー変更で確認が失効する unit（UI-UT-005 拡張）。`theme-schema.ts` と Core のテーマ一覧の同期 test を Core 正本に移す |
 | **P6 結果・報告** | 所見の list/details と所見ごとの検証記録、証拠ブラウザ、報告（ガイドライン選択・DOCX/Markdown・保証レポート） | core（evidence API）、renderer（A60〜A62） | 所見→証拠→再現 request の導線 E2E。原本が API から返らない API test |
 
 P1 と P2 が最も効果が大きい（オーナー課題の「何が起きているか分からない」「分類が悪い」を直接解消する）。P1 は UI のみで出荷でき、P0 は UI 変更なしで出荷できるため、P0 と P1 は並行して進められる。
@@ -829,27 +831,34 @@ E2E のシナリオ例（P2 の受け入れ）:
 
 - route 写像: 旧 `advanced.dashboard`→`adv.case.overview`、`advanced.scope`→`adv.case.scope`、`advanced.guidelines`→`adv.case.guidelines`（閲覧）、`browser.site-map`→`adv.recon.site-map`、`proxy.intercept`→`adv.manual.proxy`、`repeater`→`adv.manual.repeater`、`fuzzer`→`adv.manual.fuzzer`、`scan-plans`→`adv.scan.active`、`advanced.sessions`→`adv.auth.login`、`decoder`→`adv.tools.decoder`、`findings`→`adv.results.findings`、`advanced.jobs`→`adv.ops.jobs`、`settings`→`adv.settings.engines`。保存済みの UI 状態に旧 route があれば写像して開く。
 - `screenId`（A01〜A13）は E2E と設計文書が参照しているため、P1 で詳細設計 02 §3・§7（UI-UT-012〜014）を本書の ID に改訂する。
-- 同期 API（`/api/run/explore`、`/api/run/scan`、`/api/fuzzer/runs` 等）は CLI（`apps/cli`）と既存テストが使うため、P2〜P4 の間は残し、Job 版と同じ domain 処理を呼ぶ。廃止は CLI の移行後に別途判断する。
+- 同期 API（`/api/run/explore`、`/api/run/scan`、`/api/fuzzer/runs` 等）は CLI（`apps/cli`）と既存テストが使うため、P2〜P4 の間は残し、Job 版と同じ domain 処理を呼ぶ。CLI も Job API（`scopepilot job start/watch/stop`）へ移し、移行完了後に同期 API を廃止する（§8 Q12、2026-11-10 決定）。
 - Simple モードの画面・操作範囲は変えない。共通シェル・アクティビティパネル（簡易表示）・ジョブ API だけを共有する。
 
 ---
 
 ## 8. 未決事項とオーナーに確認したい点
 
+### 8.1 未決（Q1〜Q3）
+
 | ID | 論点 | 本書の仮置き | 確認したいこと |
 |---|---|---|---|
 | Q1 | グループ構成 | 9 グループ・33 画面（§3.2） | 「認証・セッション」を独立グループにするか、「案件」に含めるか。「解析ツール」に Sequencer（送信あり）を置く Burp 流でよいか |
 | Q2 | 画面 ID の体系 | 十の位をグループに割当（A01〜A94） | 既存文書・E2E の A01〜A13 を改番してよいか。別体系（例: `R-01`）を望むか |
 | Q3 | Repeater 単発送信の確認 | 案件設定で省略可（監査記録つき）。既定は確認あり | 単発送信ごとの確認ダイアログを許容するか。[22 §2](22-execution-control.md)「desktop は送信開始前に PlanConfirmation」の例外として認めるか |
-| Q4 | ZAP Spider / AJAX Spider の公開 | A22 のエンジン選択に出す（Delegated）。adapter の既定無効は維持し、選んだときだけ有効 | 「S04 で確定した対象以外へ再帰的に辿る」懸念（`zap-engine.ts:291` のコメント）を踏まえ、Advanced で公開してよいか。公開時の上限既定値 |
-| Q5 | 手動ブラウズ記録と実 Proxy | P4。Playwright 管理ブラウザ＋管理 proxy（Enforced）を主、ZAP proxy（Delegated）を従 | 実 listener の優先度（P4 より前に上げるか）。外部ブラウザ（利用者の Chrome 等）を proxy 経由で使う導線を許すか |
-| Q6 | 診断ポリシーの粒度 | 経路単位＋ZAP 強度/閾値＋汎用 HTTP 観点＋Nuclei 条件。ZAP の個別 rule ID 単位の設定は P5 以降 | ZAP の rule ごとの強度・閾値まで扱う必要があるか（ZAP 版更新で rule が変わる＝[22](22-execution-control.md) の「エンジン内部は権限外」との兼ね合い） |
-| Q7 | 設定の置き場所 | A90 に統合、別ウィンドウは Simple からの導線として残す | 別ウィンドウを廃止してよいか |
-| Q8 | ログの保持 | 1 ジョブ 50,000 行、request は集約可、警告以上は保持。案件削除まで保存 | 保持期間・上限の要件（監査上の保存期間の決まりがあるか） |
-| Q9 | 同時実行 | 既定 2 ジョブ（案件設定で変更、安全規定値以内） | クロールと能動診断の同時実行を既定で許すか |
-| Q10 | AI 支援の配置 | 使い方パネルと同じ Drawer で、画面ごとの提案（TemplateSuggest、RequestDraft 等。詳細設計 02 §5） | P1〜P2 に AI 提案を含めるか、後段にするか |
-| Q11 | 英語 UI での用語 | 画面名は ja を正、en は Burp/ZAP の慣用語（Repeater、Intercept、Site map） | ja の画面名に Burp/ZAP の英語名を併記するか（例: 「能動診断（Active Scan）」） |
-| Q12 | 同期 API の廃止時期 | CLI 移行後に別途判断 | CLI も Job API（`scopepilot job start/watch/stop`）へ移すか |
+
+### 8.2 決定済み（Q4〜Q12、2026-11-10 オーナー回答）
+
+| ID | 論点 | オーナー回答（原文） | 決定の解釈 |
+|---|---|---|---|
+| Q4 | ZAP Spider / AJAX Spider の公開 | OK | Advanced の A22 エンジン選択に公開する。adapter の既定無効は維持し、選んだときだけ有効。深さ・ページ/要求上限の既定は A22 の仮置き（深さ 5・案件上限）を採用する |
+| Q5 | 手動ブラウズ記録と実 Proxy | Playwrightを優先 | Playwright 管理ブラウザ＋管理 proxy（Enforced）を主、ZAP proxy（Delegated）を従とする。実 listener は P4 のまま（前倒ししない）。外部ブラウザ（利用者の Chrome 等）経由は主導線にしない |
+| Q6 | 診断ポリシーの粒度 | 扱わない | ZAP の個別 rule ID 単位の強度・閾値は扱わない。ポリシーは経路単位＋ZAP 強度/閾値＋汎用 HTTP 観点＋Nuclei 条件に留める |
+| Q7 | 設定の置き場所 | 廃止しない | A90 に統合しつつ、別ウィンドウは Simple からの導線として残す |
+| Q8 | ログの保持 | 保存期間の決まりなし | 監査上の保存期間要件はない。1 ジョブ 50,000 行・request 集約可・警告以上は保持・案件削除まで保存、の仮置きを採用する |
+| Q9 | 同時実行 | 同時実行可 | クロールと能動診断の同時実行を既定で許す。同時実行上限は既定 2 ジョブ（案件設定で変更、安全規定値以内） |
+| Q10 | AI 支援の配置 | 含める | 使い方パネルと同じ Drawer の画面ごと AI 提案（TemplateSuggest、RequestDraft 等）を P1〜P2 に含める |
+| Q11 | 英語 UI での用語 | 英語名併記 | ja の画面名に Burp/ZAP の英語名を併記する（例: 「能動診断（Active Scan）」）。en UI は Burp/ZAP 慣用語を主に用いる |
+| Q12 | 同期 API の廃止時期 | 移す | CLI も Job API（`scopepilot job start/watch/stop`）へ移す。同期 API は CLI 移行完了後に廃止する |
 
 ---
 
@@ -884,4 +893,4 @@ E2E のシナリオ例（P2 の受け入れ）:
 | A13 拡張 | A93 |
 | A13 証明書 | A91 |
 | A13 AI | A94 |
-| 別ウィンドウのランタイム設定 | A90（Q7） |
+| 別ウィンドウのランタイム設定 | A90（残す。§8 Q7） |
