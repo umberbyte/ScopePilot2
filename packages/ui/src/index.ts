@@ -8,3 +8,4 @@ export * from './presenters/secret.ts';
 export * from './commands/plan-confirmation.ts';
 export * from './ai/proposal-reducer.ts';
 export * from './wizard/wizard-state.ts';
+export * from './activity-panel/index.ts';
