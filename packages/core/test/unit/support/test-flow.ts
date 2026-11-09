@@ -197,6 +197,7 @@ export function createTestService(
   const explorer = options.explorer ?? new FakeExplorer();
   const scanEngine = options.scanEngine ?? new FakeScanEngine();
   const service = new BaselineFlowService({
+    jobTransport: 'fixture',
     clock: new FixedClock([TEST_NOW]),
     ids: new SequentialIdGenerator(),
     evidence: options.evidenceFailure === true ? new FailingAlertEvidenceStore() : new InMemoryEvidenceStore(),

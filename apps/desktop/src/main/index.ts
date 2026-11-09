@@ -9,7 +9,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } f
 import { BaselineFlowService, createCoreApiServer, InMemoryEvidenceStore, SequentialIdGenerator, SystemClock } from '@scopepilot2/core';
 import { composeEngines } from '@scopepilot2/adapters';
 import type { OperatorProfile, ReportModel } from '@scopepilot2/contracts';
-import type { RunRepository } from '@scopepilot2/storage';
+import { SqliteJobStore, type RunRepository } from '@scopepilot2/storage';
 import { DesktopWorkspaceManager, type WorkspaceOpenMode, type WorkspaceSettingsInput, type WorkspaceSettingsUpdateInput } from './workspace.ts';
 import { DesktopAiAssistant, type AiReportFindingInput } from './ai-assistant.ts';
 import type { ReportFindingNarrative } from './assurance-report.ts';
@@ -496,6 +496,7 @@ async function bootstrap(): Promise<void> {
     runtimeBundleHash: engines.runtimeBundleHash,
   };
   const createProductService = (options: {
+    readonly jobStore?: import('@scopepilot2/core').JobStore;
     readonly runSink?: import('@scopepilot2/core').RunSinkPort;
     readonly caseSink?: { save(record: import('@scopepilot2/contracts').CaseRecord): void };
     readonly authorizationSink?: { save(record: import('@scopepilot2/contracts').AuthorizationRecord): void };
@@ -511,6 +512,7 @@ async function bootstrap(): Promise<void> {
       clock: new SystemClock(),
       ids: new SequentialIdGenerator(options.idSeeds),
       evidence: options.evidenceStore ?? new InMemoryEvidenceStore(),
+      ...(options.jobStore === undefined ? {} : { jobStore: options.jobStore }),
       ...(options.runSink === undefined ? {} : { runSink: options.runSink }),
       ...(options.caseSink === undefined ? {} : { caseSink: options.caseSink }),
       ...(options.authorizationSink === undefined ? {} : { authorizationSink: options.authorizationSink }),
@@ -557,6 +559,7 @@ async function bootstrap(): Promise<void> {
       deniedOrigins: workspace.existingCase?.scope.deniedOrigins ?? [],
     });
     activeService = createProductService({
+      jobStore: new SqliteJobStore(repositories.db),
       runSink: repositories.runs,
       caseSink: repositories.cases,
       authorizationSink: repositories.authorizations,

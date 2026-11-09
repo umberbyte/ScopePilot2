@@ -76,4 +76,13 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'GET', path: '/api/capabilities', operationId: 'listCapabilities' },
   { method: 'GET', path: '/api/runs/interrupted', operationId: 'listInterruptedRuns' },
   { method: 'GET', path: '/api/events', operationId: 'listEvents' },
+  { method: 'GET', path: '/api/jobs', operationId: 'listJobs' },
+  { method: 'POST', path: '/api/jobs', operationId: 'startJob' },
+  { method: 'GET', path: '/api/jobs/{jobId}', operationId: 'getJob' },
+  { method: 'GET', path: '/api/jobs/events', operationId: 'streamJobEvents' },
+  { method: 'GET', path: '/api/jobs/{jobId}/events', operationId: 'streamSingleJobEvents' },
+  { method: 'POST', path: '/api/jobs/{jobId}/stop', operationId: 'stopJob' },
+  { method: 'POST', path: '/api/run/scan/start', operationId: 'startScanExecution' },
+  { method: 'GET', path: '/api/run/scan/status', operationId: 'getScanExecution' },
+  { method: 'POST', path: '/api/run/scan/stop', operationId: 'stopScanExecution' },
 ];

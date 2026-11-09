@@ -80,6 +80,7 @@ export function createHarness(options: HarnessOptions = {}): SimulationHarness {
   // login 実行器は既定も fixture (認証付き workflow を fixture 構成で回帰できる)。
   const loginExecutor: LoginExecutorPort = options.engines?.loginExecutor ?? new FixtureLoginExecutor();
   const service = new BaselineFlowService({
+    jobTransport: options.engines === undefined ? 'fixture' : 'live',
     // 実 engine 時は実時間 (認可の有効期間・監査記録)。既定は決定的な固定 clock。
     clock: options.engines?.clock ?? new FixedClock(FIXTURE_CLOCK_TIMES),
     ids: new SequentialIdGenerator(),

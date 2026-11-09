@@ -12,10 +12,10 @@ describe('SQLite storage', () => {
     const db = openDatabase(':memory:');
     const first = migrate(db);
     const second = migrate(db);
-    assert.deepEqual(first.appliedVersions, [1, 2, 3, 4]);
-    assert.deepEqual(second.appliedVersions, [1, 2, 3, 4]);
+    assert.deepEqual(first.appliedVersions, [1, 2, 3, 4, 5]);
+    assert.deepEqual(second.appliedVersions, [1, 2, 3, 4, 5]);
     const rows = db.prepare('SELECT COUNT(*) AS c FROM schema_migrations').get() as { c: number };
-    assert.equal(rows.c, 4);
+    assert.equal(rows.c, 5);
     db.close();
   });
 
@@ -142,7 +142,7 @@ describe('SQLite storage', () => {
 
       const second = openDatabase(path);
       const result = migrate(second);
-      assert.deepEqual(result.appliedVersions, [1, 2, 3, 4]);
+      assert.deepEqual(result.appliedVersions, [1, 2, 3, 4, 5]);
       assert.equal(new CaseRepository(second).get('case-0001')?.name, 'persist');
       second.close();
     } finally {

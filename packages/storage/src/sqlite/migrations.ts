@@ -118,6 +118,15 @@ export const MIGRATIONS: readonly Migration[] = [
       'CREATE INDEX IF NOT EXISTS findings_case_seen_idx ON findings (case_id, last_seen_at)',
     ],
   },
+  {
+    version: 5, name: 'job-foundation', statements: [
+      'CREATE TABLE jobs (job_id TEXT PRIMARY KEY, state TEXT NOT NULL, record_json TEXT NOT NULL)',
+      'CREATE TABLE job_events (seq INTEGER PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(job_id), category TEXT NOT NULL, level TEXT NOT NULL, event_json TEXT NOT NULL)',
+      'CREATE INDEX job_events_job_seq ON job_events(job_id, seq)',
+      'CREATE TABLE audit_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, event_json TEXT NOT NULL)',
+      'CREATE INDEX audit_events_job_seq ON audit_events(job_id, seq)',
+    ],
+  },
 ];
 
 export interface MigrationResult {

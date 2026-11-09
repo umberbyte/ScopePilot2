@@ -6,6 +6,7 @@
  * command pipeline の順序 (権限判定 → 認可 → 確認 → domain 処理 → 証跡 → event) を
  * 最初から踏襲する (SYS-UT-001/005 の土台)。
  */
+import { JobRegistry, jobContext, type JobStore, redactJobText } from './job-registry.ts';
 import {
   canonicalJson,
   DomainError,
@@ -204,6 +205,8 @@ const PAYLOAD_URL_MARKER_PATTERN = /(?:%3C|<script|javascript:|onerror\s*=|onloa
 const PAYLOAD_VERIFICATION_MAX = 5;
 
 export interface BaselineFlowDeps {
+  readonly jobStore?: JobStore;
+  readonly jobTransport?: 'live' | 'fixture';
   readonly clock: Clock;
   readonly ids: IdGenerator;
   readonly evidence: EvidenceStorePort;
@@ -447,6 +450,7 @@ export interface ActiveScanExecutionEvent {
   readonly message: string;
   readonly command?: string;
   readonly progress?: number;
+  readonly requestsReportedByEngine?: number;
 }
 
 export interface ActiveScanExecutionControl {
@@ -475,6 +479,9 @@ export interface ImportNucleiResultsResult {
 const MAX_POLL_ITERATIONS = 1000;
 
 export class BaselineFlowService {
+  readonly jobs: JobRegistry;
+  private readonly auditListeners = new Set<(event: BaselineFlowEvent, seq: number) => void>();
+  subscribeAudit(listener: (event: BaselineFlowEvent, seq: number) => void): () => void { this.auditListeners.add(listener); return () => { this.auditListeners.delete(listener); }; }
   private aggregate: CaseAggregate | null = null;
   private authorization: AuthorizationRecord | null = null;
   private readonly eventsLog: BaselineFlowEvent[] = [];
@@ -483,7 +490,7 @@ export class BaselineFlowService {
   private readonly breakQueue = new BreakQueue(100);
 
   /** HTTP 通信 log と endpoint 集約 (design/f03)。探索・Repeater・Fuzzer の観測通信を記録する。 */
-  private readonly trafficLog: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' }[] = [];
+  private readonly trafficLog: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' | 'workflow-scan'; jobId?: string }[] = [];
   private readonly siteMapProjector = new SiteMapProjector();
 
   /** 業務ロジック検証の実行履歴 (design/f17)。 */
@@ -594,6 +601,8 @@ export class BaselineFlowService {
 
   constructor(deps: BaselineFlowDeps) {
     this.deps = deps;
+    this.jobs = new JobRegistry(deps.jobStore);
+    this.eventsLog.push(...(deps.jobStore?.loadAudit() ?? []));
     this.importer = new FindingImporter(deps.initialFindings ?? []);
   }
 
@@ -827,10 +836,17 @@ export class BaselineFlowService {
   }
 
   /** 観測通信の記録 (traffic log と endpoint 集約の両方に入れる)。 */
-  private recordObservedExchange(summary: { url: string; method: string; status: number; contentType: string }, at: string, source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer'): void {
-    (this.trafficLog as { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' }[]).push({
-      exchangeId: this.deps.ids.next('exchange'),
+  private recordObservedExchange(summary: { url: string; method: string; status: number; contentType: string }, at: string, source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' | 'workflow-scan'): void {
+    const context = jobContext.getStore();
+    const exchangeId = this.deps.ids.next('exchange');
+    if (context) {
+      const counters = context.registry.get(context.jobId)!.summary.counters;
+      context.registry.emit(context.jobId, { category: 'request', messageKey: 'job.request.sent', message: 'HTTP request observed', params: { method: summary.method, status: summary.status }, refs: { url: summary.url, exchangeId }, counters: { budget: { ...counters.budget, used: counters.budget.used + 1 }, requestsSent: counters.requestsSent + 1, ...(summary.status >= 500 ? { errors: counters.errors + 1 } : {}) } });
+    }
+    (this.trafficLog as { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' | 'workflow-scan'; jobId?: string }[]).push({
+      exchangeId,
       ...summary,
+      ...(context === undefined ? {} : { jobId: context.jobId }),
       at,
       source,
     });
@@ -4278,6 +4294,14 @@ export class BaselineFlowService {
    * 能動診断の実行 (Delegated 経路)。確認 hash と能力表を検証してから engine へ入力を渡し、
    * 出力から挙動を推測して記録する。個々の送信は傍受・拒否しない。
    */
+  validateJobScan(operator: OperatorProfile, plan: ExecutionPlan, confirmation: PlanConfirmation): void {
+    this.requirePermission(operator, 'run.manage');
+    this.requireMatchingConfirmation(plan, confirmation);
+    this.authorizePlan(plan);
+  }
+  scanTransport(): 'live' | 'fixture' {
+    return this.deps.jobTransport ?? 'live';
+  }
   async runActiveScan(
     operator: OperatorProfile,
     plan: ExecutionPlan,
@@ -4400,6 +4424,8 @@ export class BaselineFlowService {
       && step.limits.maxRequests - reservedRequests - desiredGuidelineRequestCount >= 1;
     const guidelineRequestReservation = automaticGuidelineChecksEnabled ? desiredGuidelineRequestCount : 0;
     const engineLease = step.limits.maxRequests - reservedRequests - guidelineRequestReservation;
+    const context = jobContext.getStore();
+    if (context) context.registry.emit(context.jobId, { category: 'budget', messageKey: 'job.phase', message: 'Scan request budget leased', params: { engineLease, reservedRequests, guidelineRequestReservation }, counters: { budget: { leased: step.limits.maxRequests, used: 0, limit: plan.limits.maxRequests } } });
     const zapCandidates = adopted.filter(candidateAllowsAutomatedZap);
     const scanRequest: ActiveScanRequest = {
       runId,
@@ -4502,6 +4528,7 @@ export class BaselineFlowService {
         engine: 'zap',
         message: `ZAP active scan ${progress.progress}% (${progress.messageCount} messages)`,
         progress: progress.progress,
+        requestsReportedByEngine: progress.messageCount,
       }),
     );
     const monitored = await monitor.collectUntilDone();
@@ -4766,6 +4793,7 @@ export class BaselineFlowService {
                 ...(control.signal === undefined ? {} : { signal: control.signal }),
               }),
               budget,
+              (spec, response) => this.recordObservedExchange({ url: new URL(spec.path.replace(/^\//, ''), `${baseUrl}/`).toString(), method: spec.method, status: response.status, contentType: response.contentType }, this.deps.clock.now().toISOString(), 'workflow-scan'),
             );
             transports.push(transport);
             return transport;
@@ -5215,7 +5243,20 @@ export class BaselineFlowService {
   }
 
   private record(event: BaselineFlowEvent): void {
+    const context = jobContext.getStore();
+    if (context !== undefined) {
+      if (event.type === 'RunStarted') { context.runId = event.runId; context.registry.bindRun(context.jobId, event.runId); }
+      event = { ...event, jobId: context.jobId, ...(context.runId === undefined ? {} : { runId: context.runId }) };
+      if (event.type === 'EgressDenied') context.registry.emit(context.jobId, { category: 'egress-denied', level: 'warn', messageKey: 'job.egress.denied', message: event.reason, params: {}, refs: { url: event.url } });
+      if (event.type === 'FindingsImported') {
+        const counters = context.registry.get(context.jobId)!.summary.counters;
+        context.registry.emit(context.jobId, { category: 'finding', messageKey: 'job.findings.imported', message: 'Findings imported', params: { importedCount: event.importedCount, duplicateCount: event.duplicateCount }, counters: { findings: counters.findings + event.importedCount } });
+      }
+    }
+    event = JSON.parse(JSON.stringify(event), (_key, value) => typeof value === 'string' ? redactJobText(value) : value) as BaselineFlowEvent;
+    this.deps.jobStore?.appendAudit(event);
     this.eventsLog.push(event);
+    for (const listener of this.auditListeners) listener(event, this.eventsLog.length);
   }
 }
 
@@ -5483,13 +5524,16 @@ function updateDiagnosticRoute(
 class SharedBudgetWorkflowTransport implements WorkflowScanTransport {
   private readonly delegate: WorkflowScanTransport;
   private readonly budget: { readonly limit: number; used: number };
+  private readonly onExchange: ((spec: WorkflowScanRequestSpec, response: WorkflowScanHttpResponse) => void) | undefined;
 
   constructor(
     delegate: WorkflowScanTransport,
     budget: { readonly limit: number; used: number },
+    onExchange?: (spec: WorkflowScanRequestSpec, response: WorkflowScanHttpResponse) => void,
   ) {
     this.delegate = delegate;
     this.budget = budget;
+    this.onExchange = onExchange;
   }
 
   get baseUrl(): string {
@@ -5505,7 +5549,9 @@ class SharedBudgetWorkflowTransport implements WorkflowScanTransport {
       throw domainError('OutOfScope', `workflow scan request limit reached (${String(this.budget.limit)})`);
     }
     this.budget.used += 1;
-    return this.delegate.request(spec);
+    const response = await this.delegate.request(spec);
+    this.onExchange?.(spec, response);
+    return response;
   }
 
   takeRequestLog(): import('../domain/workflow-scan.ts').WorkflowScanRequestLogEntry[] {

@@ -5085,6 +5085,599 @@
           }
         }
       }
+    },
+    "/api/jobs": {
+      "get": {
+        "operationId": "listJobs",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/JobKind"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "startJob",
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "jobId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartJobRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{jobId}": {
+      "get": {
+        "operationId": "getJob",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/jobs/events": {
+      "get": {
+        "operationId": "streamJobEvents",
+        "responses": {
+          "200": {
+            "description": "Live SSE with global monotonic IDs; reconnect with Last-Event-ID. NDJSON returns a bounded snapshot.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/JobEventCategory"
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "debug",
+                "info",
+                "warn",
+                "error"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/jobs/{jobId}/events": {
+      "get": {
+        "operationId": "streamSingleJobEvents",
+        "responses": {
+          "200": {
+            "description": "Live SSE with global monotonic IDs; reconnect with Last-Event-ID. NDJSON returns a bounded snapshot.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/JobEventCategory"
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "debug",
+                "info",
+                "warn",
+                "error"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/jobs/{jobId}/stop": {
+      "post": {
+        "operationId": "stopJob",
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/run/scan/start": {
+      "post": {
+        "operationId": "startScanExecution",
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "executionId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "executionId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunActiveScanRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/run/scan/status": {
+      "get": {
+        "operationId": "getScanExecution",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanExecutionStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "executionId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/run/scan/stop": {
+      "post": {
+        "operationId": "stopScanExecution",
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "executionId": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "queued",
+                        "running",
+                        "stopping",
+                        "completed",
+                        "stopped",
+                        "failed",
+                        "interrupted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "executionId",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "executionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "executionId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6994,6 +7587,12 @@
           "revision": {
             "type": "integer",
             "minimum": 1
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7023,6 +7622,12 @@
           },
           "narrowed": {
             "type": "boolean"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7054,6 +7659,12 @@
           },
           "reason": {
             "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7078,6 +7689,12 @@
           },
           "caseId": {
             "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7099,6 +7716,12 @@
           "planHash": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7123,6 +7746,12 @@
             "pattern": "^[0-9a-f]{64}$"
           },
           "authorizationId": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
             "type": "string"
           }
         }
@@ -7149,6 +7778,12 @@
           },
           "confirmedBy": {
             "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7174,6 +7809,9 @@
           "planHash": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"
+          },
+          "jobId": {
+            "type": "string"
           }
         }
       },
@@ -7198,6 +7836,9 @@
           },
           "stopReason": {
             "$ref": "#/components/schemas/StopReason"
+          },
+          "jobId": {
+            "type": "string"
           }
         }
       },
@@ -7222,6 +7863,12 @@
           },
           "reason": {
             "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7243,6 +7890,12 @@
           "adoptedCount": {
             "type": "integer",
             "minimum": 0
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7276,6 +7929,12 @@
           "duplicateCount": {
             "type": "integer",
             "minimum": 0
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7307,6 +7966,12 @@
             "type": "string"
           },
           "changedBy": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
             "type": "string"
           }
         }
@@ -7342,6 +8007,9 @@
           "sent": {
             "type": "integer",
             "minimum": 0
+          },
+          "jobId": {
+            "type": "string"
           }
         }
       },
@@ -7372,6 +8040,12 @@
             }
           },
           "status": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
             "type": "string"
           }
         }
@@ -7405,6 +8079,12 @@
               "type": "string"
             },
             "description": "参照名のみ (値は出さない — F09-UT-006)"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7435,6 +8115,12 @@
           "acceptedUrlCount": {
             "type": "integer",
             "minimum": 0
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7460,6 +8146,12 @@
           "entryCount": {
             "type": "integer",
             "minimum": 1
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7485,6 +8177,12 @@
           "ruleCount": {
             "type": "integer",
             "minimum": 1
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7510,6 +8208,12 @@
           "parameterCount": {
             "type": "integer",
             "minimum": 1
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7534,6 +8238,12 @@
           },
           "trusted": {
             "type": "boolean"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7630,6 +8340,12 @@
           "missing": {
             "type": "integer",
             "minimum": 0
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7660,6 +8376,12 @@
           "excludedServerCount": {
             "type": "integer",
             "minimum": 0
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7695,6 +8417,12 @@
               "icmp"
             ],
             "description": "OAST protocol。fixture provider は http/dns のみ対応 (他は CapabilityUnavailable)"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7731,6 +8459,12 @@
           "uncorrelated": {
             "type": "integer",
             "minimum": 0
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7761,6 +8495,12 @@
           "duplicates": {
             "type": "integer",
             "minimum": 0
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7794,6 +8534,12 @@
               "rate"
             ],
             "description": "上限で拒否した場合のみ"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7826,6 +8572,12 @@
           },
           "downgraded": {
             "type": "boolean"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -7849,6 +8601,12 @@
             "type": "string"
           },
           "version": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
             "type": "string"
           }
         }
@@ -7875,6 +8633,12 @@
           "modelHash": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         }
       },
@@ -8251,6 +9015,12 @@
           },
           "status": {
             "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -8285,8 +9055,558 @@
           },
           "status": {
             "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
           }
         },
+        "additionalProperties": false
+      },
+      "JobKind": {
+        "type": "string",
+        "enum": [
+          "crawl",
+          "active-scan",
+          "fuzz",
+          "repeater-send",
+          "template-check",
+          "login",
+          "sequencer",
+          "ws-send",
+          "oast-poll",
+          "dom-observe",
+          "interactive-diagnostics",
+          "proxy-session",
+          "report"
+        ]
+      },
+      "JobState": {
+        "type": "string",
+        "enum": [
+          "Queued",
+          "Running",
+          "Stopping",
+          "Completed",
+          "Stopped",
+          "Failed",
+          "Interrupted"
+        ]
+      },
+      "JobEventCategory": {
+        "type": "string",
+        "enum": [
+          "lifecycle",
+          "phase",
+          "request",
+          "egress-denied",
+          "budget",
+          "engine-log",
+          "finding",
+          "warning",
+          "error"
+        ]
+      },
+      "JobMessageKey": {
+        "type": "string",
+        "enum": [
+          "job.state.changed",
+          "job.phase",
+          "job.request.sent",
+          "job.request.batch",
+          "job.egress.denied",
+          "job.findings.imported",
+          "job.error",
+          "job.events.truncated"
+        ]
+      },
+      "JobCounters": {
+        "type": "object",
+        "properties": {
+          "requestsSent": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "requestsReportedByEngine": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pagesVisited": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "queued": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "deniedByScope": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "errors": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "warnings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "findings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "budget": {
+            "type": "object",
+            "properties": {
+              "leased": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "used": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "leased",
+              "used",
+              "limit"
+            ],
+            "additionalProperties": false
+          },
+          "progress": {
+            "type": "object",
+            "properties": {
+              "done": {
+                "type": "number",
+                "minimum": 0
+              },
+              "total": {
+                "type": "number",
+                "minimum": 0
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "pages",
+                  "requests",
+                  "checks",
+                  "percent",
+                  "samples"
+                ]
+              }
+            },
+            "required": [
+              "done",
+              "unit"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "requestsSent",
+          "budget",
+          "deniedByScope",
+          "errors",
+          "warnings",
+          "findings"
+        ],
+        "additionalProperties": false
+      },
+      "JobSummary": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "parentJobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "planHash": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/JobKind"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "stopReason": {
+            "$ref": "#/components/schemas/StopReason"
+          },
+          "guarantee": {
+            "type": "string",
+            "enum": [
+              "Enforced",
+              "Delegated",
+              "Mixed"
+            ]
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "live",
+              "fixture"
+            ]
+          },
+          "counters": {
+            "$ref": "#/components/schemas/JobCounters"
+          },
+          "lastEventSeq": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "jobId",
+          "kind",
+          "label",
+          "state",
+          "guarantee",
+          "transport",
+          "createdAt",
+          "counters",
+          "lastEventSeq"
+        ],
+        "additionalProperties": false
+      },
+      "JobEvent": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "debug",
+              "info",
+              "warn",
+              "error"
+            ]
+          },
+          "category": {
+            "$ref": "#/components/schemas/JobEventCategory"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "scopepilot",
+              "zap",
+              "nuclei",
+              "playwright",
+              "interactsh",
+              "engine"
+            ]
+          },
+          "route": {
+            "type": "string"
+          },
+          "messageKey": {
+            "$ref": "#/components/schemas/JobMessageKey"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "message": {
+            "type": "string"
+          },
+          "estimated": {
+            "type": "boolean"
+          },
+          "counters": {
+            "type": "object",
+            "properties": {
+              "requestsSent": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "requestsReportedByEngine": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "pagesVisited": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "queued": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "deniedByScope": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "errors": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "warnings": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "findings": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "budget": {
+                "type": "object",
+                "properties": {
+                  "leased": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "used": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "leased",
+                  "used",
+                  "limit"
+                ],
+                "additionalProperties": false
+              },
+              "progress": {
+                "type": "object",
+                "properties": {
+                  "done": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "total": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "unit": {
+                    "type": "string",
+                    "enum": [
+                      "pages",
+                      "requests",
+                      "checks",
+                      "percent",
+                      "samples"
+                    ]
+                  }
+                },
+                "required": [
+                  "done",
+                  "unit"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "refs": {
+            "type": "object",
+            "properties": {
+              "exchangeId": {
+                "type": "string"
+              },
+              "evidenceId": {
+                "type": "string"
+              },
+              "findingId": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "seq",
+          "jobId",
+          "at",
+          "level",
+          "category",
+          "source",
+          "messageKey",
+          "params",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "StartJobRequest": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "const": "active-scan"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/ExecutionPlan"
+          },
+          "confirmation": {
+            "$ref": "#/components/schemas/PlanConfirmation"
+          },
+          "params": {
+            "type": "object",
+            "properties": {
+              "adopted": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ScanCandidate"
+                }
+              },
+              "role": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "adopted"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "kind",
+          "plan",
+          "confirmation",
+          "params"
+        ],
+        "additionalProperties": false
+      },
+      "JobDetail": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/JobSummary"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ActiveScanRunResult"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "additionalProperties": false
+      },
+      "JobList": {
+        "type": "object",
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobSummary"
+            }
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "additionalProperties": false
+      },
+      "ScanExecutionStatus": {
+        "type": "object",
+        "properties": {
+          "executionId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "stopping",
+              "completed",
+              "stopped",
+              "failed",
+              "interrupted"
+            ]
+          },
+          "currentEngine": {
+            "type": "string",
+            "enum": [
+              "scopepilot",
+              "zap",
+              "nuclei"
+            ]
+          },
+          "currentCommand": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "number",
+            "minimum": 0
+          },
+          "logs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "result": {
+            "$ref": "#/components/schemas/ActiveScanRunResult"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "executionId",
+          "state",
+          "currentEngine",
+          "currentCommand",
+          "progress",
+          "logs"
+        ],
         "additionalProperties": false
       }
     },
