@@ -1,13 +1,13 @@
 /**
- * Advanced モードの画面ナビゲーション (A01〜A13)。`docs/detailed-design/02-ui-information-architecture.md` §3。
- * 並び・構成は設計の A01〜A13 と一致させ、権限不足の画面はナビから隠す
+ * Advanced モードの画面ナビゲーション。`docs/detailed-design/02-ui-information-architecture.md` §3 と design/40。
+ * 並び・構成は設計の画面番号と一致させ、権限不足の画面はナビから隠す
  * (mode-policy の route 判定と同じ根拠。見た目だけ隠して command は出る、にしない)。
  */
 import { resolveRoute, type UiRoute } from './mode-policy.ts';
 import type { OperatorPermission } from '@scopepilot2/contracts';
 
 export interface AdvancedNavItem {
-  /** 設計文書の画面番号 (A01〜A13)。 */
+  /** 設計文書の画面番号。 */
   readonly screenId: string;
   readonly route: UiRoute;
   readonly label: string;
@@ -30,6 +30,8 @@ const ADVANCED_SCREENS: readonly AdvancedScreen[] = [
   { screenId: 'A06', route: 'repeater', label: 'Repeater' },
   { screenId: 'A07', route: 'fuzzer', label: 'Fuzzer' },
   { screenId: 'A08', route: 'scan-plans', label: 'Scan plans' },
+  { screenId: 'A40', route: 'advanced.active-scan', label: '能動診断 (Active Scan)' },
+  { screenId: 'A43', route: 'advanced.scan-policy', label: '診断ポリシー' },
   { screenId: 'A09', route: 'advanced.sessions', label: 'Sessions / Roles / Business logic' },
   { screenId: 'A10', route: 'decoder', label: 'Decoder / Comparer / Sequencer' },
   { screenId: 'A11', route: 'findings', label: 'Findings / Organizer / Report' },
@@ -37,7 +39,7 @@ const ADVANCED_SCREENS: readonly AdvancedScreen[] = [
   { screenId: 'A13', route: 'settings', label: 'Settings / Certificates / Engines / AI' },
 ];
 
-/** 権限に応じた A01〜A13 のナビ一覧。順序は設計どおり A01→A13。 */
+/** 権限に応じた Advanced ナビ一覧。順序は設計どおり。 */
 export function advancedNavItems(permissions: readonly OperatorPermission[]): readonly AdvancedNavItem[] {
   return ADVANCED_SCREENS.map((screen) => ({
     ...screen,

@@ -25,6 +25,8 @@ export type UiRoute =
   | 'repeater'
   | 'fuzzer'
   | 'scan-plans'
+  | 'advanced.active-scan'
+  | 'advanced.scan-policy'
   | 'decoder'
   | 'findings'
   | 'settings';
@@ -57,6 +59,8 @@ const ROUTE_PERMISSIONS: Readonly<Record<UiRoute, OperatorPermission>> = {
   repeater: 'run.manage',
   fuzzer: 'run.manage',
   'scan-plans': 'run.manage',
+  'advanced.active-scan': 'run.manage',
+  'advanced.scan-policy': 'case.manage',
   decoder: 'case.read',
   findings: 'finding.confirm',
   settings: 'case.manage',

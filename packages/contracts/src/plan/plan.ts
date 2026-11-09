@@ -48,6 +48,8 @@ export interface ExecutionPlan {
   readonly limits: PlanLimits;
   readonly runtimeBundleHash: string;
   readonly inputEvidenceHash: string;
+  /** A40/A43: 能動診断で選択した案件ポリシーの内容 hash。探索・旧計画では未指定。 */
+  readonly scanPolicyHash?: string;
   readonly createdAt: string;
 }
 
@@ -71,6 +73,7 @@ export interface PlanHashInput {
   readonly limits: PlanLimits;
   readonly runtimeBundleHash: string;
   readonly inputEvidenceHash: string;
+  readonly scanPolicyHash?: string;
 }
 
 /** 操作者が確認した内容の写し。hash と内容の両方で計画との一致を検証する。 */

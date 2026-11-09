@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./scan-policy": "./src/scan/scan-policy-browser.ts"
   },
   "scripts": {
     "test": "node --test \"test/contract/**/*.test.ts\""

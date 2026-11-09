@@ -38,6 +38,7 @@ async function startFakeZap(): Promise<{
       }] });
     }
     if (/^\/JSON\/(?:context|users|httpSessions|sessionManagement|authentication|replacer)\/action\//.test(url.pathname)) return respond({ result: 'OK' });
+    if (url.pathname === '/JSON/ascan/action/updateScanPolicy') return respond({ result: 'OK' });
     if (url.pathname === '/JSON/ascan/action/scan') {
       assert.equal(url.searchParams.get('recurse'), 'false');
       assert.equal(url.searchParams.get('inScopeOnly'), 'true');
@@ -148,7 +149,7 @@ describe('ZAP adapter', () => {
       const adapter = new ZapEngineAdapter({ baseUrl: zap.base, spiderEnabled: false, ajaxSpiderEnabled: false });
       assert.equal(await adapter.resolvedVersion(), 'zap 2.17.0');
       const runId = await adapter.start({
-        runId: 'run-0001', targets: ['http://target.test/a'], attackStrength: 'Medium',
+        runId: 'run-0001', targets: ['http://target.test/a'], attackStrength: 'Medium', alertThreshold: 'Medium',
         leasedLimits: { maxRequests: 100, maxPages: 10, maxDurationMinutes: 5, maxConcurrency: 2, requestsPerSecond: 2 },
         authorizationRef: 'authz-0001', sessionCookieNames: ['PHPSESSID'], requestSeedCount: 1,
       }, {
@@ -156,6 +157,10 @@ describe('ZAP adapter', () => {
         requestSeeds: [{ url: 'http://target.test/a', method: 'GET', inputPoints: [{ name: 'id', location: 'query', type: 'text' }] }],
       });
       assert.equal(runId, 'scopepilot:run-0001');
+      const policyUpdate = zap.requests.find((entry) => entry.path === '/JSON/ascan/action/updateScanPolicy');
+      assert.equal(policyUpdate?.query.get('attackStrength'), 'MEDIUM');
+      assert.equal(policyUpdate?.query.get('alertThreshold'), 'MEDIUM');
+      assert.equal(zap.requests.some((entry) => /scanner|plugin/u.test(entry.path)), false, '個別 rule ID API は呼ばない');
       assert.deepEqual(zap.seededPaths, ['/a?id=1']);
       assert.ok(zap.requests.some((entry) => entry.path === '/JSON/httpSessions/action/setSessionTokenValue'));
       const exclusion = zap.requests.find((entry) => entry.path === '/JSON/context/action/excludeFromContext');
@@ -193,7 +198,7 @@ describe('ZAP adapter', () => {
       // request contains the security cookie so a real replacement is detectable.
       const adapter = new ZapEngineAdapter({ baseUrl: zap.base, spiderEnabled: false, ajaxSpiderEnabled: false });
       await adapter.start({
-        runId: 'run-low', targets: ['http://target.test/a'], attackStrength: 'Low',
+        runId: 'run-low', targets: ['http://target.test/a'], attackStrength: 'Low', alertThreshold: 'Low',
         leasedLimits: { maxRequests: 20, maxPages: 5, maxDurationMinutes: 1, maxConcurrency: 1, requestsPerSecond: 1 },
         authorizationRef: 'authz-low',
       }, {
@@ -212,7 +217,7 @@ describe('ZAP adapter', () => {
     try {
       const adapter = new ZapEngineAdapter({ baseUrl: zap.base, spiderEnabled: false, ajaxSpiderEnabled: false });
       const runId = await adapter.start({
-        runId: 'run-bearer', targets: ['http://target.test/api'], attackStrength: 'Medium',
+        runId: 'run-bearer', targets: ['http://target.test/api'], attackStrength: 'Medium', alertThreshold: 'Medium',
         leasedLimits: { maxRequests: 20, maxPages: 5, maxDurationMinutes: 1, maxConcurrency: 1, requestsPerSecond: 1 },
         authorizationRef: 'authz-bearer', requestSeedCount: 1,
       }, {
@@ -246,7 +251,7 @@ describe('ZAP adapter', () => {
     try {
       const adapter = new ZapEngineAdapter({ baseUrl: zap.base, spiderEnabled: false, ajaxSpiderEnabled: false });
       const runId = await adapter.start({
-        runId: 'run-auth-probe', targets: ['http://target.test/a'], attackStrength: 'Medium',
+        runId: 'run-auth-probe', targets: ['http://target.test/a'], attackStrength: 'Medium', alertThreshold: 'Medium',
         leasedLimits: { maxRequests: 20, maxPages: 5, maxDurationMinutes: 1, maxConcurrency: 1, requestsPerSecond: 1 },
         authorizationRef: 'authz-auth-probe', requestSeedCount: 1,
       }, {
@@ -266,7 +271,7 @@ describe('ZAP adapter', () => {
     try {
       const adapter = new ZapEngineAdapter({ baseUrl: zap.base, spiderEnabled: false, ajaxSpiderEnabled: false });
       await adapter.start({
-        runId: 'run-bodies', targets: ['http://target.test/api', 'http://target.test/upload'], attackStrength: 'Medium',
+        runId: 'run-bodies', targets: ['http://target.test/api', 'http://target.test/upload'], attackStrength: 'Medium', alertThreshold: 'Medium',
         leasedLimits: { maxRequests: 100, maxPages: 10, maxDurationMinutes: 5, maxConcurrency: 1, requestsPerSecond: 1 },
         authorizationRef: 'authz-bodies', requestSeedCount: 2,
       }, {
@@ -298,7 +303,7 @@ describe('ZAP adapter', () => {
     try {
       const adapter = new ZapEngineAdapter({ baseUrl: zap.base, spiderEnabled: false, ajaxSpiderEnabled: false });
       await adapter.start({
-        runId: 'run-post-bodies', targets: ['http://target.test/cryptography/index.php'], attackStrength: 'Medium',
+        runId: 'run-post-bodies', targets: ['http://target.test/cryptography/index.php'], attackStrength: 'Medium', alertThreshold: 'Medium',
         leasedLimits: { maxRequests: 100, maxPages: 10, maxDurationMinutes: 5, maxConcurrency: 1, requestsPerSecond: 1 },
         authorizationRef: 'authz-post-bodies', requestSeedCount: 2,
       }, {

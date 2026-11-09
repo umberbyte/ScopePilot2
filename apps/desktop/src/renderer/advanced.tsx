@@ -1,6 +1,6 @@
 /**
  * Advanced モード画面。`docs/detailed-design/02-ui-information-architecture.md` §3。
- * A01〜A13 のナビは packages/ui の advancedNavItems (権限で隠す規則は mode-policy と同一)。
+ * Advanced ナビは packages/ui の advancedNavItems (権限で隠す規則は mode-policy と同一)。
  * まず読取系の A01 Dashboard / Case と A12 Jobs / Evidence / Audit を実装し、
  * 他画面は「未実装」プレースホルダで明示する (空画面にしない)。
  * 編集系 (crawl 計画・テンプレート選択など) は後続増分で、API は読取 endpoint のみ使う。
@@ -18,6 +18,8 @@ import { ProxyInterceptScreen } from './proxy-intercept-screen.tsx';
 import { RepeaterScreen } from './repeater-screen.tsx';
 import { FuzzerScreen } from './fuzzer-screen.tsx';
 import { SessionsScreen } from './sessions-screen.tsx';
+import { ActiveScanScreen } from './active-scan-screen.tsx';
+import { ScanPolicyScreen } from './scan-policy-screen.tsx';
 
 /** ローカル desktop operator。operator 照会 API は後続増分で追加する。 */
 const OPERATOR_PERMISSIONS: readonly OperatorPermission[] = ['case.manage', 'case.read', 'run.manage', 'finding.confirm', 'report.export'];
@@ -1188,6 +1190,8 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {activeRoute === 'advanced.scope' && <ScopeAuthorizationScreen apiBase={apiBase} />}
         {activeRoute === 'findings' && <FindingsOrganizerScreen apiBase={apiBase} />}
         {activeRoute === 'scan-plans' && <ScanPlansScreen apiBase={apiBase} />}
+        {activeRoute === 'advanced.active-scan' && <ActiveScanScreen apiBase={apiBase} />}
+        {activeRoute === 'advanced.scan-policy' && <ScanPolicyScreen apiBase={apiBase} />}
         {activeRoute === 'browser.site-map' && <SiteMapScreen apiBase={apiBase} />}
         {activeRoute === 'advanced.guidelines' && <GuidelinesCatalogScreen apiBase={apiBase} />}
         {activeRoute === 'proxy.intercept' && <ProxyInterceptScreen apiBase={apiBase} />}
@@ -1196,7 +1200,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {activeRoute === 'advanced.sessions' && <SessionsScreen apiBase={apiBase} />}
         {activeRoute === 'decoder' && <DecoderComparerScreen apiBase={apiBase} />}
         {activeRoute === 'settings' && <SettingsScreen apiBase={apiBase} />}
-        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'advanced.sessions' && (
+        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'advanced.active-scan' && activeRoute !== 'advanced.scan-policy' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'advanced.sessions' && (
           <Text className={styles.muted}>{t('common.unimplemented')}</Text>
         )}
       </div>

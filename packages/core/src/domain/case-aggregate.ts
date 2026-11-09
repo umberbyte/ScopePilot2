@@ -80,6 +80,16 @@ export class CaseAggregate {
     return [...this.activeConfirmations.keys()];
   }
 
+  /** scope 以外の plan 入力 (診断ポリシー等) が変わった場合の明示的な失効。 */
+  invalidateActiveConfirmations(reason: string): readonly string[] {
+    const invalidated = [...this.activeConfirmations.keys()];
+    for (const confirmationId of invalidated) {
+      this.activeConfirmations.delete(confirmationId);
+      this.invalidatedConfirmations.set(confirmationId, reason);
+    }
+    return invalidated;
+  }
+
   /** scope 更新。expectedRevision が不一致なら state を変えず Conflict。 */
   updateScope(input: { expectedRevision: number; scope: CaseScope }): ScopeUpdateOutcome {
     if (input.expectedRevision !== this.current.revision) {

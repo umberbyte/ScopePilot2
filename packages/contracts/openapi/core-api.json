@@ -199,6 +199,95 @@
         }
       }
     },
+    "/api/candidates": {
+      "get": {
+        "operationId": "listScanCandidates",
+        "summary": "A40 の診断候補一覧 (観測済み候補のみ)",
+        "responses": {
+          "200": {
+            "description": "scan candidates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["candidates"],
+                  "properties": {
+                    "candidates": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ScanCandidate" }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/scan-policies": {
+      "get": {
+        "operationId": "listScanPolicies",
+        "summary": "案件の診断ポリシー一覧",
+        "responses": {
+          "200": {
+            "description": "scan policies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["policies"],
+                  "properties": {
+                    "policies": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ScanPolicy" }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "operationId": "saveScanPolicy",
+        "summary": "revision guard 付き診断ポリシー保存 (変更時は既存確認を失効)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/SaveScanPolicyRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "saved scan policy and invalidated confirmations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["policy", "changed", "invalidatedConfirmationIds"],
+                  "properties": {
+                    "policy": { "$ref": "#/components/schemas/ScanPolicy" },
+                    "changed": { "type": "boolean" },
+                    "invalidatedConfirmationIds": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/api/candidates/adopt": {
       "post": {
         "operationId": "adoptScanCandidates",
@@ -5575,6 +5664,11 @@
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"
           },
+          "scanPolicyHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "A40/A43 で選択した診断ポリシーの内容 hash。plan hash の一部。"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -5781,6 +5875,32 @@
             "type": "boolean",
             "default": false,
             "description": "Add target-aware generic HTTP diagnostics to the confirmed plan."
+          },
+          "scanPolicyId": {
+            "type": "string",
+            "description": "A43 で保存した案件ポリシー。指定時は legacy enable* より優先する。"
+          },
+          "scanPolicyHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "画面表示時の policy hash。現在値と違えば 409。"
+          },
+          "targetRole": {
+            "type": "string"
+          },
+          "guidelines": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "routeOverrides": {
+            "type": "object",
+            "description": "ポリシーで有効な経路をこの計画だけ外す。無効経路の追加には使わない。",
+            "properties": {
+              "zap": { "type": "boolean" },
+              "genericHttp": { "type": "boolean" },
+              "nuclei": { "type": "boolean" }
+            },
+            "additionalProperties": false
           },
           "limits": {
             "type": "object",
@@ -6280,6 +6400,95 @@
           "High"
         ]
       },
+      "ScanAlertThreshold": {
+        "enum": ["Off", "Default", "Low", "Medium", "High"]
+      },
+      "GenericHttpCheckId": {
+        "enum": [
+          "security-headers",
+          "cookie-security",
+          "cors-policy",
+          "error-disclosure",
+          "dom-source-sink",
+          "reflected-input",
+          "sql-error",
+          "open-redirect",
+          "path-traversal"
+        ]
+      },
+      "ScanPolicyRoutes": {
+        "type": "object",
+        "required": ["zap", "genericHttp", "nuclei"],
+        "properties": {
+          "zap": {
+            "type": "object",
+            "required": ["enabled", "attackStrength", "alertThreshold"],
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "attackStrength": { "$ref": "#/components/schemas/ScanAttackStrength" },
+              "alertThreshold": { "$ref": "#/components/schemas/ScanAlertThreshold" }
+            },
+            "additionalProperties": false,
+            "description": "ZAP policy 全体の設定。rule/plugin ID 単位の設定は契約に含めない。"
+          },
+          "genericHttp": {
+            "type": "object",
+            "required": ["enabled", "checkIds"],
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "checkIds": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/GenericHttpCheckId" },
+                "uniqueItems": true
+              }
+            },
+            "additionalProperties": false
+          },
+          "nuclei": {
+            "type": "object",
+            "required": ["enabled", "templateIds"],
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "templateIds": {
+                "type": "array",
+                "items": { "type": "string" },
+                "uniqueItems": true,
+                "description": "空配列は審査済み HTTP manifest の全 template。"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScanPolicy": {
+        "type": "object",
+        "required": ["schemaVersion", "policyId", "caseId", "name", "revision", "isDefault", "routes", "policyHash", "updatedAt"],
+        "properties": {
+          "schemaVersion": { "const": "scopepilot2.scan-policy.v1" },
+          "policyId": { "type": "string" },
+          "caseId": { "type": "string" },
+          "name": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 1 },
+          "isDefault": { "type": "boolean" },
+          "routes": { "$ref": "#/components/schemas/ScanPolicyRoutes" },
+          "policyHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "SaveScanPolicyRequest": {
+        "type": "object",
+        "required": ["expectedRevision", "name", "isDefault", "routes"],
+        "properties": {
+          "expectedRevision": { "type": "integer", "minimum": 0 },
+          "policyId": { "type": "string" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "isDefault": { "type": "boolean" },
+          "routes": { "$ref": "#/components/schemas/ScanPolicyRoutes" }
+        },
+        "additionalProperties": false
+      },
       "ActiveScanRequest": {
         "type": "object",
         "description": "ScopePilot から外部 engine へ渡す入力 (Delegated)。個々の送信は傍受・拒否しない。",
@@ -6287,6 +6496,7 @@
           "runId",
           "targets",
           "attackStrength",
+          "alertThreshold",
           "leasedLimits",
           "authorizationRef"
         ],
@@ -6302,6 +6512,9 @@
           },
           "attackStrength": {
             "$ref": "#/components/schemas/ScanAttackStrength"
+          },
+          "alertThreshold": {
+            "$ref": "#/components/schemas/ScanAlertThreshold"
           },
           "leasedLimits": {
             "$ref": "#/components/schemas/PlanLimits"

@@ -60,6 +60,7 @@ export function planHashOf(plan: ExecutionPlan): string {
     limits: plan.limits,
     runtimeBundleHash: plan.runtimeBundleHash,
     inputEvidenceHash: plan.inputEvidenceHash,
+    ...(plan.scanPolicyHash === undefined ? {} : { scanPolicyHash: plan.scanPolicyHash }),
   };
   return hashStable(PLAN_HASH_NAMESPACE, input);
 }
@@ -154,6 +155,7 @@ export interface BuildPlanInput {
   readonly limits: PlanLimits;
   readonly runtimeBundleHash: string;
   readonly inputEvidenceHash: string;
+  readonly scanPolicyHash?: string;
   readonly createdAt: string;
 }
 
@@ -180,6 +182,7 @@ export function buildPlan(input: BuildPlanInput): ExecutionPlan {
     limits: input.limits,
     runtimeBundleHash: input.runtimeBundleHash,
     inputEvidenceHash: input.inputEvidenceHash,
+    ...(input.scanPolicyHash === undefined ? {} : { scanPolicyHash: input.scanPolicyHash }),
     createdAt: input.createdAt,
   };
 }

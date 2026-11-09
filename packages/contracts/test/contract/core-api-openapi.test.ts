@@ -17,6 +17,8 @@ import {
   PlanStepKinds,
   RunStates,
   ScanAttackStrengths,
+  ScanAlertThresholds,
+  GenericHttpCheckIds,
   StopReasons,
 } from '../../src/index.ts';
 
@@ -152,6 +154,8 @@ describe('Core API OpenAPI 契約', () => {
     assert.deepEqual(schemaEnum(spec, 'CandidateCategory'), [...CandidateCategories]);
     assert.deepEqual(schemaEnum(spec, 'FormClassification'), [...FormClassifications]);
     assert.deepEqual(schemaEnum(spec, 'ScanAttackStrength'), [...ScanAttackStrengths]);
+    assert.deepEqual(schemaEnum(spec, 'ScanAlertThreshold'), [...ScanAlertThresholds]);
+    assert.deepEqual(schemaEnum(spec, 'GenericHttpCheckId'), [...GenericHttpCheckIds]);
     assert.deepEqual(schemaEnum(spec, 'ControlAspect'), [...ControlAspects]);
     assert.deepEqual(schemaEnum(spec, 'ApiErrorCode'), [
       ...DomainErrorCodes,

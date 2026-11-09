@@ -169,6 +169,16 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         if (body.enableWorkflowScan !== undefined && typeof body.enableWorkflowScan !== 'boolean') {
           throw new DomainError('ValidationFailed', 'enableWorkflowScan must be boolean');
         }
+        const routeOverridesValue = body.routeOverrides;
+        if (routeOverridesValue !== undefined && (typeof routeOverridesValue !== 'object' || routeOverridesValue === null || Array.isArray(routeOverridesValue))) {
+          throw new DomainError('ValidationFailed', 'routeOverrides must be an object');
+        }
+        const routeOverrides = routeOverridesValue as Record<string, unknown> | undefined;
+        for (const [name, value] of Object.entries(routeOverrides ?? {})) {
+          if (!['zap', 'genericHttp', 'nuclei'].includes(name) || typeof value !== 'boolean') {
+            throw new DomainError('ValidationFailed', `invalid route override: ${name}`);
+          }
+        }
         const result = service.buildActiveScanPlan(
           operator,
           stringArrayField(body, 'targets'),
@@ -177,10 +187,69 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
             includeNuclei: body.enableNuclei === true,
             includeWorkflowScan: body.enableWorkflowScan === true,
             guidelines: body.guidelines === undefined ? [] : stringArrayField(body, 'guidelines'),
+            ...(typeof body.scanPolicyId === 'string' ? { scanPolicyId: stringField(body, 'scanPolicyId') } : {}),
+            ...(typeof body.scanPolicyHash === 'string' ? { scanPolicyHash: stringField(body, 'scanPolicyHash') } : {}),
+            ...(routeOverrides === undefined ? {} : {
+              routeOverrides: {
+                ...(typeof routeOverrides.zap === 'boolean' ? { zap: routeOverrides.zap } : {}),
+                ...(typeof routeOverrides.genericHttp === 'boolean' ? { genericHttp: routeOverrides.genericHttp } : {}),
+                ...(typeof routeOverrides.nuclei === 'boolean' ? { nuclei: routeOverrides.nuclei } : {}),
+              },
+            }),
+            ...(typeof body.targetRole === 'string' ? { targetRole: stringField(body, 'targetRole') } : {}),
           },
         );
         service.authorizePlan(result.plan);
         return respondJson(response, 200, { plan: result.plan, planHash: result.planHash });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'GET /api/candidates') {
+      return respondJson(response, 200, { candidates: service.listScanCandidates(operator) });
+    }
+    if (route === 'GET /api/scan-policies') {
+      try {
+        return respondJson(response, 200, { policies: service.listScanPolicies(operator) });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/scan-policies') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) return;
+      try {
+        const routesValue = body.routes;
+        if (typeof routesValue !== 'object' || routesValue === null || Array.isArray(routesValue)) {
+          throw new DomainError('ValidationFailed', 'routes must be an object');
+        }
+        const routes = routesValue as Record<string, unknown>;
+        const zap = structField(routes, 'zap');
+        const genericHttp = structField(routes, 'genericHttp');
+        const nuclei = structField(routes, 'nuclei');
+        if ('ruleIds' in zap || 'rules' in zap || 'pluginIds' in zap) {
+          throw new DomainError('ValidationFailed', 'ZAP per-rule-ID strength/threshold is not supported');
+        }
+        const attackStrength = stringField(zap, 'attackStrength');
+        if (attackStrength !== 'Low' && attackStrength !== 'Medium' && attackStrength !== 'High') {
+          throw new DomainError('ValidationFailed', 'invalid ZAP attackStrength');
+        }
+        const alertThreshold = stringField(zap, 'alertThreshold');
+        if (!['Off', 'Default', 'Low', 'Medium', 'High'].includes(alertThreshold)) {
+          throw new DomainError('ValidationFailed', 'invalid ZAP alertThreshold');
+        }
+        const result = service.saveScanPolicy(operator, {
+          expectedRevision: numberField(body, 'expectedRevision'),
+          ...(typeof body.policyId === 'string' ? { policyId: stringField(body, 'policyId') } : {}),
+          name: stringField(body, 'name'),
+          isDefault: body.isDefault === true,
+          routes: {
+            zap: { enabled: zap.enabled === true, attackStrength, alertThreshold: alertThreshold as import('@scopepilot2/contracts').ScanAlertThreshold },
+            genericHttp: { enabled: genericHttp.enabled === true, checkIds: stringArrayField(genericHttp, 'checkIds') as import('@scopepilot2/contracts').GenericHttpCheckId[] },
+            nuclei: { enabled: nuclei.enabled === true, templateIds: stringArrayField(nuclei, 'templateIds') },
+          },
+        });
+        return respondJson(response, 200, result);
       } catch (cause) {
         return respondDomainError(response, cause);
       }

@@ -1,5 +1,6 @@
 /** 能動診断の engine 入出力。`docs/design/10-active-scan.md`、`docs/detailed-design/f11-active-scan.md`。 */
 import type { PlanLimits } from '../plan/plan.ts';
+import type { ScanAlertThreshold } from './scan-policy.ts';
 
 export const ScanAttackStrengths = ['Low', 'Medium', 'High'] as const;
 
@@ -10,6 +11,8 @@ export interface ActiveScanRequest {
   readonly runId: string;
   readonly targets: readonly string[];
   readonly attackStrength: ScanAttackStrength;
+  /** ZAP policy 全体の閾値。個別 rule ID ごとの上書きは行わない。 */
+  readonly alertThreshold: ScanAlertThreshold;
   readonly leasedLimits: PlanLimits;
   readonly authorizationRef: string;
   /**
