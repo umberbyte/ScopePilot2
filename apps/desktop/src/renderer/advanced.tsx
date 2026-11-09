@@ -14,6 +14,8 @@ import { GuidelinesCatalogScreen } from './guidelines-catalog.tsx';
 import { t } from './resources.ts';
 import { SettingsScreen } from './settings-screen.tsx';
 import { DecoderComparerScreen } from './decoder-comparer-screen.tsx';
+import { DecoderScreen } from './decoder-screen.tsx';
+import { ComparerScreen } from './comparer-screen.tsx';
 import { ProxyInterceptScreen } from './proxy-intercept-screen.tsx';
 import { RepeaterScreen } from './repeater-screen.tsx';
 import { FuzzerScreen } from './fuzzer-screen.tsx';
@@ -1195,8 +1197,10 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {activeRoute === 'fuzzer' && <FuzzerScreen apiBase={apiBase} />}
         {activeRoute === 'advanced.sessions' && <SessionsScreen apiBase={apiBase} />}
         {activeRoute === 'decoder' && <DecoderComparerScreen apiBase={apiBase} />}
+        {activeRoute === 'adv.tools.decoder' && <DecoderScreen apiBase={apiBase} />}
+        {activeRoute === 'adv.tools.comparer' && <ComparerScreen apiBase={apiBase} />}
         {activeRoute === 'settings' && <SettingsScreen apiBase={apiBase} />}
-        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'advanced.sessions' && (
+        {activeRoute !== 'adv.tools.decoder' && activeRoute !== 'adv.tools.comparer' && activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'advanced.sessions' && (
           <Text className={styles.muted}>{t('common.unimplemented')}</Text>
         )}
       </div>

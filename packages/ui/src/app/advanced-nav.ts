@@ -32,6 +32,8 @@ const ADVANCED_SCREENS: readonly AdvancedScreen[] = [
   { screenId: 'A08', route: 'scan-plans', label: 'Scan plans' },
   { screenId: 'A09', route: 'advanced.sessions', label: 'Sessions / Roles / Business logic' },
   { screenId: 'A10', route: 'decoder', label: 'Decoder / Comparer / Sequencer' },
+  { screenId: 'A50', route: 'adv.tools.decoder', label: 'Decoder' },
+  { screenId: 'A51', route: 'adv.tools.comparer', label: 'Comparer' },
   { screenId: 'A11', route: 'findings', label: 'Findings / Organizer / Report' },
   { screenId: 'A12', route: 'advanced.jobs', label: 'Jobs / Evidence / Audit' },
   { screenId: 'A13', route: 'settings', label: 'Settings / Certificates / Engines / AI' },

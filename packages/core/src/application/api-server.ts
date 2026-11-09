@@ -12,7 +12,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { JobEvent, ScanExecutionStatus } from '@scopepilot2/contracts';
 import { DomainError, DocumentAuthMethods, JobEventCategories, JobKinds, JobStates, hashStable, type DocumentAuthMethod, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
 import type { BaselineFlowService } from './baseline-flow.ts';
-import { CodecRegistry, compareText, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
+import { CodecRegistry, compareText, compareBinaryRows, fingerprintBytes, parseComparisonHex, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
 import type { LoginFlowStep } from '../domain/authentication-session.ts';
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -803,6 +803,23 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
           ...(hasCvss ? { cvss: { version: cvssVersion as '3.1' | '4.0', vector: cvssVector, score: cvssScore } } : {}),
         });
         return respondJson(response, 200, { finding });
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (route === 'POST /api/tools/hash' || route === 'POST /api/tools/compare-binary') {
+      const body = await readJsonBody(request, response, 5 * 1024 * 1024);
+      if (body === undefined) return;
+      try {
+        if (!operator.permissions.includes('case.read')) {
+          return respondError(response, 403, 'PermissionDenied', 'analysis tools require case.read', false);
+        }
+        if (route === 'POST /api/tools/hash') {
+          const input = Buffer.from(stringField(body, 'inputText'), 'utf8');
+          if (input.length > 1024 * 1024) throw new DomainError('ValidationFailed', 'hash input exceeds 1 MiB');
+          return respondJson(response, 200, fingerprintBytes(input));
+        }
+        return respondJson(response, 200, compareBinaryRows(parseComparisonHex(stringField(body, 'left')), parseComparisonHex(stringField(body, 'right')), body.offset === undefined ? 0 : numberField(body, 'offset')));
       } catch (cause) {
         return respondDomainError(response, cause);
       }

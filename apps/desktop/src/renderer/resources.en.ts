@@ -5,6 +5,22 @@
 import type { StringKey } from './resources.ja.ts';
 
 export const enStrings: Readonly<Record<StringKey, string>> = {
+  "tools.decoderPurpose": "Decode text through an ordered codec chain and calculate fingerprints.",
+  "tools.comparerPurpose": "Compare two inputs as text lines or hexadecimal bytes.",
+  "tools.noTraffic": "No target traffic. Processing stays in the local Core.",
+  "tools.hash": "Calculate input fingerprints",
+  "tools.fingerprintOnly": "SHA-256 / MD5 identify input fingerprints; they do not assess cryptographic security.",
+  "tools.lineDiff": "Line differences",
+  "tools.compareMode": "Comparison format",
+  "tools.textMode": "Text (line differences)",
+  "tools.hexMode": "Bytes (hexadecimal input)",
+  "tools.hexHint": "For bytes, enter complete hexadecimal pairs; whitespace is allowed. Maximum 1 MiB per input; differences are displayed in 64 KiB ranges.",
+  "tools.byteSummary": "Left {left} bytes / right {right} bytes. First difference offset: {offset}.",
+  "tools.truncated": "There are {count} differing rows in total, including differences outside this 64 KiB range.",
+  "tools.range": "Showing 64 KiB from offset {offset}",
+  "tools.previousRange": "Previous 64 KiB",
+  "tools.nextRange": "Next 64 KiB",
+  "tools.offset": "Byte offset (zero-based)",
   'app.settings': 'Settings',
   'app.mode.label': 'Mode:',
   'app.mode.simple': 'Simple',

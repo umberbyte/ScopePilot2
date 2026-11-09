@@ -20,6 +20,8 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'GET', path: '/api/observations', operationId: 'listObservations' },
   { method: 'POST', path: '/api/findings/status', operationId: 'updateFindingStatus' },
   { method: 'POST', path: '/api/report', operationId: 'generateReport' },
+  { method: 'POST', path: '/api/tools/hash', operationId: 'hashToolInput' },
+  { method: 'POST', path: '/api/tools/compare-binary', operationId: 'compareBinaryInput' },
   { method: 'POST', path: '/api/tools/decode', operationId: 'decodeWithCodecs' },
   { method: 'POST', path: '/api/tools/compare-text', operationId: 'compareTexts' },
   { method: 'GET', path: '/api/proxy/intercept', operationId: 'listBreakItems' },
