@@ -109,4 +109,53 @@ export class ZapProxyAdapter implements ProxyListenerPort {
     const fingerprint = createHash('sha256').update(Buffer.from(derBase64, 'base64')).digest('hex');
     return { pem, sha256Fingerprint: fingerprint };
   }
+
+  /**
+   * Intercept (break) 制御。ZAP の break API。
+   * 実装は後続増分で、現在は基本構造のみ。
+   */
+  async setBreakpoints(options: { readonly requests: boolean; readonly responses: boolean; readonly urlPattern?: string }): Promise<void> {
+    // ZAP break API: /JSON/break/action/break
+    // type: http-all, http-request, http-response
+    // state: true/false
+    // scope: urlPattern (optional)
+    // 実装は ZAP API の実挙動確認後に接続する (design/f02 §3)。
+    const breakType = options.requests && options.responses ? 'http-all' : options.requests ? 'http-request' : options.responses ? 'http-response' : '';
+    if (breakType === '') {
+      await this.apiText('/JSON/break/action/break', { type: 'http-all', state: 'false' });
+      return;
+    }
+    const params: Record<string, string> = { type: breakType, state: 'true' };
+    if (options.urlPattern !== undefined && options.urlPattern !== '') {
+      params['scope'] = options.urlPattern;
+    }
+    await this.apiText('/JSON/break/action/break', params);
+  }
+
+  /**
+   * 保持中の break message を取得。未実装 (後続増分)。
+   */
+  async getBreakMessage(): Promise<{ readonly messageId: string; readonly request: string; readonly response?: string } | null> {
+    // ZAP break API: /JSON/break/view/httpMessage
+    // 実装は ZAP API の実挙動確認後に接続する (design/f02 §3)。
+    throw new Error('Break message retrieval not yet implemented (pending ZAP API fixture verification)');
+  }
+
+  /**
+   * 保持中 message を編集して転送。未実装 (後続増分)。
+   */
+  async continueBreak(messageId: string, editedRequest?: string): Promise<void> {
+    // ZAP break API: /JSON/break/action/continue, setHttpMessage (if edited)
+    // 実装は ZAP API の実挙動確認後に接続する (design/f02 §3)。
+    throw new Error('Break continue not yet implemented (pending ZAP API fixture verification)');
+  }
+
+  /**
+   * 保持中 message を破棄 (drop)。未実装 (後続増分)。
+   */
+  async dropBreak(messageId: string): Promise<void> {
+    // ZAP break API: /JSON/break/action/drop
+    // 実装は ZAP API の実挙動確認後に接続する (design/f02 §3)。
+    throw new Error('Break drop not yet implemented (pending ZAP API fixture verification)');
+  }
 }
