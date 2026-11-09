@@ -232,7 +232,10 @@ function queryInputs(target: URL, points: readonly RequestInputPoint[]): readonl
 }
 
 function checkSecurityHeaders(state: CheckState, target: URL, response: WorkflowScanHttpResponse): void {
-  if (!state.enabled.has('security-headers') || !/text\/html/i.test(response.contentType)) return;
+  // Error documents frequently come from a different framework/proxy path than the
+  // requested application resource. Reporting their missing browser headers creates
+  // one finding for every dead SPA route and says nothing about the live page.
+  if (!state.enabled.has('security-headers') || response.status >= 400 || !/text\/html/i.test(response.contentType)) return;
   const missing: string[] = [];
   const csp = header(response, 'content-security-policy');
   if (csp === '') missing.push('Content-Security-Policy');
@@ -401,9 +404,20 @@ export async function runWorkflowScan(options: WorkflowScanOptions, transport: W
     }
     progress(`汎用HTTP診断: ${target.toString()}`);
     const baseline = await request(state, { method: 'GET', path: requestPath(target) });
+    checkPassiveBody(state, target, baseline);
+    if (baseline.status >= 400) {
+      // Keep error-disclosure observation above, but do not mutate or classify an
+      // unavailable endpoint as though it were an application page. The skip notes
+      // remain in evidence so coverage cannot be mistaken for a clean result.
+      for (const checkId of enabled) {
+        if (checkId !== 'error-disclosure') {
+          skip(state, checkId, target.toString(), `基準応答が HTTP ${String(baseline.status)} のため、有効な対象として診断しません`);
+        }
+      }
+      continue;
+    }
     checkSecurityHeaders(state, target, baseline);
     checkCookies(state, target, baseline);
-    checkPassiveBody(state, target, baseline);
     await checkCors(state, target);
     for (const point of queryInputs(target, input.inputPoints ?? [])) await checkInput(state, target, point, baseline);
   }

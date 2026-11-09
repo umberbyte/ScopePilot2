@@ -19,10 +19,12 @@ import { NodeWorkflowScanTransport } from '../src/workflow-scan-transport.ts';
 describe('Generic HTTP diagnostics', () => {
   let server: Server | undefined;
   let baseUrl = '';
+  let lastAuthorization = '';
 
   before(async () => {
     server = createServer((request, response) => {
       const target = new URL(request.url ?? '/', 'http://fixture.invalid');
+      lastAuthorization = request.headers.authorization ?? '';
       const origin = request.headers.origin;
       if (typeof origin === 'string') {
         response.setHeader('Access-Control-Allow-Origin', origin);
@@ -30,6 +32,11 @@ describe('Generic HTTP diagnostics', () => {
       }
       response.setHeader('Content-Type', 'text/html; charset=utf-8');
       response.setHeader('Set-Cookie', 'fixture_session=opaque');
+      if (target.pathname === '/missing-spa-route') {
+        response.statusCode = 404;
+        response.end('<html><body>not found</body></html>');
+        return;
+      }
       if (target.pathname === '/go') {
         response.statusCode = 302;
         response.setHeader('Location', target.searchParams.get('next') ?? '/');
@@ -97,6 +104,30 @@ describe('Generic HTTP diagnostics', () => {
     assert.equal(result.checks.length, 0);
     assert.equal(result.skips.length, WORKFLOW_SCAN_CHECK_IDS.length);
     assert.ok(result.skips.every((entry) => entry.note.includes('元本文値を保存していない')));
+  });
+
+  test('applies an in-memory Authorization header without exposing it in request evidence', async () => {
+    const transport = new NodeWorkflowScanTransport({
+      baseUrl,
+      maxRequests: 2,
+      sessionHeaders: [{ name: 'Authorization', value: 'Bearer workflow-memory-secret' }],
+      redactionValues: ['Bearer workflow-memory-secret'],
+    });
+    await transport.request({ method: 'GET', path: '/authenticated' });
+    assert.equal(lastAuthorization, 'Bearer workflow-memory-secret');
+    assert.equal(JSON.stringify(transport.takeRequestLog()).includes('workflow-memory-secret'), false);
+  });
+
+  test('does not report missing headers or mutate a dead SPA route', async () => {
+    const transport = new NodeWorkflowScanTransport({ baseUrl, maxRequests: 20 });
+    const result = await runWorkflowScan({
+      baseUrl,
+      targets: [{ url: `${baseUrl}/missing-spa-route?q=value`, method: 'GET', inputPoints: [{ name: 'q', location: 'query', type: 'text' }] }],
+    }, transport);
+    assert.equal(result.requestCount, 1);
+    assert.equal(result.checks.length, 0);
+    assert.ok(result.skips.some((entry) => entry.checkId === 'security-headers' && entry.note.includes('HTTP 404')));
+    assert.ok(result.skips.some((entry) => entry.checkId === 'reflected-input' && entry.note.includes('HTTP 404')));
   });
 
   test('DS-221 selects only applicable generic HTTP checks', () => {

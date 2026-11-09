@@ -86,7 +86,20 @@ describe('探索: 応答内容トラックと API 仕様候補の合成', () => 
         servers: [{ url: 'http://fixture.target.test' }],
         paths: {
           '/api/Feedbacks': {
-            post: { responses: { 200: { description: 'ok' } } },
+            post: {
+              parameters: [{ name: 'preview', in: 'query', schema: { type: 'boolean' } }],
+              requestBody: {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: { comment: { type: 'string' }, rating: { type: 'integer' } },
+                    },
+                  },
+                },
+              },
+              responses: { 200: { description: 'ok' } },
+            },
             get: { responses: { 200: { description: 'ok' } } },
           },
           '/api/Orders/{id}': {
@@ -102,6 +115,13 @@ describe('探索: 応答内容トラックと API 仕様候補の合成', () => 
     assert.equal(post.category, 'api-endpoint');
     assert.deepEqual(post.guidelineBasis, ['api-spec:owned-spec']);
     assert.ok(post.diagnosticTracks !== undefined && post.diagnosticTracks.length > 0);
+    assert.ok(post.diagnosticTracks.includes('zap-active'), '入力点付き仕様候補は能動診断へ渡せる');
+    assert.equal(post.contentType, 'application/json');
+    assert.deepEqual(post.inputPoints, [
+      { name: 'preview', location: 'query', type: 'boolean' },
+      { name: 'comment', location: 'body', type: 'string' },
+      { name: 'rating', location: 'body', type: 'integer' },
+    ]);
 
     // path template ({id}) は具体値がないため対象外。
     assert.ok(!run.candidates.some((candidate) => candidate.url.includes('{id}')));

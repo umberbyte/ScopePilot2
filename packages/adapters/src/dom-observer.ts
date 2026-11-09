@@ -7,6 +7,7 @@ const DEFAULT_SETTLE_MS = 250;
 export interface DomObservationRunnerInput {
   readonly targetUrl: string;
   readonly scope: Parameters<DomObservationPort['observe']>[0]['scope'];
+  readonly browserSession?: Parameters<DomObservationPort['observe']>[0]['browserSession'];
   readonly sessionCookies?: Parameters<DomObservationPort['observe']>[0]['sessionCookies'];
   readonly instrumentationScript: string;
   readonly maxEvents: number;
@@ -129,15 +130,29 @@ function validEvents(value: unknown, maxEvents: number): readonly { api: string;
 export const runPlaywrightDomObservation: DomObservationRunner = async (input) => {
   const playwright = await import('playwright');
   const browser = await playwright.chromium.launch();
-  const context = await browser.newContext();
+  const context = await browser.newContext({ serviceWorkers: 'block' });
   try {
-    if (input.sessionCookies !== undefined && input.sessionCookies.length > 0) {
-      await context.addCookies(input.sessionCookies.map((cookie) => ({
+    const sessionCookies = input.browserSession?.cookies ?? input.sessionCookies ?? [];
+    if (sessionCookies.length > 0) {
+      await context.addCookies(sessionCookies.map((cookie) => ({
         name: cookie.name,
         value: cookie.value,
         domain: cookie.domain,
         path: cookie.path,
+        ...(cookie.expires === undefined ? {} : { expires: cookie.expires }),
+        ...(cookie.httpOnly === undefined ? {} : { httpOnly: cookie.httpOnly }),
+        ...(cookie.secure === undefined ? {} : { secure: cookie.secure }),
+        ...(cookie.sameSite === undefined ? {} : { sameSite: cookie.sameSite }),
       })));
+    }
+    const sessionOrigins = input.browserSession?.origins ?? [];
+    if (sessionOrigins.length > 0) {
+      await context.addInitScript((origins) => {
+        const state = origins.find((candidate) => candidate.origin === globalThis.location.origin);
+        if (state === undefined) return;
+        for (const entry of state.localStorage) globalThis.localStorage.setItem(entry.name, entry.value);
+        for (const entry of state.sessionStorage) globalThis.sessionStorage.setItem(entry.name, entry.value);
+      }, sessionOrigins);
     }
     const page = await context.newPage();
     await page.addInitScript({ content: input.instrumentationScript });

@@ -1,4 +1,4 @@
-import type { ActiveScanEnginePort, ActiveScanExecutionContext, LoginSessionCookie } from '@scopepilot2/core';
+import type { ActiveScanEnginePort, ActiveScanExecutionContext, BrowserSessionHeader, LoginSessionCookie } from '@scopepilot2/core';
 import type { ActiveScanRequest, EngineAlert, EngineProgress, RequestInputPoint } from '@scopepilot2/contracts';
 
 export interface ZapAdapterOptions {
@@ -72,6 +72,8 @@ interface ZapRun {
   readonly scanIds: readonly string[];
   readonly baselineAlertIds: ReadonlySet<string>;
   readonly emittedAlertIds: Set<string>;
+  readonly replacerRuleDescriptions: readonly string[];
+  headersCleaned: boolean;
 }
 
 interface ZapSendRequestResponse {
@@ -117,6 +119,16 @@ function boundedHttpComponent(value: string | undefined): string | undefined {
   if (value === undefined || value === '') return undefined;
   if (value.length <= MAX_HTTP_COMPONENT_CHARS) return value;
   return `${value.slice(0, MAX_HTTP_COMPONENT_CHARS)}\r\n[ScopePilot2: component truncated after ${String(MAX_HTTP_COMPONENT_CHARS)} characters]`;
+}
+
+/** ZAP history is local engine state, but report/evidence projections must never retain credentials. */
+function redactHttpHeaderSecrets(value: string | undefined): string | undefined {
+  const bounded = boundedHttpComponent(value);
+  if (bounded === undefined) return undefined;
+  return bounded
+    .replace(/^(Authorization|Proxy-Authorization):[^\r\n]*$/gimu, '$1: [REDACTED]')
+    .replace(/^(Cookie):[^\r\n]*$/gimu, '$1: [REDACTED]')
+    .replace(/^(Set-Cookie:\s*[^=;\r\n]+=)[^;\r\n]*/gimu, '$1[REDACTED]');
 }
 
 function escapeRegex(value: string): string {
@@ -225,17 +237,24 @@ function seedBody(seed: ActiveScanExecutionContext['requestSeeds'][number]): { r
 function rawSeedRequest(
   seed: ActiveScanExecutionContext['requestSeeds'][number],
   cookies: readonly LoginSessionCookie[],
+  sessionHeaders: readonly BrowserSessionHeader[] = [],
 ): { readonly target: string; readonly method: string; readonly postData: string; readonly raw: string } {
   const url = seedUrl(seed);
   const method = seed.method.toUpperCase();
   const applicable = cookies.filter((cookie) => cookieApplies(cookie, url));
   const { body, contentType } = seedBody(seed);
+  const headers = sessionHeaders.filter((header) =>
+    header.origin === url.origin
+    && header.name === 'Authorization'
+    && header.value.trim() !== ''
+    && !/[\r\n]/u.test(header.value));
   const path = `${url.pathname}${url.search}` || '/';
   const lines = [
     `${method} ${path} HTTP/1.1`,
     `Host: ${url.host}`,
     'User-Agent: ScopePilot2/ZAP-seed',
     'Accept: */*',
+    ...headers.map((header) => `${header.name}: ${header.value}`),
     ...(applicable.length === 0 ? [] : [`Cookie: ${applicable.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ')}`]),
     ...(body === '' ? [] : [`Content-Type: ${contentType ?? 'application/octet-stream'}`, `Content-Length: ${Buffer.byteLength(body)}`]),
     'Connection: close',
@@ -353,8 +372,8 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
     if (alert.messageId === undefined || alert.messageId.trim() === '') return null;
     const result = await this.api<ZapMessageResponse>('core/view/message', { id: alert.messageId });
     const message = result.message ?? result;
-    const requestHeader = boundedHttpComponent(message.requestHeader);
-    const responseHeader = boundedHttpComponent(message.responseHeader);
+    const requestHeader = redactHttpHeaderSecrets(message.requestHeader);
+    const responseHeader = redactHttpHeaderSecrets(message.responseHeader);
     if (requestHeader === undefined || responseHeader === undefined) return null;
     const line = requestLine(requestHeader);
     // Alert metadata can outlive or be rebound to a different ZAP history
@@ -398,13 +417,13 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
         && messageContainsParameter(message, httpParameter)
         && message.id !== undefined
         && message.id.trim() !== ''
-        && boundedHttpComponent(message.requestHeader) !== undefined
-        && boundedHttpComponent(message.responseHeader) !== undefined;
+        && redactHttpHeaderSecrets(message.requestHeader) !== undefined
+        && redactHttpHeaderSecrets(message.responseHeader) !== undefined;
     });
     const message = candidates.at(-1);
     if (message === undefined || message.id === undefined) return null;
-    const requestHeader = boundedHttpComponent(message.requestHeader)!;
-    const responseHeader = boundedHttpComponent(message.responseHeader)!;
+    const requestHeader = redactHttpHeaderSecrets(message.requestHeader)!;
+    const responseHeader = redactHttpHeaderSecrets(message.responseHeader)!;
     const requestBody = boundedHttpComponent(message.requestBody);
     const responseBody = boundedHttpComponent(message.responseBody);
     return {
@@ -525,13 +544,64 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
     }
   }
 
+  private async installSessionHeaderRules(
+    runId: string,
+    targets: readonly string[],
+    headers: readonly BrowserSessionHeader[],
+  ): Promise<readonly string[]> {
+    const targetOrigins = new Set(targets.map((target) => new URL(target).origin));
+    const applicable = [...new Map(headers
+      .filter((header) => targetOrigins.has(header.origin)
+        && header.name === 'Authorization'
+        && header.value.trim() !== ''
+        && !/[\r\n]/u.test(header.value))
+      .map((header) => [`${header.origin}\u0000${header.name.toLowerCase()}`, header])).values()];
+    const descriptions: string[] = [];
+    try {
+      for (let index = 0; index < applicable.length; index += 1) {
+        const header = applicable[index]!;
+        const description = `ScopePilot-${runId.replace(/[^A-Za-z0-9_.-]/gu, '-')}-auth-${String(index)}-${Date.now().toString(36)}`;
+        await this.api('replacer/action/addRule', {
+          description,
+          enabled: 'true',
+          matchType: 'REQ_HEADER',
+          matchRegex: 'false',
+          matchString: header.name,
+          replacement: header.value,
+          url: `^${escapeRegex(header.origin)}(?:/.*)?$`,
+        });
+        descriptions.push(description);
+      }
+      return descriptions;
+    } catch (cause) {
+      await this.removeSessionHeaderRules(descriptions).catch(() => undefined);
+      throw cause;
+    }
+  }
+
+  private async removeSessionHeaderRules(descriptions: readonly string[]): Promise<void> {
+    for (const description of descriptions) {
+      await this.api('replacer/action/removeRule', { description }).catch((cause: unknown) => {
+        if (cause instanceof Error && cause.message.includes('does_not_exist')) return;
+        throw cause;
+      });
+    }
+  }
+
+  private async cleanupRunHeaders(run: ZapRun): Promise<void> {
+    if (run.headersCleaned) return;
+    await this.removeSessionHeaderRules(run.replacerRuleDescriptions);
+    run.headersCleaned = true;
+  }
+
   private async seedAndVerify(
     seeds: ActiveScanExecutionContext['requestSeeds'],
     cookies: readonly LoginSessionCookie[],
+    sessionHeaders: readonly BrowserSessionHeader[],
   ): Promise<readonly SeededRequest[]> {
     const requests: SeededRequest[] = [];
     for (const seed of seeds) {
-      const request = rawSeedRequest(seed, cookies);
+      const request = rawSeedRequest(seed, cookies, sessionHeaders);
       const result = await this.api<ZapSendRequestResponse>('core/action/sendRequest', {
         request: request.raw,
         followRedirects: 'false',
@@ -564,9 +634,10 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
   private async verifyAuthenticationProbe(
     probe: ActiveScanExecutionContext['authenticationProbe'],
     cookies: readonly LoginSessionCookie[],
+    sessionHeaders: readonly BrowserSessionHeader[],
   ): Promise<void> {
     if (probe === undefined) return;
-    const request = rawSeedRequest({ url: probe.url, method: 'GET', inputPoints: [] }, cookies);
+    const request = rawSeedRequest({ url: probe.url, method: 'GET', inputPoints: [] }, cookies, sessionHeaders);
     const result = await this.api<ZapSendRequestResponse>('core/action/sendRequest', { request: request.raw, followRedirects: 'false' });
     const response = rawResponseFromSendRequest(result);
     if (/\nlocation:\s*[^\r\n]*login(?:\.php)?/im.test(response)) {
@@ -615,31 +686,33 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
 
   async start(request: ActiveScanRequest, execution: ActiveScanExecutionContext = { requestSeeds: [] }): Promise<string> {
     const cookies = execution.sessionCookies ?? [];
+    const sessionHeaders = execution.sessionHeaders ?? [];
     const seeds = execution.requestSeeds.length > 0
       ? execution.requestSeeds
       : request.targets.map((url) => ({ url, method: 'GET', inputPoints: [] }));
     const baseline = await this.alertsForTargets(request.targets);
     const context = await this.configureContext(request.runId, request.targets);
-    const seededRequests = await this.seedAndVerify(seeds, cookies);
-    await this.verifyAuthenticationProbe(execution.authenticationProbe, cookies);
-    await this.activateHttpSessions(context.contextName, request.targets, cookies);
-    const crawlRoot = request.targets[0];
-    if (crawlRoot !== undefined) {
-      const crawlBudgetMs = Math.min(request.leasedLimits.maxDurationMinutes * 60_000, 60_000);
-      const deadline = Date.now() + crawlBudgetMs;
-      await this.runTraditionalSpider(crawlRoot, context, deadline);
-      await this.runAjaxSpider(crawlRoot, context, deadline);
-    }
-
-    const attackRequests = [...new Map(
-      seededRequests
-        .filter((candidate) => candidate.hasInputPoints)
-        .map((candidate) => [`${candidate.method}\u0000${candidate.target}\u0000${candidate.postData}`, candidate]),
-    ).values()];
-    if (attackRequests.length === 0 && seededRequests[0] !== undefined) attackRequests.push(seededRequests[0]);
-    const boundedRequests = attackRequests.slice(0, Math.max(1, Math.min(100, request.leasedLimits.maxPages)));
+    const replacerRuleDescriptions = await this.installSessionHeaderRules(request.runId, request.targets, sessionHeaders);
     const scanIds: string[] = [];
     try {
+      const seededRequests = await this.seedAndVerify(seeds, cookies, sessionHeaders);
+      await this.verifyAuthenticationProbe(execution.authenticationProbe, cookies, sessionHeaders);
+      await this.activateHttpSessions(context.contextName, request.targets, cookies);
+      const crawlRoot = request.targets[0];
+      if (crawlRoot !== undefined) {
+        const crawlBudgetMs = Math.min(request.leasedLimits.maxDurationMinutes * 60_000, 60_000);
+        const deadline = Date.now() + crawlBudgetMs;
+        await this.runTraditionalSpider(crawlRoot, context, deadline);
+        await this.runAjaxSpider(crawlRoot, context, deadline);
+      }
+
+      const attackRequests = [...new Map(
+        seededRequests
+          .filter((candidate) => candidate.hasInputPoints)
+          .map((candidate) => [`${candidate.method}\u0000${candidate.target}\u0000${candidate.postData}`, candidate]),
+      ).values()];
+      if (attackRequests.length === 0 && seededRequests[0] !== undefined) attackRequests.push(seededRequests[0]);
+      const boundedRequests = attackRequests.slice(0, Math.max(1, Math.min(100, request.leasedLimits.maxPages)));
       for (const candidate of boundedRequests) {
         const body = await this.api<{ scan: string }>('ascan/action/scan', {
           url: candidate.target,
@@ -660,6 +733,7 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
       await Promise.all(scanIds.map(async (scanId) => {
         await this.api('ascan/action/stop', { scanId }).catch(() => undefined);
       }));
+      await this.removeSessionHeaderRules(replacerRuleDescriptions).catch(() => undefined);
       throw cause;
     }
     if (scanIds.length === 0) throw new Error('ZAP ascan did not return a scan id');
@@ -669,13 +743,15 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
       scanIds,
       baselineAlertIds: new Set(baseline.map((alert) => alert.id)),
       emittedAlertIds: new Set(),
+      replacerRuleDescriptions,
+      headersCleaned: false,
     });
     return engineRunId;
   }
 
   private resolveRun(engineRunId: string): ZapRun {
     return this.runs.get(engineRunId) ?? {
-      targets: [], scanIds: [engineRunId], baselineAlertIds: new Set(), emittedAlertIds: new Set(),
+      targets: [], scanIds: [engineRunId], baselineAlertIds: new Set(), emittedAlertIds: new Set(), replacerRuleDescriptions: [], headersCleaned: true,
     };
   }
 
@@ -690,6 +766,7 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
     }
     const failed = selected.find((scan) => /FAILED|STOPPED/i.test(scan.state));
     const complete = selected.every((scan) => /FINISHED|COMPLETE/i.test(scan.state));
+    if (failed !== undefined || complete) await this.cleanupRunHeaders(run);
     // A confirmed plan can fan out into dozens of per-request active scans.
     // Querying every scan concurrently can overwhelm ZAP's local API server and
     // cause undici to surface an AbortError even though the scans themselves
@@ -735,9 +812,9 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
           httpExchangeCaptureError = cause instanceof Error ? cause.message : String(cause);
         }
       }
-      const requestHeader = boundedHttpComponent(message?.requestHeader);
+      const requestHeader = redactHttpHeaderSecrets(message?.requestHeader);
       const requestBody = boundedHttpComponent(message?.requestBody);
-      const responseHeader = boundedHttpComponent(message?.responseHeader);
+      const responseHeader = redactHttpHeaderSecrets(message?.responseHeader);
       const responseBody = boundedHttpComponent(message?.responseBody);
       alerts.push({
         engineAlertId: `zap-${alert.id}`,
@@ -771,6 +848,7 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
         throw cause;
       });
     }));
+    await this.cleanupRunHeaders(run);
   }
 
   forgetRun(engineRunId: string): void { this.runs.delete(engineRunId); }

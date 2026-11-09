@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createServer, type Server } from 'node:http';
 import { describe, test } from 'node:test';
 import {
   BaselineFlowService,
@@ -10,6 +11,7 @@ import {
 import type { EngineCapabilitySnapshot, OperatorProfile } from '@scopepilot2/contracts';
 import { PlaywrightLoginExecutor } from '../src/login-executor.ts';
 import { PlaywrightExplorerAdapter } from '../src/playwright-explorer.ts';
+import { PlaywrightInteractiveBrowser } from '../src/interactive-browser.ts';
 import { startBrowserSessionSpaTarget } from './browser-session-spa-target.ts';
 import { startVulnerableTarget } from './vulnerable-target.ts';
 
@@ -34,7 +36,60 @@ class UnusedScanEngine implements ActiveScanEnginePort {
   async stop(): Promise<void> {}
 }
 
+async function listenOnLoopback(server: Server): Promise<string> {
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  assert.ok(address !== null && typeof address !== 'string');
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function closeServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}
+
 gated('Playwright explorer adapter (実 browser 結合)', () => {
+  test('認証preflightはSPAのlocal/session storageを復元して描画後markerを確認する', { timeout: 60_000 }, async () => {
+    const target = await startBrowserSessionSpaTarget();
+    const loginExecutor = new PlaywrightLoginExecutor();
+    const browser = new PlaywrightInteractiveBrowser();
+    try {
+      const login = await loginExecutor.execute({
+        baseUrl: target.baseUrl,
+        expectedUrlPrefix: target.appUrl,
+        secretValues: { email: 'user@example.test', password: 'fixture-password-secret' },
+        steps: [
+          { kind: 'navigate', target: target.loginUrl },
+          { kind: 'fill', target: 'input[name="email"]', secretReference: 'email' },
+          { kind: 'fill', target: 'input[name="password"]', secretReference: 'password' },
+          { kind: 'click', target: 'button[type="submit"]' },
+          { kind: 'wait', target: '#state[data-ready="true"]' },
+          { kind: 'assert', target: 'Dashboard ready' },
+        ],
+      });
+      assert.equal(login.authenticated, true);
+      assert.ok(login.browserState);
+
+      const verification = await browser.execute({
+        targetUrl: target.appUrl,
+        scope: { allowedOrigins: [target.baseUrl], deniedOrigins: [] },
+        browserSession: login.browserState,
+        steps: [
+          { kind: 'navigate', target: target.appUrl },
+          { kind: 'wait', target: '#state[data-ready="true"]' },
+          { kind: 'assert', target: 'Dashboard ready' },
+        ],
+      });
+      assert.equal(verification.finalUrl, target.appUrl);
+      assert.deepEqual(verification.assertions, [{ kind: 'assert', target: 'Dashboard ready', passed: true }]);
+    } finally {
+      await loginExecutor.close();
+      await target.close();
+    }
+  });
+
   test('Bearer SPAのlocal/session storageをメモリ内で引き継ぎ、実API通信とSPAルートを探索する', { timeout: 120_000 }, async () => {
     const target = await startBrowserSessionSpaTarget();
     const explorer = new PlaywrightExplorerAdapter({
@@ -166,6 +221,45 @@ gated('Playwright explorer adapter (実 browser 結合)', () => {
     } finally {
       await adapter.close();
       target.server.close();
+    }
+  });
+
+  test('scope 外の subresource・fetch・WebSocket は browser 送信前に遮断する', { timeout: 30_000 }, async () => {
+    let outsideRequestCount = 0;
+    const outside = createServer((_request, response) => {
+      outsideRequestCount += 1;
+      response.writeHead(200, { 'content-type': 'application/javascript' });
+      response.end('globalThis.outsideLoaded = true;');
+    });
+    outside.on('upgrade', (_request, socket) => {
+      outsideRequestCount += 1;
+      socket.destroy();
+    });
+    const outsideBase = await listenOnLoopback(outside);
+    const outsideWebSocket = outsideBase.replace(/^http:/, 'ws:');
+    const inside = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end([
+        '<!doctype html><title>Scoped page</title>',
+        `<script src="${outsideBase}/outside.js"></script>`,
+        `<script>fetch('${outsideBase}/outside.json').catch(() => undefined)</script>`,
+        `<script>new WebSocket('${outsideWebSocket}/outside.ws')</script>`,
+        `<img src="${outsideBase}/outside.png">`,
+      ].join(''));
+    });
+    const insideBase = await listenOnLoopback(inside);
+    const adapter = new PlaywrightExplorerAdapter({
+      scope: { allowedOrigins: [insideBase], deniedOrigins: [outsideBase] },
+    });
+    try {
+      const observation = await adapter.observe(`${insideBase}/`);
+      assert.equal(observation?.status, 200);
+      assert.equal(outsideRequestCount, 0, 'denied origin must receive no HTTP or WebSocket handshake');
+      assert.ok(observation?.requests?.every((request) => new URL(request.url).origin === insideBase));
+    } finally {
+      await adapter.close();
+      await closeServer(inside);
+      await closeServer(outside);
     }
   });
 

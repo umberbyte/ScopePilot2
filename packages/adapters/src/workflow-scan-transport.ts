@@ -17,6 +17,8 @@ export interface NodeWorkflowScanTransportOptions {
   readonly requestTimeoutMs?: number;
   /** 既存の認証済み role session。値はログへ出さず、この origin の通信だけに適用する。 */
   readonly sessionCookies?: readonly { readonly name: string; readonly value: string }[];
+  /** Browserで観測した同一Originの認証ヘッダー。値はログへ出さない。 */
+  readonly sessionHeaders?: readonly { readonly name: 'Authorization'; readonly value: string }[];
   /** 証跡ログへ出してはならない値（パスワード・一時パスワード等）。 */
   readonly redactionValues?: readonly string[];
   readonly signal?: AbortSignal;
@@ -32,6 +34,7 @@ export class NodeWorkflowScanTransport implements WorkflowScanTransport {
   private readonly redactionValues: string[];
   private readonly signal: AbortSignal | undefined;
   private readonly cookies = new Map<string, string>();
+  private readonly sessionHeaders = new Map<string, string>();
   private readonly log: WorkflowScanRequestLogEntry[] = [];
   private count = 0;
 
@@ -45,6 +48,11 @@ export class NodeWorkflowScanTransport implements WorkflowScanTransport {
     this.signal = options.signal;
     for (const cookie of options.sessionCookies ?? []) {
       if (cookie.name.trim() !== '') this.cookies.set(cookie.name, cookie.value);
+    }
+    for (const header of options.sessionHeaders ?? []) {
+      if (header.name === 'Authorization' && header.value.trim() !== '' && !/[\r\n]/u.test(header.value)) {
+        this.sessionHeaders.set('authorization', header.value);
+      }
     }
   }
 
@@ -94,6 +102,7 @@ export class NodeWorkflowScanTransport implements WorkflowScanTransport {
     if (this.cookies.size > 0) {
       headers['cookie'] = [...this.cookies.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
     }
+    for (const [name, value] of this.sessionHeaders) headers[name] = value;
     headers['referer'] = `${this.baseUrl}/`;
     headers['user-agent'] = 'ScopePilot2-HttpDiagnostic/1.0';
     const timeout = AbortSignal.timeout(this.requestTimeoutMs);

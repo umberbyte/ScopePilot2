@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import type { LoginExecutionInput, LoginExecutorPort, LoginSessionCookie } from '@scopepilot2/core';
+import type { InteractiveBrowserPort, LoginExecutionInput, LoginExecutorPort, LoginSessionCookie } from '@scopepilot2/core';
 import { bootstrapFlow } from '../support/test-flow.ts';
 
 /**
@@ -8,6 +8,98 @@ import { bootstrapFlow } from '../support/test-flow.ts';
  * 名前のみが添えられる (値は入れない — API 応答に scanRequest が映るため)。
  */
 describe('active scan session (design/08)', () => {
+  test('SPAの認証markerは描画済みbrowserで再確認し、ZAP raw responseには要求しない', async () => {
+    const browserCalls: Parameters<InteractiveBrowserPort['execute']>[0][] = [];
+    let markerPasses = true;
+    const interactiveBrowser: InteractiveBrowserPort = {
+      engineVersion: 'browser-auth-preflight-test',
+      async execute(input) {
+        browserCalls.push(input);
+        return {
+          finalUrl: input.targetUrl,
+          status: 200,
+          bodyHash: 'browser-body-hash',
+          bodyText: 'Dashboard ready',
+          headers: [],
+          elapsedMs: 1,
+          assertions: input.steps.flatMap((step) => step.kind === 'assert'
+            ? [{ kind: 'assert' as const, target: step.target, passed: markerPasses }]
+            : []),
+        };
+      },
+    };
+    const executor: LoginExecutorPort = {
+      engineVersion: 'spa-login-test',
+      async execute() {
+        const cookies = [{ name: 'sid', value: 'cookie-secret', domain: 'fixture.target.test', path: '/' }];
+        return {
+          authenticated: true,
+          finalUrl: 'http://fixture.target.test/dashboard',
+          cookies,
+          browserState: {
+            cookies,
+            headers: [{ origin: 'http://fixture.target.test', name: 'Authorization', value: 'Bearer memory-only-secret' }],
+            origins: [{
+              origin: 'http://fixture.target.test',
+              localStorage: [{ name: 'access-token', value: 'storage-secret' }],
+              sessionStorage: [],
+            }],
+          },
+        };
+      },
+    };
+    const { service, operator, scanEngine } = await bootstrapFlow({ loginExecutor: executor, interactiveBrowser });
+    service.registerLoginFlow(operator, {
+      role: 'user',
+      flowVersion: 'spa-login-v1',
+      steps: [
+        { kind: 'navigate', target: '/login' },
+        { kind: 'assert', target: 'Dashboard ready' },
+      ],
+    });
+    await service.runLogin(operator, {
+      role: 'user',
+      baseUrl: 'http://fixture.target.test',
+      secretValues: {},
+      expectedUrlPrefix: 'http://fixture.target.test/dashboard',
+    });
+    const { plan } = service.buildActiveScanPlan(operator, ['http://fixture.target.test/dashboard']);
+    service.authorizePlan(plan);
+    const adopted = [{
+      candidateId: 'spa-page',
+      url: 'http://fixture.target.test/dashboard',
+      method: 'GET' as const,
+      category: 'page' as const,
+      guidelineBasis: [],
+      confidence: 1,
+      observationUrl: 'http://fixture.target.test/dashboard',
+    }];
+    await service.runActiveScan(operator, plan, service.confirmPlan(plan, operator), adopted, 'user');
+
+    assert.equal(browserCalls.length, 1);
+    assert.equal(browserCalls[0]?.browserSession?.origins[0]?.localStorage[0]?.name, 'access-token');
+    assert.deepEqual(browserCalls[0]?.steps, [
+      { kind: 'navigate', target: 'http://fixture.target.test/dashboard' },
+      { kind: 'assert', target: 'Dashboard ready' },
+    ]);
+    assert.deepEqual(scanEngine.startCalls[0]?.authenticationProbe, {
+      url: 'http://fixture.target.test/dashboard',
+      markers: [],
+    });
+    assert.deepEqual(scanEngine.startCalls[0]?.sessionHeaders, [{
+      origin: 'http://fixture.target.test',
+      name: 'Authorization',
+      value: 'Bearer memory-only-secret',
+    }]);
+
+    markerPasses = false;
+    await assert.rejects(
+      service.runActiveScan(operator, plan, service.confirmPlan(plan, operator), adopted, 'user'),
+      /browser success marker was not present/,
+    );
+    assert.equal(scanEngine.startCalls.length, 1, 'browser preflight failure must stop before ZAP starts');
+  });
+
   test('role 指定の診断は適用 cookie 名を scan request に添える。未登録 role は拒否', async () => {
     const executor = new (class implements LoginExecutorPort {
       readonly engineVersion = 'fake-login-1';

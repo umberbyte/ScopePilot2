@@ -37,7 +37,7 @@ async function startFakeZap(): Promise<{
         responseBody: 'OK',
       }] });
     }
-    if (/^\/JSON\/(?:context|users|httpSessions|sessionManagement|authentication)\/action\//.test(url.pathname)) return respond({ result: 'OK' });
+    if (/^\/JSON\/(?:context|users|httpSessions|sessionManagement|authentication|replacer)\/action\//.test(url.pathname)) return respond({ result: 'OK' });
     if (url.pathname === '/JSON/ascan/action/scan') {
       assert.equal(url.searchParams.get('recurse'), 'false');
       assert.equal(url.searchParams.get('inScopeOnly'), 'true');
@@ -59,7 +59,7 @@ async function startFakeZap(): Promise<{
     if (url.pathname === '/JSON/core/view/message') {
       assert.equal(url.searchParams.get('id'), '501');
       return respond({ message: {
-        requestHeader: 'GET /x?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E HTTP/1.1\r\nHost: target.test\r\nCookie: session=secret',
+        requestHeader: 'GET /x?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E HTTP/1.1\r\nHost: target.test\r\nAuthorization: Bearer evidence-secret\r\nCookie: session=secret',
         requestBody: '',
         responseHeader: 'HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8',
         responseBody: '<html><body><script>alert(1)</script></body></html>',
@@ -119,6 +119,9 @@ describe('ZAP adapter', () => {
       ]);
       assert.equal(recovered[0]?.recoveryStrategy, 'alert-exact');
       assert.match(recovered[0]?.requestHeader ?? '', /^GET \/x/u);
+      assert.match(recovered[0]?.requestHeader ?? '', /Authorization: \[REDACTED\]/u);
+      assert.match(recovered[0]?.requestHeader ?? '', /Cookie: \[REDACTED\]/u);
+      assert.doesNotMatch(recovered[0]?.requestHeader ?? '', /evidence-secret|session=secret/u);
       assert.equal(recovered[1]?.recoveryStrategy, 'message-exact');
       assert.match(recovered[1]?.responseHeader ?? '', /^HTTP\/1\.1 200 OK/u);
       assert.equal(recovered[2], null, 'a different wire URL must never be attached to a nonce-specific finding');
@@ -199,6 +202,40 @@ describe('ZAP adapter', () => {
       });
       const send = zap.requests.find((entry) => entry.path === '/JSON/core/action/sendRequest');
       assert.match(send?.query.get('request') ?? '', /Cookie: security=low/);
+    } finally {
+      zap.server.close();
+    }
+  });
+
+  test('origin-bound Authorization is applied to seeds and removed from ZAP after the scan', async () => {
+    const zap = await startFakeZap();
+    try {
+      const adapter = new ZapEngineAdapter({ baseUrl: zap.base, spiderEnabled: false, ajaxSpiderEnabled: false });
+      const runId = await adapter.start({
+        runId: 'run-bearer', targets: ['http://target.test/api'], attackStrength: 'Medium',
+        leasedLimits: { maxRequests: 20, maxPages: 5, maxDurationMinutes: 1, maxConcurrency: 1, requestsPerSecond: 1 },
+        authorizationRef: 'authz-bearer', requestSeedCount: 1,
+      }, {
+        sessionHeaders: [
+          { origin: 'http://target.test', name: 'Authorization', value: 'Bearer transient-secret' },
+          { origin: 'http://elsewhere.test', name: 'Authorization', value: 'Bearer must-not-apply' },
+        ],
+        requestSeeds: [{ url: 'http://target.test/api', method: 'GET', inputPoints: [] }],
+      });
+      const add = zap.requests.find((entry) => entry.path === '/JSON/replacer/action/addRule');
+      assert.equal(add?.query.get('matchString'), 'Authorization');
+      assert.equal(add?.query.get('replacement'), 'Bearer transient-secret');
+      assert.match(add?.query.get('url') ?? '', /target\\\.test/u);
+      assert.equal(zap.requests.filter((entry) => entry.path === '/JSON/replacer/action/addRule').length, 1);
+      const seed = zap.requests.find((entry) => entry.path === '/JSON/core/action/sendRequest');
+      assert.match(seed?.query.get('request') ?? '', /Authorization: Bearer transient-secret/u);
+      assert.doesNotMatch(seed?.query.get('request') ?? '', /must-not-apply/u);
+
+      zap.setScansState([{ id: '7', state: 'FINISHED' }]);
+      assert.equal((await adapter.progress(runId)).status, 'complete');
+      const remove = zap.requests.find((entry) => entry.path === '/JSON/replacer/action/removeRule');
+      assert.equal(remove?.query.get('description'), add?.query.get('description'));
+      assert.equal(JSON.stringify(zap.requests.map((entry) => ({ path: entry.path, keys: [...entry.query.keys()] }))).includes('transient-secret'), false);
     } finally {
       zap.server.close();
     }

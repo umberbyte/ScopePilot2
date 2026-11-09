@@ -68,7 +68,9 @@ export class FakeScanEngine implements ActiveScanEnginePort {
       targets: [...request.targets],
       leasedMaxRequests: request.leasedLimits.maxRequests,
       sessionCookies: context?.sessionCookies ?? [],
+      sessionHeaders: context?.sessionHeaders ?? [],
       requestSeeds: context?.requestSeeds ?? [],
+      ...(context?.authenticationProbe === undefined ? {} : { authenticationProbe: context.authenticationProbe }),
     });
     this.sequence += 1;
     return `fake-run-${this.sequence}`;
@@ -105,12 +107,17 @@ export interface ActiveScanEngineStartCall {
   readonly targets: readonly string[];
   readonly leasedMaxRequests: number;
   readonly sessionCookies: readonly import('../../../src/ports/engines.ts').LoginSessionCookie[];
+  readonly sessionHeaders: readonly import('../../../src/ports/engines.ts').BrowserSessionHeader[];
   readonly requestSeeds: readonly {
     readonly url: string;
     readonly method: string;
     readonly contentType?: string;
     readonly inputPoints: readonly import('@scopepilot2/contracts').RequestInputPoint[];
   }[];
+  readonly authenticationProbe?: {
+    readonly url: string;
+    readonly markers: readonly string[];
+  };
 }
 
 function testCapabilities(zapVersion = 'fake-zap-1', nucleiVersion?: string): readonly EngineCapabilitySnapshot[] {

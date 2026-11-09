@@ -10,7 +10,7 @@
  * 対象ごとのlogin flowを実行する。認証後の cookie は scan adapter へ
  * 明示的に渡す。proxyServer は高度な画面から明示指定された場合のみ利用する。
  */
-import type { BrowserSessionState, LoginExecutionInput, LoginExecutionResult, LoginExecutorPort, LoginSessionCookie } from '@scopepilot2/core';
+import type { BrowserSessionHeader, BrowserSessionState, LoginExecutionInput, LoginExecutionResult, LoginExecutorPort, LoginSessionCookie } from '@scopepilot2/core';
 import type { ObservedHttpRequest } from '@scopepilot2/contracts';
 import { detectAuthState } from '@scopepilot2/core';
 import type { LoginFlowStep } from '@scopepilot2/core';
@@ -51,16 +51,36 @@ const defaultLauncher: LoginBrowserLauncher = async () => {
       const page = await context.newPage();
       // login 実行中の通信観測 (診断候補の根拠。値は inputPoints の名前だけ)。
       const requests: ObservedHttpRequest[] = [];
+      const sessionHeaders = new Map<string, BrowserSessionHeader>();
+      const headerCaptureTasks: Promise<void>[] = [];
       const captureRequest = (request: import('playwright').Request): void => {
+        const requestUrl = request.url();
         requests.push({
           requestId: `login-${String(requests.length + 1).padStart(6, '0')}`,
-          url: request.url(),
+          url: requestUrl,
           method: request.method().toUpperCase(),
           resourceType: request.resourceType(),
           ...(request.headers()['content-type'] === undefined ? {} : { contentType: request.headers()['content-type'] }),
           inputPoints: requestInputPoints(request),
           sourceUrl: page.url() || request.url(),
         });
+        // Capture only the standard Authorization header and only when the
+        // request destination matches the page's current origin. Chromium's
+        // allHeaders() is required because headers() can omit security-related
+        // fields. The value remains in the in-memory browser state.
+        const capture = request.allHeaders().then((headers) => {
+          const value = headers['authorization'];
+          if (value === undefined || value.trim() === '' || /[\r\n]/u.test(value)) return;
+          try {
+            const origin = new URL(requestUrl).origin;
+            const pageUrl = page.url();
+            if (!/^https?:/u.test(pageUrl) || new URL(pageUrl).origin !== origin) return;
+            sessionHeaders.set(`${origin}\u0000authorization`, { origin, name: 'Authorization', value });
+          } catch {
+            // Non-HTTP requests are irrelevant to HTTP diagnostics.
+          }
+        }).catch(() => undefined);
+        headerCaptureTasks.push(capture);
       };
       page.on('request', captureRequest);
       return {
@@ -100,6 +120,7 @@ const defaultLauncher: LoginBrowserLauncher = async () => {
             sameSite: cookie.sameSite,
           })),
         browserState: async () => {
+          await Promise.allSettled(headerCaptureTasks);
           const stored = await context.storageState();
           const currentUrl = new URL(page.url());
           const currentStorage = await page.evaluate(() => ({
@@ -132,6 +153,7 @@ const defaultLauncher: LoginBrowserLauncher = async () => {
               sameSite: cookie.sameSite,
             })),
             origins,
+            ...(sessionHeaders.size === 0 ? {} : { headers: [...sessionHeaders.values()] }),
           };
         },
         close: async () => {

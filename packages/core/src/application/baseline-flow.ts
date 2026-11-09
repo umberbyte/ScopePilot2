@@ -164,7 +164,7 @@ import {
 } from '../domain/repeater.ts';
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
 import { assess, createSamplePlan, createSequencerExtractor, createSequencerReplayRequest, extractSequencerToken, reportProjection, SampleCollector, type AlphabetClassCounts, type NumericDeltaSignCounts } from '../domain/sequencer.ts';
-import { parseOpenApiDocument } from '../domain/api-scanning.ts';
+import { parseOpenApiDocument, type ParsedOpenApiEndpoint } from '../domain/api-scanning.ts';
 import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, TokenIssuer, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
 import { buildWsSendPlan, importFrames, sendWithPolicy, validateWsSubprotocols, wsEvidence, type WsFrame } from '../domain/websocket.ts';
 import { checkAuthorityScope, negotiateTransport, transportCapability, transportEvidence, validateHeaderValues, validatePseudoHeaders } from '../domain/advanced-transport.ts';
@@ -215,6 +215,7 @@ export interface BaselineFlowDeps {
     readonly maxRequests: number;
     readonly redactionValues: readonly string[];
     readonly sessionCookies?: readonly { readonly name: string; readonly value: string }[];
+    readonly sessionHeaders?: readonly { readonly name: 'Authorization'; readonly value: string }[];
     readonly signal?: AbortSignal;
   }) => WorkflowScanTransport;
   /** 設定済みの実Nuclei CLI。未設定時はscan planにNuclei stepを含めない。 */
@@ -530,7 +531,7 @@ export class BaselineFlowService {
   private readonly loadedExtensions: readonly { extensionId: string; version: string; permissions: readonly string[]; apiRange: readonly string[] }[] = [];
 
   /** 取り込んだ API 仕様の記録 (design/f12)。endpoint の一覧は都度応答する。 */
-  private readonly apiSpecImports: readonly { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[] = [];
+  private readonly apiSpecImports: readonly { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly (ParsedOpenApiEndpoint & { readonly url: string })[]; importedAt: string }[] = [];
 
   /** Sequencer session の台帳 (design/f07)。token 原文は保存しない (統計のみ)。 */
   private readonly sequencerSessions: readonly SequencerSessionRecord[] = [];
@@ -1265,13 +1266,13 @@ export class BaselineFlowService {
     }
     const params = input.params ?? {};
     const secrets = input.secretValues ?? {};
-    const requireSession = (): { role: string; cookies: readonly LoginSessionCookie[]; markers: readonly string[] } => {
+    const requireSession = (): { role: string; cookies: readonly LoginSessionCookie[]; browserState: BrowserSessionState; markers: readonly string[] } => {
       const role = input.role ?? '';
       const session = this.roleSessionCookies.get(role);
       if (session === undefined) {
         throw domainError('ValidationFailed', `no authenticated session for role '${role}'; run login first`);
       }
-      return { role, cookies: session.cookies, markers: session.verificationMarkers ?? [] };
+      return { role, cookies: session.cookies, browserState: session.browserState, markers: session.verificationMarkers ?? [] };
     };
     const requireFlow = (role: string | undefined): { steps: readonly LoginFlowStep[]; markers: readonly string[] } => {
       const flow = this.loginFlows.get(role ?? '');
@@ -1710,24 +1711,23 @@ export class BaselineFlowService {
         const otherValues = (params.otherValues ?? '').split(',').map((value) => value.trim()).filter((value) => value !== '');
         const planned = planIdorProbes({ targetUrl: template, objectParam, ownValue, otherValues });
         requestBudget(planned.length);
-        const runPage = async (url: string, cookies: readonly LoginSessionCookie[]) => {
+        const runPage = async (url: string, browserSession: BrowserSessionState) => {
           const canonical = ScopePolicy.canonicalUrl(url);
-          const applicable = applicableSessionCookies([...cookies], canonical);
           return await browser().execute({
             targetUrl: canonical,
             scope: caseRecord.scope,
             steps: [{ kind: 'navigate', target: canonical }],
-            ...(applicable === undefined ? {} : { sessionCookies: applicable }),
+            browserSession,
           });
         };
-        const own = await runPage(planned[0]!.url, candidateSession.cookies);
+        const own = await runPage(planned[0]!.url, candidateSession.browserState);
         probes.push({ kind: 'browser', pattern: 'own-object-baseline', targetUrl: ScopePolicy.canonicalUrl(planned[0]!.url), status: own.status, finalUrl: own.finalUrl, bodyHash: own.bodyHash, outcome: own.status !== null && own.status < 400 ? null : 'inconclusive' });
         for (let index = 1; index < planned.length; index += 2) {
           const authorizedPlan = planned[index]!;
           const candidatePlan = planned[index + 1]!;
-          const authorized = await runPage(authorizedPlan.url, authorizedSession.cookies);
+          const authorized = await runPage(authorizedPlan.url, authorizedSession.browserState);
           probes.push({ kind: 'browser', pattern: authorizedPlan.pattern, targetUrl: ScopePolicy.canonicalUrl(authorizedPlan.url), status: authorized.status, finalUrl: authorized.finalUrl, bodyHash: authorized.bodyHash, outcome: null });
-          const candidate = await runPage(candidatePlan.url, candidateSession.cookies);
+          const candidate = await runPage(candidatePlan.url, candidateSession.browserState);
           const outcome = judgeIdorAccess({
             authorized: { status: authorized.status, finalUrl: authorized.finalUrl, bodyHash: authorized.bodyHash },
             candidate: { status: candidate.status, finalUrl: candidate.finalUrl, bodyHash: candidate.bodyHash },
@@ -2018,7 +2018,7 @@ export class BaselineFlowService {
           targetUrl: ScopePolicy.canonicalUrl(target),
           scope: caseRecord.scope,
           steps: [{ kind: 'navigate', target: ScopePolicy.canonicalUrl(target) }],
-          ...(session === undefined ? {} : { sessionCookies: applicableSessionCookies([...session.cookies], ScopePolicy.canonicalUrl(target)) }),
+          ...(session === undefined ? {} : { browserSession: session.browserState }),
         });
         probes.push({ kind: 'browser', pattern: 'https-baseline', targetUrl: ScopePolicy.canonicalUrl(target), status: httpsResponse.status, finalUrl: httpsResponse.finalUrl, bodyHash: httpsResponse.bodyHash, outcome: null });
         const mixed = findMixedContent(httpsResponse.bodyText);
@@ -2190,12 +2190,11 @@ export class BaselineFlowService {
         const session = input.role === undefined ? undefined : requireSession();
         for (const target of targets) {
           const canonical = ScopePolicy.canonicalUrl(target);
-          const sessionCookies = session === undefined ? undefined : applicableSessionCookies([...session.cookies], canonical);
           const page = await browser().execute({
             targetUrl: canonical,
             scope: caseRecord.scope,
             steps: [{ kind: 'navigate', target: canonical }],
-            ...(sessionCookies === undefined ? {} : { sessionCookies }),
+            ...(session === undefined ? {} : { browserSession: session.browserState }),
           });
           const sensitiveParams = findSensitiveUrlParamNames(canonical);
           probes.push({ kind: 'browser', pattern: 'sensitive-url-parameters', targetUrl: canonical, status: page.status, finalUrl: page.finalUrl, bodyHash: page.bodyHash, outcome: sensitiveParams.length > 0 ? 'exposed' : 'denied', detail: `parameterNames=${sensitiveParams.length === 0 ? '(none)' : sensitiveParams.join(',')}` });
@@ -2204,7 +2203,7 @@ export class BaselineFlowService {
           const observation = await this.deps.domObserver.observe({
             targetUrl: canonical,
             scope: caseRecord.scope,
-            ...(sessionCookies === undefined ? {} : { sessionCookies }),
+            ...(session === undefined ? {} : { browserSession: session.browserState }),
           });
           const piiCount = observation.nodes.filter((node) => node.looksLikePii).length;
           const confirmedUnmaskedCount = observation.nodes.filter((node) => node.looksLikePii && /(?:payment-card|my-number|pin)-unmasked/u.test(node.text)).length;
@@ -2364,11 +2363,11 @@ export class BaselineFlowService {
     const forbiddenClickTerms = ['logout', 'log-out', 'delete', 'remove', '退会', '削除'];
     const results: InteractiveDiagnosticItemResult[] = [];
 
-    const roleCookies = (role: string, targetUrl: string): readonly LoginSessionCookie[] | undefined => {
+    const roleBrowserSession = (role: string): BrowserSessionState | undefined => {
       if (role === '' || role === 'unauthenticated') return undefined;
       const session = this.roleSessionCookies.get(role);
       if (session === undefined) throw domainError('ValidationFailed', `no authenticated session for role ${role}`);
-      return applicableSessionCookies(session.cookies, targetUrl);
+      return session.browserState;
     };
 
     const validateSteps = (steps: readonly InteractiveBrowserStep[]): void => {
@@ -2435,12 +2434,12 @@ export class BaselineFlowService {
         }
         const observations = [] as { role: string; finalUrl: string; status: number | null; bodyHash: string; assertionsPassed: boolean }[];
         for (const role of item.roles) {
-          const cookies = roleCookies(role, canonical);
+          const browserSession = roleBrowserSession(role);
           const observation = await this.deps.interactiveBrowser.execute({
             targetUrl: canonical,
             scope: caseRecord.scope,
             steps: item.steps,
-            ...(cookies === undefined ? {} : { sessionCookies: cookies }),
+            ...(browserSession === undefined ? {} : { browserSession }),
           });
           observations.push({ role, finalUrl: observation.finalUrl, status: observation.status, bodyHash: observation.bodyHash, assertionsPassed: observation.assertions.every((entry) => entry.passed) });
         }
@@ -2456,12 +2455,12 @@ export class BaselineFlowService {
         continue;
       }
       const selectedFiles = item.steps.flatMap((step) => step.kind === 'upload' ? [files.get(step.inputRef)] : []).filter((file): file is InteractiveBrowserFile => file !== undefined);
-      const cookies = roleCookies(item.role, canonical);
+      const browserSession = roleBrowserSession(item.role);
       const observation = await this.deps.interactiveBrowser.execute({
         targetUrl: canonical,
         scope: caseRecord.scope,
         steps: item.steps,
-        ...(cookies === undefined ? {} : { sessionCookies: cookies }),
+        ...(browserSession === undefined ? {} : { browserSession }),
         ...(selectedFiles.length === 0 ? {} : { files: selectedFiles }),
       });
       const assertionsPassed = observation.assertions.every((entry) => entry.passed);
@@ -2945,10 +2944,10 @@ export class BaselineFlowService {
       throw domainError('OutOfScope', 'no api spec server is within the allowed origins');
     }
     const candidates = allowed.map((server) => server.replace(/\/+$/, ''));
-    const endpoints = candidates.flatMap((server) => parsed.endpoints.map((endpoint) => ({ method: endpoint.method, path: endpoint.path, url: `${server}${endpoint.path}` })));
+    const endpoints = candidates.flatMap((server) => parsed.endpoints.map((endpoint) => ({ ...endpoint, url: `${server}${endpoint.path}` })));
     const warnings = [...new Set(parsed.endpoints.filter((endpoint) => endpoint.path.includes('{')).map((endpoint) => `path template ${endpoint.path} needs explicit values`))];
     const importedAt = this.deps.clock.now().toISOString();
-    (this.apiSpecImports as { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly { method: string; path: string; url: string }[]; importedAt: string }[]).push({ documentLabel: input.documentLabel, servers: candidates, excludedServers: excluded, endpoints, importedAt });
+    (this.apiSpecImports as { documentLabel: string; servers: readonly string[]; excludedServers: readonly string[]; endpoints: readonly (ParsedOpenApiEndpoint & { readonly url: string })[]; importedAt: string }[]).push({ documentLabel: input.documentLabel, servers: candidates, excludedServers: excluded, endpoints, importedAt });
     this.record({
       type: 'ApiSpecImported',
       at: importedAt,
@@ -2956,7 +2955,13 @@ export class BaselineFlowService {
       endpointCount: endpoints.length,
       excludedServerCount: excluded.length,
     });
-    return { documentLabel: input.documentLabel, servers: candidates, excludedServers: excluded, endpoints, warnings };
+    return {
+      documentLabel: input.documentLabel,
+      servers: candidates,
+      excludedServers: excluded,
+      endpoints: endpoints.map(({ method, path, url }) => ({ method, path, url })),
+      warnings,
+    };
   }
 
   /**
@@ -4224,7 +4229,7 @@ export class BaselineFlowService {
       for (const endpoint of apiSpec.endpoints) {
         if (endpoint.path.includes('{')) continue;
         if (!ScopePolicy.decide(caseRecord.scope, endpoint.url).allowed) continue;
-        const key = loginMergeKeyOf(endpoint.method, endpoint.url, []);
+        const key = loginMergeKeyOf(endpoint.method, endpoint.url, endpoint.inputPoints);
         if (crawlCandidateKeys.has(key) || loginSeen.has(key) || specSeen.has(key)) continue;
         specSeen.add(key);
         if (isSessionControlUrl(endpoint.url)) continue;
@@ -4238,7 +4243,9 @@ export class BaselineFlowService {
           observationUrl: endpoint.url,
           detectionReason: `API 仕様 (${apiSpec.documentLabel}) に ${endpoint.method} ${endpoint.path} が定義されている`,
           dynamic: endpoint.method.toUpperCase() !== 'GET',
-          diagnosticTracks: diagnosticTracksFor(endpoint.url, endpoint.method, [], false),
+          inputPoints: endpoint.inputPoints,
+          ...(endpoint.contentType === undefined ? {} : { contentType: endpoint.contentType }),
+          diagnosticTracks: diagnosticTracksFor(endpoint.url, endpoint.method, endpoint.inputPoints, false, endpoint.contentType),
         });
       }
     }
@@ -4309,6 +4316,8 @@ export class BaselineFlowService {
     // scan request へ添える。実 ZAP は proxy 経由 login で jar を作るため値は渡さない。
     let sessionCookieNames: readonly string[] | undefined;
     let scanSessionCookies: readonly LoginSessionCookie[] | undefined;
+    let scanSessionHeaders: BrowserSessionState['headers'];
+    let scanBrowserSession: BrowserSessionState | undefined;
     let expectedAuthenticatedUrlPrefix: string | undefined;
     let authenticationProbe: { readonly url: string; readonly markers: readonly string[] } | undefined;
     if (role !== undefined) {
@@ -4326,9 +4335,42 @@ export class BaselineFlowService {
       }
       sessionCookieNames = names;
       scanSessionCookies = session.cookies;
+      scanBrowserSession = session.browserState;
+      const targetOrigins = new Set(targets.map((target) => new URL(target).origin));
+      scanSessionHeaders = (session.browserState.headers ?? []).filter((header) =>
+        header.name === 'Authorization'
+        && targetOrigins.has(header.origin)
+        && header.value.trim() !== ''
+        && !/[\r\n]/u.test(header.value));
       expectedAuthenticatedUrlPrefix = session.expectedUrlPrefix;
       if (session.verificationUrl !== undefined) {
-        authenticationProbe = { url: session.verificationUrl, markers: session.verificationMarkers ?? [] };
+        if (!ScopePolicy.decide(caseRecord.scope, session.verificationUrl).allowed) {
+          throw domainError('OutOfScope', `authentication verification URL is out of scope: ${session.verificationUrl}`);
+        }
+        const markers = (session.verificationMarkers ?? []).filter((marker) => marker !== '');
+        // Login assertions are browser-DOM assertions. Searching the same marker in
+        // ZAP's raw HTTP response rejects valid SPAs because their authenticated UI
+        // is rendered only after JavaScript executes. Re-check the live browser state
+        // immediately before scanning, including local/session storage. ZAP retains
+        // responsibility for detecting redirects and replaced cookies.
+        if (this.deps.interactiveBrowser !== undefined) {
+          const verification = await this.deps.interactiveBrowser.execute({
+            targetUrl: session.verificationUrl,
+            scope: caseRecord.scope,
+            browserSession: session.browserState,
+            steps: [
+              { kind: 'navigate', target: session.verificationUrl },
+              ...markers.map((marker) => ({ kind: 'assert' as const, target: marker })),
+            ],
+          });
+          if (session.expectedUrlPrefix !== undefined && !verification.finalUrl.startsWith(session.expectedUrlPrefix)) {
+            throw domainError('ValidationFailed', `authenticated scan preflight left the expected URL prefix: ${verification.finalUrl}`);
+          }
+          if (verification.assertions.some((assertion) => !assertion.passed)) {
+            throw domainError('ValidationFailed', `authenticated scan preflight failed for ${session.verificationUrl}: browser success marker was not present`);
+          }
+        }
+        authenticationProbe = { url: session.verificationUrl, markers: [] };
       }
     }
     const workflowStep = plan.steps.find((candidate) => candidate.kind === 'workflow-scan');
@@ -4434,6 +4476,7 @@ export class BaselineFlowService {
     });
     const engineRunId = await this.deps.scanEngine.start(scanRequest, {
       ...(scanSessionCookies === undefined ? {} : { sessionCookies: scanSessionCookies }),
+      ...(scanSessionHeaders === undefined ? {} : { sessionHeaders: scanSessionHeaders }),
       requestSeeds: zapCandidates.map((candidate) => ({
         url: ScopePolicy.canonicalUrl(candidate.url),
         method: candidate.method.toUpperCase(),
@@ -4619,7 +4662,9 @@ export class BaselineFlowService {
         const observed = await observer.observe({
           targetUrl,
           scope: caseRecord.scope,
-          ...(appliedCookies === undefined ? {} : { sessionCookies: appliedCookies }),
+          ...(scanBrowserSession === undefined
+            ? appliedCookies === undefined ? {} : { sessionCookies: appliedCookies }
+            : { browserSession: scanBrowserSession }),
         });
         const valueFlows = buildDomCandidate(observed.observations);
         const projectedFlows = valueFlows.map((candidate) => ({
@@ -4701,13 +4746,20 @@ export class BaselineFlowService {
           const sessionCookies = scanSessionCookies === undefined
             ? []
             : applicableSessionCookies([...scanSessionCookies], baseUrl);
+          const sessionHeaders = (scanSessionHeaders ?? [])
+            .filter((header) => header.origin === baseUrl)
+            .map((header) => ({ name: header.name, value: header.value }));
           const createTransport = (): WorkflowScanTransport => {
             const transport = new SharedBudgetWorkflowTransport(
               this.deps.workflowScanTransportFactory!({
                 baseUrl,
                 maxRequests: workflowStep.limits.maxRequests,
-                redactionValues: sessionCookies.map((cookie) => cookie.value),
+                redactionValues: [
+                  ...sessionCookies.map((cookie) => cookie.value),
+                  ...sessionHeaders.map((header) => header.value),
+                ],
                 sessionCookies: sessionCookies.map((cookie) => ({ name: cookie.name, value: cookie.value })),
+                ...(sessionHeaders.length === 0 ? {} : { sessionHeaders }),
                 ...(control.signal === undefined ? {} : { signal: control.signal }),
               }),
               budget,
@@ -4727,7 +4779,7 @@ export class BaselineFlowService {
             {
               baseUrl,
               targets: targetsForOrigin,
-              authenticated: sessionCookies.length > 0,
+              authenticated: sessionCookies.length > 0 || sessionHeaders.length > 0,
               maxRequests: workflowStep.limits.maxRequests,
               checkIds: selectedWorkflowCheckIds,
               ...(control.signal === undefined ? {} : { signal: control.signal }),

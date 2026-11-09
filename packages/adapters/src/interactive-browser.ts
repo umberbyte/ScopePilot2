@@ -23,7 +23,7 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
     }
     const playwright = await import('playwright');
     const browser = await playwright.chromium.launch();
-    const context = await browser.newContext();
+    const context = await browser.newContext({ serviceWorkers: 'block' });
     let lastStatus: number | null = null;
     let lastHeaders: readonly (readonly [string, string])[] = [];
     const startedAt = Date.now();
@@ -37,13 +37,28 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
         if (ScopePolicy.decide(input.scope, url).allowed) await route.continue();
         else await route.abort('blockedbyclient');
       });
-      if (input.sessionCookies !== undefined && input.sessionCookies.length > 0) {
-        await context.addCookies(input.sessionCookies.map((cookie) => ({
+      await context.routeWebSocket(/.*/, async (webSocket) => {
+        const scopeUrl = webSocket.url().replace(/^ws:/i, 'http:').replace(/^wss:/i, 'https:');
+        if (ScopePolicy.decide(input.scope, scopeUrl).allowed) webSocket.connectToServer();
+        else await webSocket.close({ code: 1008, reason: 'blocked by scope' });
+      });
+      const sessionCookies = input.browserSession?.cookies ?? input.sessionCookies ?? [];
+      if (sessionCookies.length > 0) {
+        await context.addCookies(sessionCookies.map((cookie) => ({
           name: cookie.name,
           value: cookie.value,
           domain: cookie.domain,
           path: cookie.path,
         })));
+      }
+      const sessionOrigins = input.browserSession?.origins ?? [];
+      if (sessionOrigins.length > 0) {
+        await context.addInitScript(({ origins }) => {
+          const current = origins.find((entry) => entry.origin === globalThis.location.origin);
+          if (current === undefined) return;
+          for (const entry of current.localStorage) globalThis.localStorage.setItem(entry.name, entry.value);
+          for (const entry of current.sessionStorage) globalThis.sessionStorage.setItem(entry.name, entry.value);
+        }, { origins: sessionOrigins });
       }
       const page = await context.newPage();
       page.on('response', (response) => {

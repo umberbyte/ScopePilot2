@@ -5,6 +5,7 @@ import {
   classifyGraphqlOperation,
   normalizeOpenApiServers,
   normalizePostmanCollection,
+  parseOpenApiDocument,
   planApiCandidates,
   requireSecretVariable,
   resolveSchemaReference,
@@ -92,5 +93,65 @@ describe('api-scanning (F12)', () => {
     ]);
     assert.equal(candidates[0]?.observed, false);
     assert.equal(candidates[1]?.observed, true);
+  });
+
+  test('OpenAPI 3 / Swagger 2 の入力点を値なしで抽出する', () => {
+    const openapi = parseOpenApiDocument({
+      openapi: '3.1.0',
+      servers: [{ url: 'http://api.fixture.test' }],
+      components: {
+        schemas: {
+          Feedback: {
+            type: 'object',
+            properties: { comment: { type: 'string' }, rating: { type: 'integer' } },
+          },
+        },
+      },
+      paths: {
+        '/feedback': {
+          parameters: [{ name: 'tenant', in: 'header', schema: { type: 'string' } }],
+          post: {
+            parameters: [{ name: 'preview', in: 'query', schema: { type: 'boolean' } }],
+            requestBody: {
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/Feedback' } } },
+            },
+          },
+        },
+      },
+    });
+    assert.deepEqual(openapi.endpoints[0], {
+      method: 'POST',
+      path: '/feedback',
+      inputPoints: [
+        { name: 'tenant', location: 'header', type: 'string' },
+        { name: 'preview', location: 'query', type: 'boolean' },
+        { name: 'comment', location: 'body', type: 'string' },
+        { name: 'rating', location: 'body', type: 'integer' },
+      ],
+      contentType: 'application/json',
+    });
+
+    const swagger = parseOpenApiDocument({
+      swagger: '2.0',
+      host: 'api.fixture.test',
+      schemes: ['http'],
+      consumes: ['application/json'],
+      paths: {
+        '/upload': {
+          post: {
+            consumes: ['multipart/form-data'],
+            parameters: [
+              { name: 'description', in: 'formData', type: 'string' },
+              { name: 'document', in: 'formData', type: 'file' },
+            ],
+          },
+        },
+      },
+    });
+    assert.deepEqual(swagger.endpoints[0]?.inputPoints, [
+      { name: 'description', location: 'body', type: 'string' },
+      { name: 'document', location: 'file', type: 'file' },
+    ]);
+    assert.equal(swagger.endpoints[0]?.contentType, 'multipart/form-data');
   });
 });

@@ -53,12 +53,24 @@ export interface BrowserOriginStorage {
 }
 
 /**
+ * Origin-bound authentication header observed after login. Values are
+ * secret-bearing and must remain in memory; only allow-listed header names are
+ * captured by the browser adapter.
+ */
+export interface BrowserSessionHeader {
+  readonly origin: string;
+  readonly name: 'Authorization';
+  readonly value: string;
+}
+
+/**
  * Authenticated browser state used only between Core and browser adapters.
  * It is deliberately absent from contracts and persistence repositories.
  */
 export interface BrowserSessionState {
   readonly cookies: readonly LoginSessionCookie[];
   readonly origins: readonly BrowserOriginStorage[];
+  readonly headers?: readonly BrowserSessionHeader[];
 }
 
 /** 能動診断 engine (ZAP 相当、Delegated)。停止は冪等とする (F11-UT-005)。 */
@@ -77,6 +89,8 @@ export interface ActiveScanEnginePort {
  */
 export interface ActiveScanExecutionContext {
   readonly sessionCookies?: readonly LoginSessionCookie[];
+  /** Origin-bound authentication headers. Values never enter ActiveScanRequest or evidence. */
+  readonly sessionHeaders?: readonly BrowserSessionHeader[];
   readonly requestSeeds: readonly {
     readonly url: string;
     readonly method: string;
@@ -329,6 +343,8 @@ export interface DomObservationPort {
       readonly allowedOrigins: readonly string[];
       readonly deniedOrigins: readonly string[];
     };
+    /** Full in-memory state is required for SPAs that keep bearer tokens in browser storage. */
+    readonly browserSession?: BrowserSessionState;
     /** Core-filtered role cookies for this target. Values must stay inside the browser operation. */
     readonly sessionCookies?: readonly LoginSessionCookie[];
   }): Promise<{
@@ -363,6 +379,9 @@ export interface InteractiveBrowserPort {
       readonly deniedOrigins: readonly string[];
     };
     readonly steps: readonly InteractiveBrowserStep[];
+    /** Full in-memory browser state for authenticated SPA verification. Never persisted or returned. */
+    readonly browserSession?: BrowserSessionState;
+    /** Cookie-only compatibility path for callers that do not hold browser storage. */
     readonly sessionCookies?: readonly LoginSessionCookie[];
     readonly files?: readonly InteractiveBrowserFile[];
   }): Promise<{

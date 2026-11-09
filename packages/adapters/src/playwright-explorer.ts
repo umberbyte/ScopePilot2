@@ -315,16 +315,49 @@ export function requestInputPoints(request: PlaywrightRequest): readonly Request
   return points;
 }
 
-const createDefaultLauncher = (fixedCookies?: readonly BrowserCookie[], proxyServer?: string): BrowserLauncher => {
+const createDefaultLauncher = (
+  fixedCookies: readonly BrowserCookie[] | undefined,
+  proxyServer: string | undefined,
+  requestAllowed: (url: string) => boolean,
+): BrowserLauncher => {
   return async () => {
     const playwright = await import('playwright');
     const browser = await playwright.chromium.launch(proxyServer === undefined ? {} : { proxy: { server: proxyServer } });
+    const newScopedContext = async () => {
+      const context = await browser.newContext(proxyServer === undefined
+        ? { serviceWorkers: 'block' }
+        : { ignoreHTTPSErrors: true, serviceWorkers: 'block' });
+      await context.route('**/*', async (route) => {
+        const requestUrl = route.request().url();
+        // blob:/data: and other browser-local resources do not cause network
+        // egress. HTTP(S) requests, including redirects and subresources, must
+        // pass the current case scope before the browser sends them.
+        if (!/^https?:/i.test(requestUrl) || requestAllowed(requestUrl)) {
+          await route.continue();
+        } else {
+          await route.abort('blockedbyclient');
+        }
+      });
+      await context.routeWebSocket(/.*/, async (webSocket) => {
+        // ScopePolicy is expressed in HTTP(S) origins. A WebSocket opened by
+        // an allowed HTTP(S) page belongs to the equivalent WS(S) origin.
+        const scopeUrl = webSocket.url()
+          .replace(/^ws:/i, 'http:')
+          .replace(/^wss:/i, 'https:');
+        if (requestAllowed(scopeUrl)) {
+          webSocket.connectToServer();
+        } else {
+          await webSocket.close({ code: 1008, reason: 'blocked by scope' });
+        }
+      });
+      return context;
+    };
     return {
       newPage: async (session?: BrowserSessionState) => {
         // ZAP 等の自前 proxy を通る HTTPS は proxy のルート CA で再署名される。
         // fresh な browser context はその CA を信頼しないため、明示的に proxy を
         // 指定した観測に限り証明書検証を免除する (対象・経路は我々の管理内)。
-        const context = await browser.newContext(proxyServer === undefined ? {} : { ignoreHTTPSErrors: true });
+        const context = await newScopedContext();
         // 構成時 cookie と呼出時 cookie (runLogin で得た session) を context へ注入する。
         const cookies = [...(fixedCookies ?? []), ...(session?.cookies ?? [])];
         if (cookies.length > 0) {
@@ -485,7 +518,7 @@ const createDefaultLauncher = (fixedCookies?: readonly BrowserCookie[], proxySer
       },
       verifyExecution: async (url: string, session?: BrowserSessionState) => {
         // 検証専用 page: dialog は自動で dismiss しつつ種別と文言 (先頭のみ) を記録する。
-        const context = await browser.newContext(proxyServer === undefined ? {} : { ignoreHTTPSErrors: true });
+        const context = await newScopedContext();
         const cookies = [...(fixedCookies ?? []), ...(session?.cookies ?? [])];
         if (cookies.length > 0) {
           await context.addCookies(cookies.map((cookie) => ({
@@ -631,7 +664,11 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
 
   constructor(options: PlaywrightExplorerOptions) {
     this.scope = options.scope;
-    this.launcher = options.launcher ?? createDefaultLauncher(options.cookies, options.proxyServer);
+    this.launcher = options.launcher ?? createDefaultLauncher(
+      options.cookies,
+      options.proxyServer,
+      (url) => ScopePolicy.decide(this.scope, url).allowed,
+    );
     this.beforeSessionObservation = options.beforeSessionObservation;
   }
 
