@@ -166,6 +166,9 @@ try {
       visitedUrls: urls,
       apiPathShapes: [...apiPaths].sort(),
       candidates: exploration.candidates.map((candidate) => ({
+        score: candidate.score,
+        scoreSignals: candidate.scoreSignals,
+        provenance: candidate.provenance,
         url: candidate.url,
         method: candidate.method,
         category: candidate.category,

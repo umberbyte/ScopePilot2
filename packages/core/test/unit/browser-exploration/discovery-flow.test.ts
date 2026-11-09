@@ -75,3 +75,16 @@ test('reviewed interactive workflow routes and requests are merged into future e
   assert.ok(result.candidates.some((candidate) => candidate.url === `${origin}/api/items/42` && candidate.requestId === 'owned-workflow-1'));
   assert.ok(result.candidates.some((candidate) => candidate.url === `${origin}/#/dialog/42` && candidate.diagnosticTracks?.includes('browser-dom')));
 });
+
+test('login JWT review is passive, exposed as redacted signals and kept separate from acceptance', async () => {
+  const token = `${Buffer.from('{"alg":"none"}').toString('base64url')}.${Buffer.from('{"sub":"private-subject"}').toString('base64url')}.`;
+  const flow = await bootstrapFlow({ loginExecutor: { engineVersion: 'owned-login', execute: async () => ({ authenticated: true, finalUrl: `${origin}/account`, cookies: [{ name: 'session', value: token, domain: 'fixture.target.test', path: '/' }] }) } });
+  flow.service.registerLoginFlow(flow.operator, { role: 'user', flowVersion: 'v1', steps: [{ kind: 'navigate', target: `${origin}/login` }, { kind: 'assert', target: 'Owned dashboard' }] });
+  await flow.service.runLogin(flow.operator, { role: 'user', baseUrl: origin, expectedUrlPrefix: origin, secretValues: {} });
+  const { plan } = flow.service.buildExplorationPlan(flow.operator, [origin]);
+  const result = await flow.service.runExploration(flow.operator, plan, flow.service.confirmPlan(plan, flow.operator), { maxDepth: 1 });
+  assert.ok(result.authenticationReview?.some((signal) => signal.ruleId === 'jwt-none'));
+  assert.ok(flow.service.listFindings().some((finding) => finding.title.includes('acceptance untested') && finding.source.unverified));
+  assert.equal(JSON.stringify({ result, findings: flow.service.listFindings() }).includes(token), false);
+  assert.equal(JSON.stringify(result).includes('private-subject'), false);
+});

@@ -238,8 +238,12 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       if (body === undefined) {
         return;
       }
+      const controller = new AbortController();
+      const abortOnDisconnect = () => { if (!response.writableEnded) controller.abort(); };
+      response.on('close', abortOnDisconnect);
       try {
         const result = await service.runExploration(operator, planField(body), confirmationField(body), {
+          signal: controller.signal,
           maxDepth: positiveIntegerField(body, 'maxDepth'),
           // role 指定時は runLogin 済み session で観測する (design/f09)。
           ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
@@ -247,6 +251,8 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondJson(response, 200, result);
       } catch (cause) {
         return respondDomainError(response, cause);
+      } finally {
+        response.off('close', abortOnDisconnect);
       }
     }
     if (route === 'POST /api/run/scan/start') {

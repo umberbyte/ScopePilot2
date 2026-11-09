@@ -92,3 +92,24 @@ describe('production engine composition', () => {
     assert.equal(zap?.guaranteeLevels.preSendScopeEnforcement, 'Unsupported');
   });
 });
+
+test('local component database rejects missing pins, tampering and unapproved rollback', async () => {
+  const { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { assetHash } = await import('@scopepilot2/core');
+  const { canonicalJson } = await import('@scopepilot2/contracts');
+  const directory = mkdtempSync(join(tmpdir(), 'scopepilot-owned-db-'));
+  const path = join(directory, 'database.json');
+  try {
+    const entries = [{ id: 'OWNED-DB', name: 'example', introduced: '1.0.0', fixed: '2.0.0' }];
+    const sha256 = assetHash(canonicalJson(entries));
+    writeFileSync(path, JSON.stringify({ source: 'owned-fixture', version: '2026-11-10', sha256, entries }));
+    assert.throws(() => resolveEngineSelection({ SCOPEPILOT_COMPONENT_DB_PATH: path }), /pins/);
+    const env = { SCOPEPILOT_COMPONENT_DB_PATH: path, SCOPEPILOT_COMPONENT_DB_SHA256: sha256, SCOPEPILOT_COMPONENT_DB_VERSION: '2026-11-10' };
+    assert.equal(resolveEngineSelection(env).componentDatabase?.version, '2026-11-10');
+    assert.throws(() => resolveEngineSelection({ ...env, SCOPEPILOT_COMPONENT_DB_VERSION: '2026-11-11' }), /rollback/);
+    writeFileSync(path, JSON.stringify({ source: 'owned-fixture', version: '2026-11-10', sha256, entries: [] }));
+    assert.throws(() => resolveEngineSelection(env), /snapshot/);
+  } finally { unlinkSync(path); rmdirSync(directory); }
+});

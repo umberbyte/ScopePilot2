@@ -1,5 +1,5 @@
 ﻿import type { PageObservation } from '@scopepilot2/contracts';
-import { analyzeClientAsset, assetHash, allowedTextAsset, extractAssetReferences, MAX_ASSET_BYTES, ScopePolicy, type ComponentDatabase, type ExplorationControl } from '@scopepilot2/core';
+import { analyzeClientAsset, discoveryFingerprint, allowedTextAsset, extractAssetReferences, MAX_ASSET_BYTES, ScopePolicy, type ComponentDatabase, type ExplorationControl } from '@scopepilot2/core';
 
 /** Streaming acquisition for explicit static references; no execution and no automatic redirect following. */
 export async function readStaticAsset(input: {
@@ -7,7 +7,7 @@ export async function readStaticAsset(input: {
   scope: { allowedOrigins: readonly string[]; deniedOrigins: readonly string[] };
   control?: ExplorationControl;
   database?: ComponentDatabase;
-  analyseScript?: (body: string, url: string) => Pick<PageObservation, 'routeTemplates' | 'scriptApiCalls'>;
+  analyseScript?: (body: string, url: string) => Pick<PageObservation, 'links' | 'routeTemplates' | 'scriptApiCalls'>;
 }): Promise<PageObservation | null> {
   let current = input.url;
   const deadline = AbortSignal.timeout(Math.min(input.control?.timeoutMs ?? 15000, 15000));
@@ -46,7 +46,7 @@ export async function readStaticAsset(input: {
     } finally { reader.releaseLock(); }
     const body = Buffer.concat(chunks).toString('utf8');
     const asset = analyzeClientAsset({ url: current, sourceUrl: input.url, contentType, body, headers: { server: response.headers.get('server') ?? '', 'x-powered-by': response.headers.get('x-powered-by') ?? '' }, ...(input.database ? { database: input.database } : {}) });
-    return { url: input.url, finalUrl: current, status: response.status, contentType, depth: 0, discoveredFrom: null, originType: 'crawl', links: [], forms: [], ...(input.analyseScript?.(body, current) ?? {}), ...(asset ? { assets: [asset], discoveryLinks: extractAssetReferences(body, current), contentFingerprint: assetHash(body) } : {}) };
+    return { url: input.url, finalUrl: current, status: response.status, contentType, depth: 0, discoveredFrom: null, originType: 'crawl', links: [], forms: [], ...(input.analyseScript?.(body, current) ?? {}), ...(asset ? { assets: [asset], discoveryLinks: extractAssetReferences(body, current), contentFingerprint: discoveryFingerprint(body, current) } : {}) };
   }
   return null;
 }

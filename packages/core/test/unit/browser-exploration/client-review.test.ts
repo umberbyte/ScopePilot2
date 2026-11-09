@@ -1,9 +1,9 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { generateKeyPairSync } from 'node:crypto';
 import { canonicalJson } from '@scopepilot2/contracts';
 import { analyzeClientAsset, assetHash, reviewJwt, validateComponentDatabase } from '../../../src/domain/client-review.ts';
-import { extractAssetReferences, rankCandidates } from '../../../src/domain/exploration-discovery.ts';
+import { discoveryFingerprint, extractAssetReferences, rankCandidates } from '../../../src/domain/exploration-discovery.ts';
 
 const url = 'https://owned.test/main.js';
 const analyze = (body: string) => analyzeClientAsset({ url, sourceUrl: 'https://owned.test/', contentType: 'application/javascript', body });
@@ -46,6 +46,10 @@ test('weak public key inspection records properties without key bytes', () => {
   assert.equal(result.signals[0]?.ruleId, 'weak-rsa-key');
   assert.equal(JSON.stringify(result).includes('BEGIN PUBLIC KEY'), false);
 });
+test('wildcard path echoes share a negative fingerprint without storing text', () => {
+  assert.equal(discoveryFingerprint('Missing /admin/', 'https://owned.test/admin/'), discoveryFingerprint('Missing /.scopepilot-missing-7d4f92c1', 'https://owned.test/.scopepilot-missing-7d4f92c1'));
+});
+
 test('bounded references reject out-of-origin, wildcard, embedded code, and data URLs', () => {
   const links = extractAssetReferences('Disallow: /hidden\nDisallow: /*\nSitemap: https://other.test/map\n', 'https://owned.test/robots.txt');
   assert.deepEqual(links, [{ url: 'https://owned.test/hidden', source: 'robots' }]);
@@ -60,4 +64,24 @@ test('ranking is stable, generic, explained and penalises transport and state ch
   assert.equal(ranked.at(-1)?.candidateId, 'transport');
   assert.ok(ranked.every((c) => c.scoreSignals?.length && c.provenance?.length));
   assert.deepEqual(rankCandidates([base, { ...base, candidateId: 'b' }]).map((c) => c.candidateId), ['a', 'b']);
+});
+
+test('weak JWT signing key and key confusion are offline observations; valid RSA signature stays distinct', async () => {
+  const { createHmac, sign } = await import('node:crypto');
+  const header = Buffer.from('{"alg":"HS256"}').toString('base64url');
+  const payload = Buffer.from('{"exp":2000000000}').toString('base64url');
+  const message = `${header}.${payload}`;
+  const token = `${message}.${createHmac('sha256', 'secret').update(message).digest('base64url')}`;
+  assert.ok(reviewJwt(token).some((signal) => signal.ruleId === 'jwt-weak-key'));
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const pem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const confusing = `${message}.${createHmac('sha256', pem).update(message).digest('base64url')}`;
+  assert.ok(reviewJwt(confusing, pem).some((signal) => signal.ruleId === 'jwt-key-confusion'));
+  const rsa = `${Buffer.from('{"alg":"RS256"}').toString('base64url')}.${payload}`;
+  assert.ok(reviewJwt(`${rsa}.${sign('RSA-SHA256', Buffer.from(rsa), privateKey).toString('base64url')}`, pem).some((signal) => signal.ruleId === 'jwt-signature' && signal.detail.startsWith('Signature matches')));
+});
+test('prerelease banners are not asserted as exact stable versions; header signatures use only named products', () => {
+  assert.deepEqual(analyze('jquery v3.4.1-beta')!.signals, []);
+  const result = analyzeClientAsset({ url, sourceUrl: url, contentType: 'text/plain', body: 'ordinary', headers: { server: 'nginx/1.2.3', 'x-powered-by': 'PHP/8.2.0' } })!;
+  assert.equal(result.signals.filter((signal) => signal.kind === 'dependency').length, 2);
 });

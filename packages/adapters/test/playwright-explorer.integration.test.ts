@@ -351,3 +351,26 @@ gated('GO-31 owned workflow observation', () => {
     } finally { await closeServer(server); }
   });
 });
+
+gated('GO-31 browser discovery budgets', () => {
+  test('subrequest budget blocks additional sends and worker registration attempts stay distinguishable', { timeout: 30000 }, async () => {
+    const hits: string[] = [];
+    const server = createServer((req, res) => {
+      hits.push(req.url!);
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(`<script>
+        navigator.serviceWorker.register('/owned-worker.js').catch(() => {});
+        fetch('/extra-a').catch(() => {}); fetch('/extra-b').catch(() => {});
+      </script><p>Owned page</p>`);
+    });
+    const origin = await listenOnLoopback(server);
+    const explorer = new PlaywrightExplorerAdapter({ scope: { allowedOrigins: [origin], deniedOrigins: [] } });
+    try {
+      let sent = 0;
+      const observation = await explorer.observe(origin, { timeoutMs: 10000, consumeRequest: () => { if (sent >= 1) return false; sent++; return true; } });
+      assert.equal(sent, 1);
+      assert.deepEqual(hits, ['/']);
+      assert.ok(observation?.serviceWorkerRegistrations?.some((registration) => registration.url === `${origin}/owned-worker.js` && registration.status === 'attempted'));
+    } finally { await explorer.close(); await closeServer(server); }
+  });
+});

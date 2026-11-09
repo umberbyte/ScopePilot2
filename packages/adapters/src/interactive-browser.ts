@@ -38,6 +38,7 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
     const abort = () => { void context.close().catch(() => undefined); };
     const timer = setTimeout(abort, maxDurationMs);
     input.signal?.addEventListener('abort', abort, { once: true });
+    if (input.signal?.aborted) abort();
     try {
       await context.route('**/*', async (route) => {
         const url = route.request().url();
@@ -50,7 +51,7 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
       });
       await context.routeWebSocket(/.*/, async (webSocket) => {
         const scopeUrl = webSocket.url().replace(/^ws:/i, 'http:').replace(/^wss:/i, 'https:');
-        if (ScopePolicy.decide(input.scope, scopeUrl).allowed) webSocket.connectToServer();
+        if (!input.signal?.aborted && requests < maxRequests && ScopePolicy.decide(input.scope, scopeUrl).allowed) { requests++; webSocket.connectToServer(); }
         else await webSocket.close({ code: 1008, reason: 'blocked by scope' });
       });
       const sessionCookies = input.browserSession?.cookies ?? input.sessionCookies ?? [];

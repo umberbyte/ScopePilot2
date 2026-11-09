@@ -1,6 +1,12 @@
 ﻿import type { ScanCandidate, DiscoverySource } from '@scopepilot2/contracts';
-import { ScopePolicy } from './scope-policy.ts';
+import { assetHash } from './client-review.ts';
 
+/** Path-echoing wildcard pages share a negative-control fingerprint without retaining text. */
+export function discoveryFingerprint(body: string, url: string): string {
+  const parsed = new URL(url);
+  const text = parsed.pathname.length > 1 ? body.replaceAll(parsed.href, '<url>').replaceAll(parsed.pathname, '<path>') : body;
+  return assetHash(text.replace(/\b\d{4}-\d{2}-\d{2}T[\d:.Z+-]+\b/g, '<time>'));
+}
 export const DISCOVERY_VERSION = 'discovery-1';
 /** Small, target-independent list. Only used with confirmed ActiveCrawl permission. */
 export const DISCOVERY_WORDLIST = ['/admin/', '/backup/', '/api/', '/.well-known/security.txt'] as const;
@@ -41,16 +47,25 @@ export function extractAssetReferences(body: string, url: string): readonly { ur
 
 /** Explainable priority, independent of product or challenge route names. Never grants permission. */
 export function rankCandidates(candidates: readonly ScanCandidate[]): ScanCandidate[] {
+  const sources = new Map<string, Set<string>>();
+  for (const candidate of candidates) {
+    const urls = sources.get(candidate.observationUrl) ?? new Set<string>();
+    urls.add(candidate.url); sources.set(candidate.observationUrl, urls);
+  }
   return candidates.map((candidate, index) => {
     const signals: string[] = [];
     let score = 0;
     const add = (points: number, reason: string) => { score += points; signals.push(`${points >= 0 ? '+' : ''}${points} ${reason}`); };
     const source = candidate.guidelineBasis.join(' ');
-    if (source.includes('observed-http')) add(60, 'observed browser request');
+    if (source.includes('document-hint')) add(10, 'document hint; execution unobserved');
+    else if (source.includes('observed-http')) add(60, 'observed browser request');
     else if (source.includes('script-api')) add(35, 'script definition; execution unobserved');
     else if (source.includes('api-spec')) add(25, 'specification; execution unobserved');
     else add(40, 'rendered page or form');
     add(Math.min(candidate.inputPoints?.length ?? 0, 5) * 5, 'input points');
+    const centrality = Math.min(5, Math.max(0, (sources.get(candidate.observationUrl)?.size ?? 1) - 1));
+    if (centrality) add(centrality, 'source observation links multiple targets');
+    if (new Set(candidate.observedRoles ?? []).size > 1) add(5, 'multiple role observations; authorization difference untested');
     if (candidate.category === 'form') add(10, 'observed form');
     const url = new URL(candidate.url);
     if (/\.(?:js|mjs|css|map|txt|json|pem|crt|png|woff2?)(?:$)/i.test(url.pathname)) add(-40, 'static resource');

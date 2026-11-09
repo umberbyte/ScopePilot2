@@ -10,7 +10,7 @@ import { isStaticReference, readStaticAsset } from './static-assets.ts';
  */
 import type { BrowserSessionState, ExplorationControl, ExplorationPort, LoginSessionCookie } from '@scopepilot2/core';
 import type { ObservedHttpRequest, PageObservation, RequestInputPoint } from '@scopepilot2/contracts';
-import { analyzeClientAsset, assetHash, allowedTextAsset, extractAssetReferences, MAX_ASSET_BYTES, validateComponentDatabase, ScopePolicy, type ComponentDatabase } from '@scopepilot2/core';
+import { analyzeClientAsset, discoveryFingerprint, allowedTextAsset, extractAssetReferences, MAX_ASSET_BYTES, validateComponentDatabase, ScopePolicy, type ComponentDatabase } from '@scopepilot2/core';
 import type { Request as PlaywrightRequest, Response as PlaywrightResponse } from 'playwright';
 
 /** テスト差替え用の最小 browser 面 (playwright の該当部分に対応)。 */
@@ -39,7 +39,7 @@ export interface StubPage {
   observedResourceIds?(): Promise<readonly string[]>;
   /** Already-loaded JavaScript response bodies. Reading these must not issue another request. */
   scriptSources?(): Promise<readonly string[]>;
-  observedAssets?(): Promise<Pick<PageObservation, 'assets' | 'discoveryLinks' | 'contentFingerprint'>>;
+  observedAssets?(): Promise<Pick<PageObservation, 'assets' | 'discoveryLinks' | 'contentFingerprint' | 'serviceWorkerRegistrations'>>;
   clientRoutes?(): Promise<NonNullable<PageObservation['clientRoutes']>>;
   close(): Promise<void>;
 }
@@ -346,7 +346,7 @@ const createDefaultLauncher = (
         const scopeUrl = webSocket.url()
           .replace(/^ws:/i, 'http:')
           .replace(/^wss:/i, 'https:');
-        if (requestAllowed(scopeUrl)) {
+        if (requestAllowed(scopeUrl) && !control?.signal?.aborted && (control?.consumeRequest() ?? true)) {
           webSocket.connectToServer();
         } else {
           await webSocket.close({ code: 1008, reason: 'blocked by scope' });
@@ -383,6 +383,15 @@ const createDefaultLauncher = (
           }, session!.origins);
         }
         await context.addInitScript(() => {
+          const workers: string[] = [];
+          Object.defineProperty(globalThis, '__scopepilotWorkers', { value: workers });
+          if (navigator.serviceWorker) {
+            const register = navigator.serviceWorker.register.bind(navigator.serviceWorker);
+            navigator.serviceWorker.register = (url, options) => {
+              if (workers.length < 32) workers.push(new URL(String(url), location.href).href);
+              return register(url, options);
+            };
+          }
           const routes: { url: string; source: 'history' | 'hash' }[] = [];
           Object.defineProperty(globalThis, '__scopepilotRoutes', { value: routes });
           const record = (source: 'history' | 'hash') => {
@@ -398,6 +407,7 @@ const createDefaultLauncher = (
         const page = await context.newPage();
         const abort = () => { void context.close().catch(() => undefined); };
         control?.signal?.addEventListener('abort', abort, { once: true });
+        if (control?.signal?.aborted) abort();
         const timeout = control ? setTimeout(abort, control.timeoutMs) : undefined;
         const requests: ObservedHttpRequest[] = [];
         const scriptSources: string[] = [];
@@ -420,11 +430,11 @@ const createDefaultLauncher = (
           const task = withResponseBodyDeadline(response.body()).then((body) => {
             if (!body || body.byteLength > MAX_ASSET_BYTES) return;
             const text = body.toString('utf8');
-            const asset = analyzeClientAsset({ url, sourceUrl, contentType, body: text, headers: response.headers(), ...(database ? { database } : {}) });
+            const asset = analyzeClientAsset({ url, sourceUrl, contentType, body: text, observedTokens: [...(session?.cookies ?? []).map((cookie) => cookie.value), ...(session?.origins ?? []).flatMap((origin) => [...origin.localStorage, ...origin.sessionStorage].map((entry) => entry.value)), ...(session?.headers ?? []).map((header) => header.value.replace(/^Bearer /i, ''))].slice(0, 128), headers: response.headers(), ...(database ? { database } : {}) });
             if (!asset) return;
             assets.set(url, asset);
             discoveryLinks.push(...extractAssetReferences(text, url));
-            if (response.request().isNavigationRequest() && response.frame() === page.mainFrame()) contentFingerprint = assetHash(text);
+            if (response.request().isNavigationRequest() && response.frame() === page.mainFrame()) contentFingerprint = discoveryFingerprint(text, url);
           }).catch(() => undefined).then(() => undefined);
           assetTasks.add(task);
           void task.finally(() => assetTasks.delete(task));
@@ -555,7 +565,8 @@ const createDefaultLauncher = (
           },
           observedAssets: async () => {
             await withCaptureDeadline(Promise.all([...assetTasks]));
-            return { assets: [...assets.values()], discoveryLinks: discoveryLinks.slice(0, 256), ...(contentFingerprint ? { contentFingerprint } : {}) };
+            const workerRegistrations = await page.evaluate(() => (globalThis as unknown as { __scopepilotWorkers?: string[] }).__scopepilotWorkers ?? []);
+            return { assets: [...assets.values()], serviceWorkerRegistrations: workerRegistrations.filter((url) => new URL(url).origin === new URL(page.url()).origin).map((url) => ({ url, status: 'attempted' as const })), discoveryLinks: discoveryLinks.slice(0, 256), ...(contentFingerprint ? { contentFingerprint } : {}) };
           },
           clientRoutes: async () => await page.evaluate(() => {
             return (globalThis as unknown as { __scopepilotRoutes?: { url: string; source: 'history' | 'hash' }[] }).__scopepilotRoutes ?? [];
@@ -732,7 +743,7 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
       options.cookies,
       options.proxyServer,
       (url) => ScopePolicy.decide(this.scope, url).allowed,
-      options.componentDatabase,
+      this.database,
     );
     this.beforeSessionObservation = options.beforeSessionObservation;
   }
@@ -801,7 +812,7 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
     }
     if (this.staticReader && sessionState === undefined && isStaticReference(url)) {
       try {
-        return await readStaticAsset({ url, scope: this.scope, ...(control ? { control } : {}), ...(this.database ? { database: this.database } : {}), analyseScript: (body, assetUrl) => ({ routeTemplates: extractScriptRouteLiterals(body, assetUrl).templates, scriptApiCalls: extractScriptApiCalls(body, assetUrl) }) });
+        return await readStaticAsset({ url, scope: this.scope, ...(control ? { control } : {}), ...(this.database ? { database: this.database } : {}), analyseScript: (body, assetUrl) => ({ links: extractScriptRouteLiterals(body, assetUrl).candidates, routeTemplates: extractScriptRouteLiterals(body, assetUrl).templates, scriptApiCalls: extractScriptApiCalls(body, assetUrl) }) });
       } catch (cause) {
         if (control?.signal?.aborted || cause instanceof TypeError || (cause instanceof Error && /abort|timeout/i.test(cause.name))) return navigationFailureObservation(url);
         throw cause;

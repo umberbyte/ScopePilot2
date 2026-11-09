@@ -79,7 +79,7 @@ export function reviewJwt(token: string, publicKey?: string): readonly ClientRev
   } catch { return []; }
 }
 /** Passive only: no network lookup, evaluation, or execution of untrusted code. */
-export function analyzeClientAsset(input: { url: string; sourceUrl: string; contentType: string; body: string; headers?: Readonly<Record<string, string>>; database?: ComponentDatabase }): AssetObservation | null {
+export function analyzeClientAsset(input: { url: string; sourceUrl: string; contentType: string; body: string; observedTokens?: readonly string[]; headers?: Readonly<Record<string, string>>; database?: ComponentDatabase }): AssetObservation | null {
   const { body } = input;
   const bytes = Buffer.byteLength(body);
   if (bytes > MAX_ASSET_BYTES || body.includes('\0') || !allowedTextAsset(input.url, input.contentType) || new URL(input.url).origin !== new URL(input.sourceUrl).origin) return null;
@@ -98,7 +98,7 @@ export function analyzeClientAsset(input: { url: string; sourceUrl: string; cont
     if (match) addComponent(match[1]!, match[2]);
   }
   // Versioned banner signatures and package metadata; never infer a version from an API name.
-  for (const match of body.matchAll(/\b(jquery|lodash|angular|react|moment)[ /@v-]+(\d+\.\d+\.\d+)\b/gi)) addComponent(match[1]!, match[2]);
+  for (const match of body.matchAll(/\b(jquery|lodash|angular|react|moment)[ /@v-]+(\d+\.\d+\.\d+)(?![\w.+-])/gi)) addComponent(match[1]!, match[2]);
   try {
     const metadata = JSON.parse(body) as Record<string, unknown>;
     if (typeof metadata.name === 'string') addComponent(metadata.name, typeof metadata.version === 'string' ? metadata.version : undefined);
@@ -143,6 +143,7 @@ export function analyzeClientAsset(input: { url: string; sourceUrl: string; cont
   if (pem) try {
     const key = pem[1] === 'CERTIFICATE' ? new X509Certificate(pem[0]).publicKey : createPublicKey(pem[0]);
     const bits = key.asymmetricKeyDetails?.modulusLength;
+    for (const token of (input.observedTokens ?? []).slice(0, 32)) signals.push(...reviewJwt(token, pem[0]));
     signals.push({ kind: 'public-key', ruleId: bits && bits < 2048 ? 'weak-rsa-key' : 'key-properties', confidence: 1, detail: `Public key algorithm=${key.asymmetricKeyType ?? 'unknown'}${bits ? ` bits=${bits}` : ''}`, fingerprint: assetHash(pem[0]) });
   } catch { /* Invalid PEM is not a key observation. */ }
   for (const match of body.matchAll(/\beyJ[A-Za-z0-9_-]{1,2048}\.[A-Za-z0-9_-]{1,8192}\.[A-Za-z0-9_-]{0,2048}/g)) {

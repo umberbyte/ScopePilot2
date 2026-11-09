@@ -2603,6 +2603,11 @@ export class BaselineFlowService {
     if (result.authenticated || (result.observedRequests?.length ?? 0) > 0) {
       const jwtValues = [...result.cookies.map((cookie) => cookie.value), ...(result.browserState?.origins ?? []).flatMap((origin) => [...origin.localStorage, ...origin.sessionStorage].map((entry) => entry.value)), ...(result.browserState?.headers ?? []).map((header) => header.value.replace(/^Bearer /i, ''))];
       const authenticationReview = jwtValues.slice(0, 128).flatMap((value) => reviewJwt(value));
+      if (authenticationReview.length) {
+        const evidence = await this.deps.evidence.saveText(`jwt-review:${input.role}`, canonicalJson({ analyzerVersion: 'client-review-1', signals: authenticationReview }));
+        const imported = this.importer.importObservationCandidates(authenticationReview.map((signal) => ({ key: `jwt-review:${signal.ruleId}`, title: `JWT: ${signal.ruleId} (passive review; acceptance untested)`, url: result.finalUrl, method: 'GET', param: signal.ruleId, severity: 'info' as const })), { now: this.deps.clock.now().toISOString(), engineVersion: 'client-review-1', makeFindingId: () => this.deps.ids.next('finding'), evidenceRef: evidence.evidenceId });
+        this.persistFindings([...imported.created, ...imported.reobserved]);
+      }
       this.loginObservations.set(input.role, {
         authenticationReview,
         url: result.finalUrl,
@@ -4048,6 +4053,9 @@ export class BaselineFlowService {
     if (step === undefined || step.kind !== 'explore') {
       throw domainError('ValidationFailed', 'plan does not contain an exploration step');
     }
+    if (step.discoverySources?.length && (step.operationClass !== 'ActiveCrawl' || !this.currentAuthorization().allowedOperationClasses.includes('ActiveCrawl'))) {
+      throw domainError('PermissionDenied', 'discovery execution requires current ActiveCrawl authorization');
+    }
     if (input.maxDepth < 1) {
       throw domainError('ValidationFailed', 'maxDepth must be at least 1');
     }
@@ -4096,6 +4104,8 @@ export class BaselineFlowService {
 
     let stopReason: StopReason = 'completed';
     let requests = 0;
+    let pageVisits = 0;
+    const maxFrontier = Math.min(20000, step.limits.maxPages * 4);
     const startedAt = Date.now();
     const negativeFingerprints = new Set<string>();
     // A normal missing path is a negative control for wildcard/soft-404 sites.
@@ -4139,11 +4149,12 @@ export class BaselineFlowService {
         this.record({ type: 'EgressDenied', at: this.deps.clock.now().toISOString(), url: canonical, reason: decision.reason });
         continue;
       }
-      if (requests >= step.limits.maxRequests || observations.length >= step.limits.maxPages) {
+      if (requests >= step.limits.maxRequests || pageVisits >= step.limits.maxPages) {
         stopReason = 'budget-exhausted';
         break;
       }
 
+      pageVisits++;
       let consumed = false;
       const control = {
         ...(input.signal ? { signal: input.signal } : {}),
@@ -4168,7 +4179,7 @@ export class BaselineFlowService {
         if (observed.contentFingerprint) negativeFingerprints.add(observed.contentFingerprint);
         continue;
       }
-      if (observed.status === 404 || (step.discoverySources?.length && [...DISCOVERY_WORDLIST, '/robots.txt', '/sitemap.xml', '/manifest.json'].includes(new URL(canonical).pathname) && observed.contentFingerprint && negativeFingerprints.has(observed.contentFingerprint))) continue;
+      if ((step.discoverySources?.length && observed.status === 404) || (step.discoverySources?.length && [...DISCOVERY_WORDLIST, '/robots.txt', '/sitemap.xml', '/manifest.json'].includes(new URL(canonical).pathname) && observed.contentFingerprint && negativeFingerprints.has(observed.contentFingerprint))) continue;
       const finalUrl = ScopePolicy.canonicalBrowserUrl(observed.finalUrl ?? observed.url);
       const finalDecision = ScopePolicy.decide(caseRecord.scope, finalUrl);
       if (!finalDecision.allowed) {
@@ -4185,7 +4196,7 @@ export class BaselineFlowService {
         for (const link of [...observation.links, ...(observation.discoveryLinks ?? []).filter((entry) => step.discoverySources?.length || ['source-map', 'module'].includes(entry.source)).map((entry) => entry.url)]) {
           if (/\.(?:png|jpe?g|gif|svg|webp|ico|woff2?|ttf|mp4|zip|exe|dll|wasm)(?:[?#]|$)/i.test(link)) continue;
           const linkCanonical = ScopePolicy.canonicalBrowserUrl(link);
-          if (!visited.has(linkCanonical)) {
+          if (!visited.has(linkCanonical) && frontier.length < maxFrontier && !frontier.some((entry) => entry.url === linkCanonical)) {
             frontier.push({ url: linkCanonical, depth: entry.depth + 1, discoveredFrom: finalUrl, origin: 'crawl', priority: this.isPrioritizedUrl(linkCanonical) ? 'high' : 'normal' });
           }
         }
@@ -4235,6 +4246,7 @@ export class BaselineFlowService {
       }
     }
 
+    if (stopReason === 'completed' && (requests >= step.limits.maxRequests || Date.now() - startedAt >= step.limits.maxDurationMinutes * 60000)) stopReason = 'budget-exhausted';
     const reviewAssets = [...new Map(observations.flatMap((observation) => observation.assets ?? []).map((asset) => [asset.url, asset])).values()];
     for (const asset of reviewAssets) {
       const reviewSignals = asset.signals.filter((signal) => !['dependency', 'public-key'].includes(signal.kind) || signal.ruleId === 'weak-rsa-key');
@@ -4273,12 +4285,14 @@ export class BaselineFlowService {
     const candidates: ScanCandidate[] = [];
     const candidateKeys = new Map<string, number>();
     for (const observation of [...observations, ...this.workflowObservations.values()]) {
-      for (const candidate of candidatesFromObservation(observation, this.deps.ids)) {
+      for (const rawCandidate of candidatesFromObservation(observation, this.deps.ids)) {
+        const candidate = input.role && observations.includes(observation) && (rawCandidate.requestId || rawCandidate.category !== 'api-endpoint') ? { ...rawCandidate, observedRoles: [input.role] } : rawCandidate;
         const key = `${candidate.category}|${candidate.category === 'page' ? ScopePolicy.canonicalBrowserUrl(candidate.url) : loginMergeKeyOf(candidate.method, candidate.url, candidate.inputPoints ?? [])}`;
         const previousIndex = candidateKeys.get(key);
         if (previousIndex !== undefined) {
           const previous = candidates[previousIndex]!;
-          if (candidate.confidence > previous.confidence) candidates[previousIndex] = candidate;
+          const representative = candidate.confidence > previous.confidence ? candidate : previous;
+          candidates[previousIndex] = { ...representative, observedRoles: [...new Set([...(previous.observedRoles ?? []), ...(candidate.observedRoles ?? [])])], provenance: [...(previous.provenance ?? [{ source: previous.guidelineBasis.join(','), url: previous.observationUrl }]), ...(candidate.provenance ?? [{ source: candidate.guidelineBasis.join(','), url: candidate.observationUrl }])] };
           continue;
         }
         candidateKeys.set(key, candidates.length);
@@ -5423,7 +5437,8 @@ function candidatesFromObservation(observation: PageObservation, ids: IdGenerato
 
 export function isSessionControlUrl(value: string): boolean {
   try {
-    const pathname = new URL(value).pathname.toLowerCase();
+    const parsed = new URL(value);
+    const pathname = (parsed.hash.startsWith('#/') || parsed.hash.startsWith('#!/') ? parsed.hash.replace(/^#!?/, '').split('?')[0]! : parsed.pathname).toLowerCase();
     return /\/(?:logout|log-out|logoff|signout|sign-out)(?:\.php)?\/?$/.test(pathname)
       || /\/(?:setup|install)(?:\.php)?\/?$/.test(pathname);
   } catch {
