@@ -10,7 +10,8 @@
 import type { Server } from 'node:http';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { DomainError, DocumentAuthMethods, hashStable, type DocumentAuthMethod, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
+import { assertRunStopReason, DomainError, DocumentAuthMethods, hashStable, type DocumentAuthMethod, type DomainErrorCode, type OperatorProfile, type StopReason } from '@scopepilot2/contracts';
+import { RunStateMachine } from '../domain/run-state-machine.ts';
 import type { BaselineFlowService } from './baseline-flow.ts';
 import { CodecRegistry, compareText, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
 import type { LoginFlowStep } from '../domain/authentication-session.ts';
@@ -47,7 +48,9 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
   interface ScanExecution {
     readonly executionId: string;
     readonly controller: AbortController;
-    state: 'queued' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed';
+    readonly machine: RunStateMachine;
+    dispatchState: 'queued' | 'dispatched';
+    stopReason?: StopReason;
     currentEngine: 'zap' | 'nuclei' | 'scopepilot';
     currentCommand: string;
     progress: number;
@@ -262,7 +265,8 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         const execution: ScanExecution = {
           executionId,
           controller,
-          state: 'queued',
+          machine: new RunStateMachine('Confirmed'),
+          dispatchState: 'queued',
           currentEngine: 'scopepilot',
           currentCommand: '',
           progress: 0,
@@ -270,7 +274,8 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         };
         scanExecutions.set(executionId, execution);
         void (async () => {
-          execution.state = 'running';
+          execution.dispatchState = 'dispatched';
+          execution.machine.transition('Running');
           try {
             const result = await service.runActiveScan(operator, plan, confirmation, adopted, role, {
               signal: controller.signal,
@@ -280,15 +285,20 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
                 if (event.command !== undefined) execution.currentCommand = event.command;
                 execution.logs.push(`${event.at} [${event.engine.toUpperCase()}] ${event.message}${event.command === undefined ? '' : `\n  $ ${event.command}`}`);
                 if (execution.logs.length > 500) execution.logs.splice(0, execution.logs.length - 500);
-                if (event.phase === 'stopped') execution.state = 'stopped';
+                // Engine stop events are progress only; await final persistence/cleanup.
               },
             });
+            assertRunStopReason(result.runRecord.state, result.runRecord.stopReason);
+            if (result.runRecord.state === 'Stopped') execution.machine.requestStop();
+            execution.machine.transition(result.runRecord.state);
             execution.result = result;
-            execution.state = 'completed';
+            if (result.runRecord.stopReason !== undefined) execution.stopReason = result.runRecord.stopReason;
             execution.progress = 100;
           } catch (cause) {
-            const cancelled = controller.signal.aborted || (cause instanceof DomainError && cause.code === 'Cancelled');
-            execution.state = cancelled ? 'stopped' : 'failed';
+            const cancelled = cause instanceof DomainError && cause.code === 'Cancelled';
+            if (cancelled) execution.machine.requestStop();
+            execution.machine.transition(cancelled ? 'Stopped' : 'Failed');
+            execution.stopReason = cancelled ? 'user-request' : 'engine-failure';
             execution.error = cause instanceof Error ? cause.message : String(cause);
             execution.logs.push(`${new Date().toISOString()} [ScopePilot] ${cancelled ? '停止しました' : `エラー: ${execution.error}`}`);
           }
@@ -306,7 +316,10 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       }
       return respondJson(response, 200, {
         executionId: execution.executionId,
-        state: execution.state,
+        state: execution.machine.state,
+        runState: execution.machine.state,
+        dispatchState: execution.dispatchState,
+        ...(execution.stopReason === undefined ? {} : { stopReason: execution.stopReason }),
         currentEngine: execution.currentEngine,
         currentCommand: execution.currentCommand,
         progress: execution.progress,
@@ -339,12 +352,13 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       if (execution === undefined) {
         return respondError(response, 404, 'ValidationFailed', 'scan execution was not found', false);
       }
-      if (execution.state === 'queued' || execution.state === 'running') {
-        execution.state = 'stopping';
+      if (execution.machine.state === 'Running') {
+        execution.machine.requestStop();
+        execution.stopReason = 'user-request';
         execution.logs.push(`${new Date().toISOString()} [ScopePilot] 停止要求を送信しました`);
         execution.controller.abort();
       }
-      return respondJson(response, 202, { executionId, state: execution.state });
+      return respondJson(response, 202, { executionId, state: execution.machine.state, runState: execution.machine.state, dispatchState: execution.dispatchState, ...(execution.stopReason === undefined ? {} : { stopReason: execution.stopReason }) });
     }
     if (route === 'POST /api/run/scan') {
       const body = await readJsonBody(request, response);

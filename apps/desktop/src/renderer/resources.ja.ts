@@ -4,6 +4,17 @@
  */
 export const jaStrings = {
   'app.settings': '設定',
+  'run.state.Draft': '下書き',
+  'run.state.Validated': '検証済み',
+  'run.state.Authorized': '認可済み',
+  'run.state.Confirmed': '実行確認済み',
+  'run.state.Running': '実行中',
+  'run.state.Stopping': '停止処理中',
+  'run.state.Completed': '完了',
+  'run.state.Stopped': '停止済み',
+  'run.state.Failed': '失敗',
+  'run.state.Interrupted': '中断（復旧確認が必要）',
+  'run.dispatch.queued': '待機中',
   'app.mode.label': 'モード:',
   'app.mode.simple': 'シンプル',
   'app.mode.advanced': 'アドバンスド',

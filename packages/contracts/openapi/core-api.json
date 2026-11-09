@@ -5085,6 +5085,112 @@
           }
         }
       }
+    },
+    "/api/run/scan/start": {
+      "post": {
+        "operationId": "startActiveScan",
+        "summary": "Start an asynchronous active scan",
+        "description": "Accepts the same input as synchronous scan. Service validation and execution failures are reported by status as failed/error.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunActiveScanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Scan execution accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanExecutionAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/run/scan/status": {
+      "get": {
+        "operationId": "getActiveScanStatus",
+        "summary": "Get an asynchronous scan execution snapshot",
+        "parameters": [
+          {
+            "name": "executionId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current scan execution snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanExecutionSnapshot"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error",
+            "description": "Unknown or missing executionId (ValidationFailed)"
+          }
+        }
+      }
+    },
+    "/api/run/scan/stop": {
+      "post": {
+        "operationId": "stopActiveScan",
+        "summary": "Request cooperative scan cancellation",
+        "description": "Running executions become Stopping. Terminal executions return their current state. Stopped is reported after cooperative cleanup; failures remain Failed.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanStopRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Stop requested or current execution state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanStopAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error",
+            "description": "Unknown executionId (ValidationFailed)"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5870,7 +5976,12 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RunStopReasonConstraint"
+          }
+        ]
       },
       "FormClassification": {
         "enum": [
@@ -8288,6 +8399,494 @@
           }
         },
         "additionalProperties": false
+      },
+      "ScanExecutionState": {
+        "$ref": "#/components/schemas/RunState"
+      },
+      "ScanExecutionAccepted": {
+        "type": "object",
+        "required": [
+          "executionId"
+        ],
+        "properties": {
+          "executionId": {
+            "type": "string"
+          }
+        }
+      },
+      "ScanStopRequest": {
+        "type": "object",
+        "required": [
+          "executionId"
+        ],
+        "properties": {
+          "executionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "ScanStopAccepted": {
+        "type": "object",
+        "required": [
+          "executionId",
+          "state",
+          "runState",
+          "dispatchState"
+        ],
+        "properties": {
+          "executionId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RunState",
+            "description": "Compatibility alias of canonical runState."
+          },
+          "runState": {
+            "$ref": "#/components/schemas/RunState"
+          },
+          "dispatchState": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "dispatched"
+            ]
+          },
+          "stopReason": {
+            "$ref": "#/components/schemas/StopReason"
+          }
+        },
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RunStopReasonConstraint"
+          }
+        ]
+      },
+      "ScanExecutionSnapshot": {
+        "type": "object",
+        "required": [
+          "executionId",
+          "state",
+          "currentEngine",
+          "currentCommand",
+          "progress",
+          "logs",
+          "runState",
+          "dispatchState"
+        ],
+        "properties": {
+          "executionId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RunState",
+            "description": "Compatibility alias of canonical runState."
+          },
+          "currentEngine": {
+            "type": "string",
+            "enum": [
+              "zap",
+              "nuclei",
+              "scopepilot"
+            ]
+          },
+          "currentCommand": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "number"
+          },
+          "logs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Recent execution logs. Engine event updates retain 500 entries; stop/error messages may append beyond that window."
+          },
+          "result": {
+            "$ref": "#/components/schemas/ScanExecutionResult"
+          },
+          "error": {
+            "type": "string"
+          },
+          "runState": {
+            "$ref": "#/components/schemas/RunState"
+          },
+          "dispatchState": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "dispatched"
+            ]
+          },
+          "stopReason": {
+            "$ref": "#/components/schemas/StopReason"
+          }
+        },
+        "description": "Current in-memory execution snapshot. Execution IDs are lost on server restart. Execution failures are returned in state/error, not as start HTTP errors.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RunStopReasonConstraint"
+          }
+        ]
+      },
+      "ScanExecutionResult": {
+        "type": "object",
+        "required": [
+          "runRecord",
+          "planHash",
+          "scanRequest",
+          "overshootReservation",
+          "engineVersion",
+          "findings",
+          "requestCorpusEvidenceRef",
+          "diagnosticRoutes",
+          "guidelineRoutes"
+        ],
+        "properties": {
+          "runRecord": {
+            "$ref": "#/components/schemas/RunRecord"
+          },
+          "planHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "scanRequest": {
+            "$ref": "#/components/schemas/ActiveScanRequest"
+          },
+          "overshootReservation": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Delegated step の maxOvershoot 分の予算予約。"
+          },
+          "engineVersion": {
+            "type": "string"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            }
+          },
+          "requestCorpusEvidenceRef": {
+            "type": "string"
+          },
+          "diagnosticRoutes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "track",
+                "targetUrl",
+                "candidateCount",
+                "status",
+                "detail"
+              ],
+              "properties": {
+                "track": {
+                  "enum": [
+                    "zap-active",
+                    "browser-dom",
+                    "workflow-state",
+                    "session-analysis",
+                    "authorization-differential",
+                    "upload-workflow",
+                    "api-schema",
+                    "cryptography-review"
+                  ]
+                },
+                "targetUrl": {
+                  "type": "string"
+                },
+                "candidateCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "delegated",
+                    "executed",
+                    "needs-input",
+                    "unavailable"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "findingCount": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "guidelineRoutes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "routeId",
+                "themeNo",
+                "guidelineIds",
+                "status",
+                "detail"
+              ],
+              "properties": {
+                "routeId": {
+                  "type": "string"
+                },
+                "themeNo": {
+                  "type": "string"
+                },
+                "guidelineIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "delegated",
+                    "executed",
+                    "needs-input",
+                    "unavailable"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "checkId": {
+                  "type": "string"
+                },
+                "checkStatus": {
+                  "type": "string",
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "inconclusive"
+                  ]
+                }
+              }
+            }
+          },
+          "workflow": {
+            "type": "object",
+            "required": [
+              "status",
+              "payloadSet",
+              "baseUrls",
+              "requestCount",
+              "checkKindCount",
+              "checkCount",
+              "skipCount",
+              "importedCount",
+              "duplicateCount",
+              "evidenceRefs"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed"
+                ]
+              },
+              "payloadSet": {
+                "type": "string"
+              },
+              "baseUrls": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "requestCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "checkKindCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "checkCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "skipCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "importedCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "duplicateCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "evidenceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "error": {
+                "type": "string"
+              }
+            }
+          },
+          "nuclei": {
+            "type": "object",
+            "required": [
+              "status",
+              "engineVersion",
+              "importedCount",
+              "duplicateCount",
+              "quarantinedCount",
+              "excludedOutOfScope"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed"
+                ]
+              },
+              "engineVersion": {
+                "type": "string"
+              },
+              "templateBundleHash": {
+                "type": "string"
+              },
+              "importedCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "duplicateCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "quarantinedCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "excludedOutOfScope": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "error": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "RunStopReasonConstraint": {
+        "description": "Canonical terminal run states require their matching stop reason (design 41 section 6).",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "Completed"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            "then": {
+              "required": [
+                "stopReason"
+              ],
+              "properties": {
+                "stopReason": {
+                  "enum": [
+                    "completed"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "Stopped"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            "then": {
+              "required": [
+                "stopReason"
+              ],
+              "properties": {
+                "stopReason": {
+                  "enum": [
+                    "user-request",
+                    "budget-exhausted",
+                    "scope-violation",
+                    "authorization-expired"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "Failed"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            "then": {
+              "required": [
+                "stopReason"
+              ],
+              "properties": {
+                "stopReason": {
+                  "enum": [
+                    "engine-failure"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "Interrupted"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            "then": {
+              "required": [
+                "stopReason"
+              ],
+              "properties": {
+                "stopReason": {
+                  "enum": [
+                    "interrupted"
+                  ]
+                }
+              }
+            }
+          }
+        ]
       }
     },
     "responses": {

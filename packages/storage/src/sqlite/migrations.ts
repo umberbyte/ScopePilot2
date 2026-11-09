@@ -118,6 +118,14 @@ export const MIGRATIONS: readonly Migration[] = [
       'CREATE INDEX IF NOT EXISTS findings_case_seen_idx ON findings (case_id, last_seen_at)',
     ],
   },
+  {
+    version: 5,
+    name: 'canonical-run-states',
+    statements: [
+      "UPDATE runs SET state = 'Completed', stop_reason = 'completed' WHERE state = 'Succeeded'",
+      "UPDATE runs SET state = 'Stopped', stop_reason = CASE WHEN stop_reason IN ('user-request', 'budget-exhausted', 'scope-violation', 'authorization-expired') THEN stop_reason ELSE 'user-request' END WHERE state = 'Cancelled'",
+    ],
+  },
 ];
 
 export interface MigrationResult {

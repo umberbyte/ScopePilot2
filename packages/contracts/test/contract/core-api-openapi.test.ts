@@ -298,3 +298,27 @@ function schemaEnum(spec: OpenApiSpec, name: string): Json[] {
   assert.ok(Array.isArray(node.enum), `schema ${name} が enum を持たない`);
   return node.enum as Json[];
 }
+
+test('GO-26: async scan projects canonical states with independent dispatch and terminal reasons', () => {
+  const spec = JSON.parse(readFileSync(SPEC_PATH, 'utf8'));
+  const schemas = spec.components.schemas;
+  assert.deepEqual(schemas.ScanExecutionState, { $ref: '#/components/schemas/RunState' });
+  for (const name of ['ScanExecutionSnapshot', 'ScanStopAccepted']) {
+    assert.ok(schemas[name].required.includes('runState'));
+    assert.ok(schemas[name].required.includes('dispatchState'));
+    assert.equal(schemas[name].properties.runState.$ref, '#/components/schemas/RunState');
+    assert.equal(schemas[name].properties.state.$ref, '#/components/schemas/RunState');
+    assert.deepEqual(schemas[name].properties.dispatchState.enum, ['queued', 'dispatched']);
+  }
+  for (const name of ['RunRecord', 'ScanExecutionSnapshot', 'ScanStopAccepted']) {
+    assert.deepEqual(schemas[name].allOf, [{ $ref: '#/components/schemas/RunStopReasonConstraint' }]);
+  }
+  assert.deepEqual(schemas.RunStopReasonConstraint.allOf.map((rule: { if: { properties: { state: { const: string } } }; then: { required: string[]; properties: { stopReason: { enum: string[] } } } }) => {
+    assert.deepEqual(rule.then.required, ['stopReason']);
+    return [rule.if.properties.state.const, rule.then.properties.stopReason.enum];
+  }), [
+    ['Completed', ['completed']],
+    ['Stopped', ['user-request', 'budget-exhausted', 'scope-violation', 'authorization-expired']],
+    ['Failed', ['engine-failure']], ['Interrupted', ['interrupted']],
+  ]);
+});

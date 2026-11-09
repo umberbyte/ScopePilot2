@@ -3,6 +3,7 @@
  * S02 はガイドライン選択のみ、S03 の crawl 上限は表示専用。進行は wizard-state の判定のみを使う。
  * S04〜S07 は次増分で接続する (この file では案内のみ)。
  */
+import type { ScanStateProjection } from '@scopepilot2/contracts';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
@@ -401,9 +402,8 @@ interface ScanRunResultView {
   }[];
 }
 
-interface ScanExecutionView {
+interface ScanExecutionView extends ScanStateProjection {
   readonly executionId: string;
-  readonly state: 'queued' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed';
   readonly currentEngine: 'zap' | 'nuclei' | 'scopepilot';
   readonly currentCommand: string;
   readonly progress: number;
@@ -1233,23 +1233,25 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
       });
       let snapshot: ScanExecutionView = {
         executionId: started.executionId,
-        state: 'queued',
+        state: 'Confirmed',
+        runState: 'Confirmed',
+        dispatchState: 'queued',
         currentEngine: 'scopepilot',
         currentCommand: '',
         progress: 0,
         logs: [],
       };
       setScanExecution(snapshot);
-      while (snapshot.state === 'queued' || snapshot.state === 'running' || snapshot.state === 'stopping') {
+      while (snapshot.state === 'Confirmed' || snapshot.state === 'Running' || snapshot.state === 'Stopping') {
         await waitFor(400);
         snapshot = await callApi<ScanExecutionView>(apiBase, 'GET', `/api/run/scan/status?executionId=${encodeURIComponent(started.executionId)}`);
         setScanExecution(snapshot);
       }
-      if (snapshot.state === 'stopped') {
+      if (snapshot.state === 'Stopped') {
         setRunSummary(t('wizard.s06.stopped'));
         return;
       }
-      if (snapshot.state === 'failed' || snapshot.result === undefined) {
+      if (snapshot.state === 'Failed' || snapshot.state === 'Interrupted' || snapshot.result === undefined) {
         throw new Error(snapshot.error ?? t('wizard.s06.failed'));
       }
       const run = snapshot.result;
@@ -1300,12 +1302,12 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
   }, [executeInteractiveDiagnostics]);
 
   const stopScan = useCallback(async () => {
-    if (scanExecution === null || !['queued', 'running'].includes(scanExecution.state)) return;
+    if (scanExecution === null || !['Confirmed', 'Running'].includes(scanExecution.state)) return;
     try {
-      const stopped = await callApi<{ executionId: string; state: ScanExecutionView['state'] }>(apiBase, 'POST', '/api/run/scan/stop', {
+      const stopped = await callApi<ScanStateProjection & { executionId: string }>(apiBase, 'POST', '/api/run/scan/stop', {
         executionId: scanExecution.executionId,
       });
-      setScanExecution((current) => current === null ? current : { ...current, state: stopped.state });
+      setScanExecution((current) => current === null ? current : { ...current, ...stopped });
     } catch (cause) {
       setError(String(cause));
     }
@@ -1983,7 +1985,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
           {scanExecution !== null && (
             <div className={styles.consolePanel}>
               <div className={styles.summaryRow}>
-                <Text weight="semibold">{t('wizard.s06.state', { state: scanExecution.state, engine: scanExecution.currentEngine.toUpperCase() })}</Text>
+                <Text weight="semibold">{t('wizard.s06.state', { state: scanExecution.dispatchState === 'queued' ? t('run.dispatch.queued') : t(`run.state.${scanExecution.runState}`), engine: scanExecution.currentEngine.toUpperCase() })}</Text>
                 <Text>{scanExecution.progress}%</Text>
               </div>
               <ProgressBar value={scanExecution.progress / 100} thickness="medium" />
@@ -1991,10 +1993,10 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
               <pre className={styles.command}>{scanExecution.currentCommand || t('wizard.s06.waitingCommand')}</pre>
               <div className={styles.summaryRow}>
                 <Text weight="semibold">{t('wizard.s06.log')}</Text>
-                {(scanExecution.state === 'queued' || scanExecution.state === 'running') && (
+                {(scanExecution.state === 'Confirmed' || scanExecution.state === 'Running') && (
                   <Button appearance="primary" onClick={() => void stopScan()}>{t('wizard.s06.stop')}</Button>
                 )}
-                {scanExecution.state === 'stopping' && <Button disabled>{t('wizard.s06.stopping')}</Button>}
+                {scanExecution.state === 'Stopping' && <Button disabled>{t('wizard.s06.stopping')}</Button>}
               </div>
               <pre className={styles.executionLog} aria-live="polite">{scanExecution.logs.join('\n')}</pre>
             </div>

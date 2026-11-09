@@ -84,7 +84,8 @@ describe('confirmed active scan plan with Nuclei', () => {
     const result = await service.runActiveScan(operator, plan, confirmation, [{
       candidateId: 'candidate-real-2', url: target, method: 'GET', category: 'page', guidelineBasis: ['OWASP WSTG'], confidence: 0.9, observationUrl: target,
     }]);
-    assert.equal(result.runRecord.state, 'Completed');
+    assert.equal(result.runRecord.state, 'Failed');
+    assert.equal(result.runRecord.stopReason, 'engine-failure');
     assert.equal(result.nuclei?.status, 'failed');
     assert.match(result.nuclei?.error ?? '', /template process failed/);
   });
@@ -95,4 +96,21 @@ describe('confirmed active scan plan with Nuclei', () => {
     const { plan } = service.buildActiveScanPlan(operator, ['http://fixture.target.test/'], undefined, { includeNuclei: true });
     assert.throws(() => service.authorizePlan(plan), /NucleiScan/);
   });
+});
+
+test('GO-26: real Nuclei failure remains Failed when a stop is concurrently requested', async () => {
+  const controller = new AbortController();
+  const nucleiRunner: NucleiScanPort = { engineVersion: 'nuclei-test', run: async () => {
+    controller.abort();
+    throw new Error('engine process failed');
+  } };
+  const { service, operator } = await bootstrapFlow({ nucleiRunner, allowedOperationClasses: ['Browse', 'ActiveScan', 'NucleiScan'] });
+  const target = 'http://fixture.target.test/';
+  const { plan } = service.buildActiveScanPlan(operator, [target], undefined, { includeNuclei: true });
+  service.authorizePlan(plan);
+  const result = await service.runActiveScan(operator, plan, service.confirmPlan(plan, operator), [{
+    candidateId: 'candidate', url: target, method: 'GET', category: 'page', guidelineBasis: [], confidence: 1, observationUrl: target,
+  }], undefined, { signal: controller.signal });
+  assert.equal(result.runRecord.state, 'Failed');
+  assert.equal(result.runRecord.stopReason, 'engine-failure');
 });
