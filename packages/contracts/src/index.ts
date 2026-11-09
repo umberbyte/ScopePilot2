@@ -12,3 +12,5 @@ export * from './report/report.ts';
 export * from './documents/documents.ts';
 export * from './events/events.ts';
 export * from './openapi-routes.ts';
+
+export * from './plan/guideline-automation.ts';

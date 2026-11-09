@@ -82,6 +82,18 @@ describe('ScanStartPolicy (BaselineFlowService.runActiveScan)', () => {
       observationUrl: target,
     }]);
 
+    const smuggling = result.guidelineRoutes.find((route) => route.themeNo === '17');
+    assert.equal(smuggling?.status, 'unavailable');
+    assert.equal(smuggling?.automationClass, 'unsupported');
+    assert.ok(smuggling?.limitationCodes?.includes('smuggling-send-prohibited'));
+    assert.equal(smuggling?.checkId, undefined);
+    assert.equal(smuggling?.checkStatus, undefined);
+    const conditional = result.guidelineRoutes.find((route) => route.themeNo === '26');
+    assert.equal(conditional?.status, 'needs-input');
+    assert.equal(conditional?.automationClass, 'conditional-automatic');
+    assert.ok(conditional?.missingInputCodes?.includes('normal-query'));
+    assert.ok(conditional?.detail.includes('正常query'));
+    assert.equal(conditional?.checkStatus, undefined);
     assert.equal(sent.length, 12);
     assert.ok(sent.every((url) => url === target));
     for (const themeNo of ['13', '24', '25', '30']) {

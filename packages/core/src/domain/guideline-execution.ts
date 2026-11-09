@@ -1,3 +1,5 @@
+import { guidelineAutomationPolicy, GUIDELINE_AUTOMATION_POLICY_VERSION } from './guideline-automation.ts';
+import type { GuidelineAutomationDisclosure } from '@scopepilot2/contracts';
 import type { ZapUnsupportedThemeNo } from './zap-unsupported.ts';
 
 export const SUPPORTED_HTTP_GUIDELINES = [
@@ -11,41 +13,29 @@ export const SUPPORTED_HTTP_GUIDELINES = [
 export type SupportedHttpGuideline = (typeof SUPPORTED_HTTP_GUIDELINES)[number];
 
 interface GuidelineExecutionProfile {
-  readonly automaticThemeNos: readonly ZapUnsupportedThemeNo[];
-  readonly needsInputThemeNos: readonly ZapUnsupportedThemeNo[];
+  readonly themeNos: readonly ZapUnsupportedThemeNo[];
 }
 
-/**
- * ガイドライン選択から ZAP 非対応の実行経路を決定する正本。
- * テーマ13 (CORS)、24 (browser protection headers)、25 (安全なHTTP method)、30
- * (公開情報) は、確認済みHTTP対象へ非破壊の既定probeだけを送るため active scan から
- * 自動実行できる。それ以外は資格情報・比較role・対象固有payload・副作用確認等を
- * 要するため、選択時に needs-input として公開し、A03 の個別実行関数へ接続する。
- */
+/** Guideline applicability only. Automation and disclosure come from the versioned policy registry. */
 const PROFILES: Readonly<Record<SupportedHttpGuideline, GuidelineExecutionProfile>> = {
   'OWASP Top 10-2025': {
-    automaticThemeNos: ['24', '25', '30'],
-    needsInputThemeNos: ['5', '6', '10', '15', '20', '21'],
+    themeNos: ['24', '25', '30', '5', '6', '10', '15', '20', '21'],
   },
   'OWASP ASVS 5.0': {
-    automaticThemeNos: ['13', '24', '25', '30'],
-    needsInputThemeNos: ['2', '3', '4', '5', '6', '7', '9', '10', '11', '14', '15', '16', '18', '20', '21', '23', '26', '27', '29'],
+    themeNos: ['13', '24', '25', '30', '2', '3', '4', '5', '6', '7', '9', '10', '11', '14', '15', '16', '18', '20', '21', '23', '26', '27', '29'],
   },
   'OWASP WSTG 4.2': {
-    automaticThemeNos: ['13', '24', '25', '30'],
-    needsInputThemeNos: ['2', '3', '4', '5', '6', '7', '9', '10', '11', '14', '15', '16', '18', '20', '21', '23', '26', '27', '29'],
+    themeNos: ['13', '24', '25', '30', '2', '3', '4', '5', '6', '7', '9', '10', '11', '14', '15', '16', '18', '20', '21', '23', '26', '27', '29'],
   },
   'デジタル庁 DS-221': {
-    automaticThemeNos: ['13', '24', '25', '30'],
-    needsInputThemeNos: ['3', '4', '5', '6', '7', '10', '15', '16', '20', '21', '23', '29'],
+    themeNos: ['13', '24', '25', '30', '3', '4', '5', '6', '7', '10', '15', '16', '20', '21', '23', '29'],
   },
   'IPA/NISC/WebAppPentestGuidelines': {
-    automaticThemeNos: ['13', '24', '25', '30'],
-    needsInputThemeNos: ['2', '3', '4', '5', '6', '7', '9', '10', '11', '14', '15', '16', '18', '20', '21', '22', '23', '26', '27', '29'],
+    themeNos: ['13', '24', '25', '30', '2', '3', '4', '5', '6', '7', '9', '10', '11', '14', '15', '16', '18', '20', '21', '22', '23', '26', '27', '29'],
   },
 };
 
-export interface GuidelineThemeRoutePlan {
+export interface GuidelineThemeRoutePlan extends Required<GuidelineAutomationDisclosure> {
   readonly themeNo: ZapUnsupportedThemeNo;
   readonly mode: 'automatic' | 'needs-input';
   readonly guidelineIds: readonly SupportedHttpGuideline[];
@@ -53,22 +43,26 @@ export interface GuidelineThemeRoutePlan {
 
 export function resolveGuidelineThemeRoutes(guidelines: readonly string[]): readonly GuidelineThemeRoutePlan[] {
   const selected = SUPPORTED_HTTP_GUIDELINES.filter((guideline) => guidelines.includes(guideline));
-  const routes = new Map<ZapUnsupportedThemeNo, { mode: 'automatic' | 'needs-input'; guidelineIds: SupportedHttpGuideline[] }>();
+  const routes = new Map<ZapUnsupportedThemeNo, SupportedHttpGuideline[]>();
   for (const guideline of selected) {
-    const profile = PROFILES[guideline];
-    for (const themeNo of profile.needsInputThemeNos) {
-      const current = routes.get(themeNo) ?? { mode: 'needs-input' as const, guidelineIds: [] };
-      if (!current.guidelineIds.includes(guideline)) current.guidelineIds.push(guideline);
-      routes.set(themeNo, current);
-    }
-    for (const themeNo of profile.automaticThemeNos) {
-      const current = routes.get(themeNo) ?? { mode: 'automatic' as const, guidelineIds: [] };
-      current.mode = 'automatic';
-      if (!current.guidelineIds.includes(guideline)) current.guidelineIds.push(guideline);
-      routes.set(themeNo, current);
+    for (const themeNo of PROFILES[guideline].themeNos) {
+      const sources = routes.get(themeNo) ?? [];
+      if (!sources.includes(guideline)) sources.push(guideline);
+      routes.set(themeNo, sources);
     }
   }
   return [...routes.entries()]
     .sort(([left], [right]) => Number.parseInt(left, 10) - Number.parseInt(right, 10))
-    .map(([themeNo, route]) => ({ themeNo, mode: route.mode, guidelineIds: route.guidelineIds }));
+    .map(([themeNo, guidelineIds]) => {
+      const policy = guidelineAutomationPolicy(themeNo);
+      const automatic = policy.connection === 'active-scan';
+      return {
+        themeNo, mode: automatic ? 'automatic' as const : 'needs-input' as const,
+        guidelineIds,
+        automationPolicyVersion: GUIDELINE_AUTOMATION_POLICY_VERSION,
+        automationClass: policy.automationClass,
+        missingInputCodes: automatic ? [] : policy.requiredInputCodes,
+        limitationCodes: automatic ? policy.limitationCodes : [...policy.limitationCodes, 'automatic-route-not-connected'],
+      };
+    });
 }
