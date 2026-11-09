@@ -14,6 +14,7 @@ import type { BrowserSessionHeader, BrowserSessionState, LoginExecutionInput, Lo
 import type { ObservedHttpRequest } from '@scopepilot2/contracts';
 import { detectAuthState } from '@scopepilot2/core';
 import type { LoginFlowStep } from '@scopepilot2/core';
+import { enforceAuthenticationContext } from './authentication-context.ts';
 import { requestInputPoints } from './playwright-explorer.ts';
 
 /** テスト差替え用の最小 browser 面 (playwright の該当部分に対応)。 */
@@ -34,7 +35,7 @@ export interface StubLoginPage {
 }
 
 export interface StubLoginBrowser {
-  newPage(options: { readonly proxyServer?: string; readonly bypass?: string }): Promise<StubLoginPage>;
+  newPage(options: { readonly proxyServer?: string; readonly bypass?: string; readonly scope?: LoginExecutionInput['scope'] }): Promise<StubLoginPage>;
   close(): Promise<void>;
 }
 
@@ -44,12 +45,12 @@ const defaultLauncher: LoginBrowserLauncher = async () => {
   const playwright = await import('playwright');
   const browser = await playwright.chromium.launch();
   return {
-    newPage: async ({ proxyServer }: { readonly proxyServer?: string }) => {
+    newPage: async ({ proxyServer, scope }: { readonly proxyServer?: string; readonly scope?: LoginExecutionInput['scope'] }) => {
       const context = await browser.newContext(
-        proxyServer === undefined ? {} : { proxy: { server: proxyServer } },
+        { serviceWorkers: 'block', ...(proxyServer === undefined ? {} : { proxy: { server: proxyServer, bypass: '<-loopback>' } }) },
       );
       const page = await context.newPage();
-      // login 実行中の通信観測 (診断候補の根拠。値は inputPoints の名前だけ)。
+      if (scope !== undefined) await enforceAuthenticationContext(context, page, scope);
       const requests: ObservedHttpRequest[] = [];
       const sessionHeaders = new Map<string, BrowserSessionHeader>();
       const headerCaptureTasks: Promise<void>[] = [];
@@ -196,9 +197,10 @@ export class PlaywrightLoginExecutor implements LoginExecutorPort {
       // Chromium は既定で localhost を proxy bypass する。loopback の所有ターゲットも
       // proxy 経由にするため bypass 除外の特殊規則 <-loopback> を渡す (loopback上の
       // 非 loopback 対象では影響しない)。
-      input.proxyServer === undefined ? {} : { proxyServer: input.proxyServer, bypass: '<-loopback>' },
+      { ...(input.scope === undefined ? {} : { scope: input.scope }), ...(input.proxyServer === undefined ? {} : { proxyServer: input.proxyServer, bypass: '<-loopback>' }) },
     );
-    try {
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const executeFlow = async (): Promise<LoginExecutionResult> => {
       const variables = new Map<string, string>();
       let assertResult = true;
       let sawAssert = false;
@@ -208,7 +210,7 @@ export class PlaywrightLoginExecutor implements LoginExecutorPort {
           sawAssert = true;
           const marker = step.target ?? '';
           const content = await page.content();
-          if (marker !== '' && !content.includes(marker)) {
+          if (marker.trim() === '' || !content.includes(marker)) {
             assertResult = false;
             // The remaining steps are post-login actions. Continuing after a
             // failed authentication assertion obscures the real cause with an
@@ -251,7 +253,13 @@ export class PlaywrightLoginExecutor implements LoginExecutorPort {
         browserState,
         ...(observedRequests.length === 0 ? {} : { observedRequests }),
       };
+    };
+    try {
+      return await Promise.race([executeFlow(), new Promise<never>((_resolve, reject) => {
+        deadline = setTimeout(() => reject(new Error('login flow exceeded 60000 ms deadline')), 60_000);
+      })]);
     } finally {
+      if (deadline !== undefined) clearTimeout(deadline);
       await page.close();
     }
   }

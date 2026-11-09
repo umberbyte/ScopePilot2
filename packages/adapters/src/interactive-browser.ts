@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { ScopePolicy, type InteractiveBrowserFile, type InteractiveBrowserPort } from '@scopepilot2/core';
 
+import { enforceAuthenticationContext } from './authentication-context.ts';
+
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 function decodeFile(file: InteractiveBrowserFile): Buffer {
@@ -28,20 +30,6 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
     let lastHeaders: readonly (readonly [string, string])[] = [];
     const startedAt = Date.now();
     try {
-      await context.route('**/*', async (route) => {
-        const url = route.request().url();
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-          await route.continue();
-          return;
-        }
-        if (ScopePolicy.decide(input.scope, url).allowed) await route.continue();
-        else await route.abort('blockedbyclient');
-      });
-      await context.routeWebSocket(/.*/, async (webSocket) => {
-        const scopeUrl = webSocket.url().replace(/^ws:/i, 'http:').replace(/^wss:/i, 'https:');
-        if (ScopePolicy.decide(input.scope, scopeUrl).allowed) webSocket.connectToServer();
-        else await webSocket.close({ code: 1008, reason: 'blocked by scope' });
-      });
       const sessionCookies = input.browserSession?.cookies ?? input.sessionCookies ?? [];
       if (sessionCookies.length > 0) {
         await context.addCookies(sessionCookies.map((cookie) => ({
@@ -61,6 +49,7 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
         }, { origins: sessionOrigins });
       }
       const page = await context.newPage();
+      await enforceAuthenticationContext(context, page, input.scope);
       page.on('response', (response) => {
         if (!response.request().isNavigationRequest() || response.frame() !== page.mainFrame()) return;
         lastStatus = response.status();

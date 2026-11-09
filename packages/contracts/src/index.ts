@@ -2,6 +2,7 @@ export * from './common/errors.ts';
 export * from './common/command.ts';
 export * from './common/runtime.ts';
 export * from './case/case.ts';
+export * from './case/authentication.ts';
 export * from './plan/canonical.ts';
 export * from './plan/plan.ts';
 export * from './engines/capability.ts';

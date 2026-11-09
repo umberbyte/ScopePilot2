@@ -10,7 +10,7 @@
 import type { Server } from 'node:http';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { DomainError, DocumentAuthMethods, hashStable, type DocumentAuthMethod, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
+import { DomainError, DocumentAuthMethods, hashStable, type AuthenticationMethod, type DocumentAuthMethod, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
 import type { BaselineFlowService } from './baseline-flow.ts';
 import { CodecRegistry, compareText, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
 import type { LoginFlowStep } from '../domain/authentication-session.ts';
@@ -1033,6 +1033,26 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       } catch (cause) {
         return respondDomainError(response, cause);
       }
+    }
+    if (route === 'GET /api/authentication') {
+      return respondJson(response, 200, service.authenticationConfiguration());
+    }
+    if (route === 'POST /api/authentication/users') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) return;
+      try {
+        if (Object.keys(body).some((key) => !['role', 'displayName', 'authorizationRole', 'method', 'enabled'].includes(key)) || typeof body.enabled !== 'boolean') {
+          throw new DomainError('ValidationFailed', 'only user metadata and an enabled boolean are accepted; never send credentials');
+        }
+        const user = service.saveAuthenticationUser(operator, { role: stringField(body, 'role'), displayName: stringField(body, 'displayName'), authorizationRole: stringField(body, 'authorizationRole'), method: stringField(body, 'method') as AuthenticationMethod, enabled: body.enabled });
+        return respondJson(response, 200, { user });
+      } catch (cause) { return respondDomainError(response, cause); }
+    }
+    if (route === 'POST /api/sessions/verify') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) return;
+      try { return respondJson(response, 200, await service.verifySession(operator, stringField(body, 'role'))); }
+      catch (cause) { return respondDomainError(response, cause); }
     }
     if (route === 'GET /api/sessions') {
       return respondJson(response, 200, { sessions: service.listSessions() });
