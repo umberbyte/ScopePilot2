@@ -317,6 +317,7 @@ export async function composeEngines(
     ? new InteractshCliProvider({ serverUrl: selection.oastServerUrl, configPath: selection.interactshConfigPath })
     : undefined;
   const oastProvider: import('@scopepilot2/core').OastProviderPort = interactshProvider ?? {
+    adapterKind: 'unavailable',
     supportedProtocols: [], async startSession(): Promise<never> { throw new Error('OAST provider is not configured'); },
   };
   return {

@@ -268,11 +268,15 @@ export interface OastProviderEvent {
   readonly payload: string;
 }
 
+/** Runtime adapter provenance. Production composition must use real or unavailable. */
+export type ToolAdapterKind = 'real' | 'fixture' | 'unavailable';
+
 /**
  * OAST provider session。実 adapter は明示設定された外部 runtime だけを起動し、
  * callback を逐次 core へ渡す。token/config secret は監査へ渡さない。
  */
 export interface OastProviderPort {
+  readonly adapterKind: ToolAdapterKind;
   readonly supportedProtocols: readonly ('http' | 'dns' | 'smtp' | 'icmp')[];
   startSession(input: {
     readonly attemptId: string;
@@ -283,6 +287,7 @@ export interface OastProviderPort {
 
 /** WebSocket text message の実送受信。scope と size は core、rate は adapter でも強制する。 */
 export interface WebSocketTransportPort {
+  readonly adapterKind: ToolAdapterKind;
   exchange(input: {
     /** 案件 scope と同じ http(s) URL。adapter 内で ws(s) へ写像する。 */
     readonly targetUrl: string;

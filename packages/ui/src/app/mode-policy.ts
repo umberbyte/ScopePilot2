@@ -24,6 +24,8 @@ export type UiRoute =
   | 'proxy.intercept'
   | 'repeater'
   | 'fuzzer'
+  | 'adv.manual.websocket'
+  | 'adv.manual.oast'
   | 'scan-plans'
   | 'decoder'
   | 'findings'
@@ -56,6 +58,8 @@ const ROUTE_PERMISSIONS: Readonly<Record<UiRoute, OperatorPermission>> = {
   'proxy.intercept': 'run.manage',
   repeater: 'run.manage',
   fuzzer: 'run.manage',
+  'adv.manual.websocket': 'run.manage',
+  'adv.manual.oast': 'run.manage',
   'scan-plans': 'run.manage',
   decoder: 'case.read',
   findings: 'finding.confirm',

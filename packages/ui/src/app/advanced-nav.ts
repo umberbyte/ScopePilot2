@@ -1,6 +1,6 @@
 /**
- * Advanced モードの画面ナビゲーション (A01〜A13)。`docs/detailed-design/02-ui-information-architecture.md` §3。
- * 並び・構成は設計の A01〜A13 と一致させ、権限不足の画面はナビから隠す
+ * Advanced モードの画面ナビゲーション。A33/A34 は design/40 P4 の独立手動検証画面。
+ * 既存画面を保ちながら P4 の A33/A34 を手動検証の位置へ追加し、権限不足の画面はナビから隠す
  * (mode-policy の route 判定と同じ根拠。見た目だけ隠して command は出る、にしない)。
  */
 import { resolveRoute, type UiRoute } from './mode-policy.ts';
@@ -29,6 +29,8 @@ const ADVANCED_SCREENS: readonly AdvancedScreen[] = [
   { screenId: 'A05', route: 'proxy.intercept', label: 'Proxy / Intercept' },
   { screenId: 'A06', route: 'repeater', label: 'Repeater' },
   { screenId: 'A07', route: 'fuzzer', label: 'Fuzzer' },
+  { screenId: 'A33', route: 'adv.manual.websocket', label: 'WebSocket' },
+  { screenId: 'A34', route: 'adv.manual.oast', label: 'OAST' },
   { screenId: 'A08', route: 'scan-plans', label: 'Scan plans' },
   { screenId: 'A09', route: 'advanced.sessions', label: 'Sessions / Roles / Business logic' },
   { screenId: 'A10', route: 'decoder', label: 'Decoder / Comparer / Sequencer' },

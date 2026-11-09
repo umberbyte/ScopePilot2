@@ -895,6 +895,7 @@ describe('zap-unsupported check (service, Top10 対象テーマ)', () => {
   test('テーマ27: Cookie付きWebSocketが任意Originを受理すればCSWSHとして検出する', async () => {
     const origins: string[] = [];
     const webSocket: WebSocketTransportPort = {
+      adapterKind: 'real',
       exchange: async (input) => {
         origins.push(input.origin ?? '');
         input.onSentFrame(input.messages[0] ?? '');

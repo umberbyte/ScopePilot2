@@ -107,6 +107,7 @@ describe('NodeWebSocketTransport (実 text frame 送受信)', () => {
     try {
       const frames: string[] = [];
       const transport = new NodeWebSocketTransport({ connectTimeoutMs: 2_000, responseWaitMs: 100 });
+      assert.equal(transport.adapterKind, 'real');
       const result = await transport.exchange({
         targetUrl: `${base}/echo`,
         messages: ['one', 'two'],

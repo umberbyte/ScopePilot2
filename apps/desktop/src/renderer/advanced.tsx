@@ -18,6 +18,8 @@ import { ProxyInterceptScreen } from './proxy-intercept-screen.tsx';
 import { RepeaterScreen } from './repeater-screen.tsx';
 import { FuzzerScreen } from './fuzzer-screen.tsx';
 import { SessionsScreen } from './sessions-screen.tsx';
+import { WebSocketScreen } from './websocket-screen.tsx';
+import { OastScreen } from './oast-screen.tsx';
 
 /** ローカル desktop operator。operator 照会 API は後続増分で追加する。 */
 const OPERATOR_PERMISSIONS: readonly OperatorPermission[] = ['case.manage', 'case.read', 'run.manage', 'finding.confirm', 'report.export'];
@@ -1193,10 +1195,12 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {activeRoute === 'proxy.intercept' && <ProxyInterceptScreen apiBase={apiBase} />}
         {activeRoute === 'repeater' && <RepeaterScreen apiBase={apiBase} />}
         {activeRoute === 'fuzzer' && <FuzzerScreen apiBase={apiBase} />}
+        {activeRoute === 'adv.manual.websocket' && <WebSocketScreen apiBase={apiBase} />}
+        {activeRoute === 'adv.manual.oast' && <OastScreen apiBase={apiBase} />}
         {activeRoute === 'advanced.sessions' && <SessionsScreen apiBase={apiBase} />}
         {activeRoute === 'decoder' && <DecoderComparerScreen apiBase={apiBase} />}
         {activeRoute === 'settings' && <SettingsScreen apiBase={apiBase} />}
-        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'advanced.sessions' && (
+        {activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'adv.manual.websocket' && activeRoute !== 'adv.manual.oast' && activeRoute !== 'advanced.sessions' && (
           <Text className={styles.muted}>{t('common.unimplemented')}</Text>
         )}
       </div>

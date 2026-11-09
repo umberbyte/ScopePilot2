@@ -26,12 +26,16 @@ describe('websocket (service)', () => {
     const sent = await service.sendWsMessages(operator, { targetUrl: 'http://fixture.target.test/ws', messages: ['ping', 'pong'] });
     assert.equal(sent.sent, 2);
     assert.equal(sent.rejected, null);
+    assert.equal(sent.transport, 'fixture');
+    assert.ok(sent.connectionId?.startsWith('ws-connection-'));
     assert.match(sent.planHash, /^[0-9a-f]{64}$/);
 
     const frames = service.listWsFrames();
     assert.equal(frames.length, 4);
     assert.ok(frames.some((frame) => frame.direction === 'sent' && frame.text === 'ping'));
     assert.ok(frames.every((frame) => frame.rawHash.length === 12), 'raw hash と text を区別した表示素材');
+    assert.ok(frames.every((frame) => frame.connectionId !== '' && frame.targetUrl === 'http://fixture.target.test/ws'));
+    assert.deepEqual(service.listWsConnections().map((connection) => connection.state), ['imported', 'closed']);
 
     const eventsText = JSON.stringify(service.events());
     assert.ok(eventsText.includes('WsFramesImported'));
@@ -65,6 +69,7 @@ describe('websocket (service)', () => {
     let calls = 0;
     const { service, operator } = await bootstrapFlow({
       webSocketTransport: {
+        adapterKind: 'real',
         async exchange(input) {
           calls += 1;
           for (const message of input.messages) {
@@ -82,11 +87,15 @@ describe('websocket (service)', () => {
     assert.match(result.planHash, /^[0-9a-f]{64}$/);
     assert.equal(result.sent, 2);
     assert.equal(result.rejected, null);
+    assert.equal(result.transport, 'real');
     assert.equal(calls, 1);
     assert.deepEqual(
       service.listWsFrames().map((frame) => [frame.direction, frame.text]),
       [['sent', 'one'], ['received', 'echo:one'], ['sent', 'two'], ['received', 'echo:two']],
     );
+    assert.deepEqual(service.listWsConnections().map(({ transport, state, sentFrames, receivedFrames }) => ({ transport, state, sentFrames, receivedFrames })), [
+      { transport: 'real', state: 'closed', sentFrames: 2, receivedFrames: 2 },
+    ]);
 
     const oversized = await service.sendWsMessages(operator, {
       targetUrl: 'http://fixture.target.test/ws',
@@ -99,6 +108,7 @@ describe('websocket (service)', () => {
   test('role 指定は対象URLに適用可能なcookieだけをhandshakeへ渡し、値を保存しない', async () => {
     const transportCalls: Parameters<WebSocketTransportPort['exchange']>[0][] = [];
     const webSocketTransport: WebSocketTransportPort = {
+      adapterKind: 'real',
       async exchange(input) {
         transportCalls.push(input);
         for (const message of input.messages) {

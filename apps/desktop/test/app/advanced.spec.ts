@@ -4,7 +4,7 @@ import { hashStable } from '@scopepilot2/contracts';
 
 /**
  * Advanced モードの実 DOM 検証。`docs/detailed-design/02-ui-information-architecture.md` §3。
- * A01〜A13 ナビ・A01 Dashboard (案件・能力表・Interrupted 検出)・A12 監査 event を確認する。
+ * 既存ナビと P4 の A33/A34、A01 Dashboard (案件・能力表・Interrupted 検出)・A12 監査 event を確認する。
  */
 let app: ElectronApplication;
 let page: Page;
@@ -20,10 +20,12 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test('A01〜A13 のナビが表示され、A01 が既定の着地画面', async () => {
+test('既存画面と A33/A34 のナビが表示され、A01 が既定の着地画面', async () => {
   const nav = page.getByRole('navigation', { name: 'Advanced 画面ナビ' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('button')).toHaveCount(13);
+  await expect(nav.getByRole('button')).toHaveCount(15);
+  await expect(page.getByText('A33 WebSocket')).toBeVisible();
+  await expect(page.getByText('A34 OAST')).toBeVisible();
   await expect(page.getByText('A13 Settings / Certificates / Engines / AI')).toBeVisible();
   await expect(page.getByText('外部 engine 能力 (保証等級)')).toBeVisible();
 });

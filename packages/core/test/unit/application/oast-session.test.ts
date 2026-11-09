@@ -12,6 +12,7 @@ describe('oast (service)', () => {
     const attempt = await service.startOastAttempt(operator, { targetUrl: 'http://fixture.target.test/xss', protocol: 'http' });
     assert.match(attempt.token, /^oast-/);
     assert.equal(attempt.waitMs, 24 * 60 * 60 * 1000);
+    assert.equal(attempt.transport, 'fixture');
 
     const first = service.recordOastCallbacks(operator, {
       events: [
@@ -31,6 +32,12 @@ describe('oast (service)', () => {
     assert.equal(attempts[0]?.status, 'waiting');
     assert.equal(attempts[0]?.interactions, 1);
     assert.equal(JSON.stringify(attempts).includes(attempt.token), false, '一覧に token を出さない');
+    assert.equal(attempts[0]?.transport, 'fixture');
+
+    const callbacks = service.listOastCallbacks();
+    assert.deepEqual(callbacks.map((callback) => callback.correlation), ['correlated', 'uncorrelated']);
+    assert.ok(callbacks.every((callback) => callback.transport === 'fixture' && callback.rawHash.length === 12));
+    assert.equal(JSON.stringify(callbacks).includes(attempt.token), false, 'callback 一覧に token/raw payload を出さない');
 
     const eventsText = JSON.stringify(service.events());
     assert.ok(eventsText.includes('OastAttemptStarted'));
@@ -63,6 +70,7 @@ describe('oast (service)', () => {
   test('実 provider が発行した payload と background callback を相関し token を監査へ出さない', async () => {
     const token = 'real-payload.self-host.example';
     const provider = {
+      adapterKind: 'real' as const,
       supportedProtocols: ['http', 'dns', 'smtp'] as const,
       async startSession(input: { onEvents: (events: readonly { eventId: string; token: string; payload: string }[]) => void }): Promise<{ token: string }> {
         // payload 応答と同じ event-loop 内で callback が来ても attempt 登録後に相関する。
@@ -73,11 +81,15 @@ describe('oast (service)', () => {
     const { service, operator } = await bootstrapFlow({ oastProvider: provider });
     const attempt = await service.startOastAttempt(operator, { targetUrl: 'http://fixture.target.test/xss', protocol: 'smtp' });
     assert.equal(attempt.token, token);
+    assert.equal(attempt.transport, 'real');
 
     const attempts = service.listOastAttempts();
     assert.equal(attempts[0]?.interactions, 1);
     assert.equal(JSON.stringify(attempts).includes(attempt.token), false);
     assert.equal(JSON.stringify(service.events()).includes(attempt.token), false);
+    assert.deepEqual(service.listOastCallbacks().map(({ attemptId, protocol, correlation, transport }) => ({ attemptId, protocol, correlation, transport })), [
+      { attemptId: attempt.attemptId, protocol: 'smtp', correlation: 'correlated', transport: 'real' },
+    ]);
     assert.deepEqual(
       service.events().map((event) => event.type).filter((type) => type.startsWith('Oast')),
       ['OastAttemptStarted', 'OastCallbacksRecorded'],

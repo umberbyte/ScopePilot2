@@ -2563,7 +2563,7 @@
     "/api/oast/attempts": {
       "get": {
         "operationId": "listOastAttempts",
-        "summary": "OAST attempt の一覧 (token なし・interactions と曖昧判定のみ)",
+        "summary": "OAST transport、attempt、callback の一覧 (token と raw provider payload は含めない)",
         "responses": {
           "200": {
             "description": "attempts",
@@ -2572,9 +2572,25 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "attempts"
+                    "transport",
+                    "provider",
+                    "supportedProtocols",
+                    "attempts",
+                    "callbacks"
                   ],
                   "properties": {
+                    "transport": {
+                      "type": "string",
+                      "enum": ["real", "fixture", "unavailable"]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "enum": ["interactsh", "fixture", "unavailable"]
+                    },
+                    "supportedProtocols": {
+                      "type": "array",
+                      "items": { "type": "string", "enum": ["http", "dns", "smtp", "icmp"] }
+                    },
                     "attempts": {
                       "type": "array",
                       "items": {
@@ -2585,7 +2601,8 @@
                           "protocol",
                           "status",
                           "interactions",
-                          "candidateOnly"
+                          "candidateOnly",
+                          "transport"
                         ],
                         "properties": {
                           "attemptId": {
@@ -2619,7 +2636,29 @@
                           "candidateOnly": {
                             "type": "boolean",
                             "description": "観測が無い・曖昧な相関は所見候補にしかしない (F13-UT-006)"
+                          },
+                          "transport": {
+                            "type": "string",
+                            "enum": ["real", "fixture", "unavailable"]
                           }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "callbacks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["eventId", "attemptId", "protocol", "recordedAt", "rawHash", "correlation", "transport"],
+                        "properties": {
+                          "eventId": { "type": "string" },
+                          "attemptId": { "type": ["string", "null"] },
+                          "protocol": { "type": "string", "enum": ["http", "dns", "smtp", "icmp"] },
+                          "remoteAddress": { "type": "string" },
+                          "recordedAt": { "type": "string" },
+                          "rawHash": { "type": "string" },
+                          "correlation": { "type": "string", "enum": ["correlated", "uncorrelated"] },
+                          "transport": { "type": "string", "enum": ["real", "fixture", "unavailable"] }
                         },
                         "additionalProperties": false
                       }
@@ -2677,7 +2716,8 @@
                     "targetUrl",
                     "protocol",
                     "token",
-                    "waitMs"
+                    "waitMs",
+                    "transport"
                   ],
                   "properties": {
                     "attemptId": {
@@ -2703,6 +2743,10 @@
                     "waitMs": {
                       "type": "integer",
                       "minimum": 1
+                    },
+                    "transport": {
+                      "type": "string",
+                      "enum": ["real", "fixture", "unavailable"]
                     }
                   },
                   "additionalProperties": false
@@ -2814,7 +2858,7 @@
     "/api/websocket/frames": {
       "get": {
         "operationId": "listWsFrames",
-        "summary": "WebSocket frame の一覧 (text のみ・raw hash と text を区別)",
+        "summary": "WebSocket transport、connection、frame 履歴の一覧 (text のみ・raw hash と text を区別)",
         "responses": {
           "200": {
             "description": "frames",
@@ -2823,21 +2867,61 @@
                 "schema": {
                   "type": "object",
                   "required": [
+                    "transport",
+                    "implementation",
+                    "connections",
                     "frames"
                   ],
                   "properties": {
+                    "transport": {
+                      "type": "string",
+                      "enum": ["real", "fixture", "unavailable"]
+                    },
+                    "implementation": {
+                      "type": "string",
+                      "enum": ["node-websocket", "fixture", "unavailable"]
+                    },
+                    "connections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["connectionId", "logicalSessionId", "targetUrl", "transport", "state", "openedAt", "sentFrames", "receivedFrames"],
+                        "properties": {
+                          "connectionId": { "type": "string" },
+                          "logicalSessionId": { "type": "string" },
+                          "targetUrl": { "type": "string" },
+                          "transport": { "type": "string", "enum": ["real", "fixture", "unavailable"] },
+                          "state": { "type": "string", "enum": ["closed", "failed", "imported"] },
+                          "openedAt": { "type": "string" },
+                          "sentFrames": { "type": "integer", "minimum": 0 },
+                          "receivedFrames": { "type": "integer", "minimum": 0 },
+                          "negotiatedSubprotocol": { "type": "string" }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
                     "frames": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "required": [
                           "frameId",
+                          "connectionId",
+                          "targetUrl",
                           "direction",
                           "text",
-                          "rawHash"
+                          "rawHash",
+                          "recordedAt",
+                          "transport"
                         ],
                         "properties": {
                           "frameId": {
+                            "type": "string"
+                          },
+                          "connectionId": {
+                            "type": "string"
+                          },
+                          "targetUrl": {
                             "type": "string"
                           },
                           "direction": {
@@ -2854,6 +2938,13 @@
                           "rawHash": {
                             "type": "string",
                             "description": "原本 hash (先頭 12 桁)"
+                          },
+                          "recordedAt": {
+                            "type": "string"
+                          },
+                          "transport": {
+                            "type": "string",
+                            "enum": ["real", "fixture", "unavailable"]
                           }
                         },
                         "additionalProperties": false
@@ -3006,7 +3097,8 @@
                   "required": [
                     "planHash",
                     "sent",
-                    "rejected"
+                    "rejected",
+                    "transport"
                   ],
                   "properties": {
                     "planHash": {
@@ -3026,6 +3118,16 @@
                         "rate",
                         null
                       ]
+                    },
+                    "transport": {
+                      "type": "string",
+                      "enum": ["real", "fixture", "unavailable"]
+                    },
+                    "connectionId": {
+                      "type": "string"
+                    },
+                    "logicalSessionId": {
+                      "type": "string"
                     },
                     "sessionCookieNames": {
                       "type": "array",

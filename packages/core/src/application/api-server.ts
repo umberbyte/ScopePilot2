@@ -467,7 +467,11 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       }
     }
     if (route === 'GET /api/oast/attempts') {
-      return respondJson(response, 200, { attempts: service.listOastAttempts() });
+      return respondJson(response, 200, {
+        ...service.oastTransport(),
+        attempts: service.listOastAttempts(),
+        callbacks: service.listOastCallbacks(),
+      });
     }
     if (route === 'POST /api/oast/attempts') {
       const body = await readJsonBody(request, response);
@@ -509,7 +513,11 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       }
     }
     if (route === 'GET /api/websocket/frames') {
-      return respondJson(response, 200, { frames: service.listWsFrames() });
+      return respondJson(response, 200, {
+        ...service.webSocketTransport(),
+        connections: service.listWsConnections(),
+        frames: service.listWsFrames(),
+      });
     }
     if (route === 'POST /api/websocket/frames') {
       const body = await readJsonBody(request, response);
