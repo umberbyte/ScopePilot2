@@ -1,9 +1,17 @@
-import { createHash, createPublicKey, X509Certificate, verify } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual, createPublicKey, X509Certificate, verify } from 'node:crypto';
 import { canonicalJson, type AssetObservation, type ClientReviewSignal } from '@scopepilot2/contracts';
 
 export const CLIENT_ANALYZER_VERSION = 'client-review-1';
 export const MAX_ASSET_BYTES = 1024 * 1024;
 export const assetHash = (text: string): string => createHash('sha256').update(text).digest('hex');
+export function sanitiseObservationUrl(value: string): string {
+  const url = new URL(value);
+  url.username = ''; url.password = '';
+  for (const name of [...url.searchParams.keys()]) {
+    if (/token|secret|password|credential|authorization|api.?key|^code$/i.test(name)) url.searchParams.set(name, '[REDACTED]');
+  }
+  return url.href;
+}
 export interface ComponentDatabase {
   readonly source: string;
   readonly version: string;
@@ -52,6 +60,17 @@ export function reviewJwt(token: string, publicKey?: string): readonly ClientRev
     if (header.alg.toLowerCase() === 'none') add('jwt-none', 'Unsigned JWT configuration observed; server acceptance untested');
     if (payload.exp === undefined) add('jwt-no-exp', 'JWT has no expiry claim; server policy untested');
     if (header.jwk !== undefined || header.jku !== undefined || header.x5u !== undefined) add('jwt-key-reference', 'Token supplies a key reference; trust and key confusion untested');
+    if (header.alg === 'HS256') {
+      const observed = Buffer.from(parts[2]!, 'base64url');
+      const keys = [...(publicKey ? [publicKey] : []), 'secret', 'password', 'changeme'];
+      for (const key of keys) {
+        const expected = createHmac('sha256', key).update(`${parts[0]}.${parts[1]}`).digest();
+        if (observed.length === expected.length && timingSafeEqual(observed, expected)) {
+          add(key === publicKey ? 'jwt-key-confusion' : 'jwt-weak-key', 'Signature matches review key; server acceptance and token mutation untested');
+          break;
+        }
+      }
+    }
     if (publicKey && header.alg === 'RS256') {
       const valid = verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), createPublicKey(publicKey), Buffer.from(parts[2]!, 'base64url'));
       add('jwt-signature', valid ? 'Signature matches supplied public key; acceptance untested' : 'Signature does not match supplied public key');
@@ -60,7 +79,7 @@ export function reviewJwt(token: string, publicKey?: string): readonly ClientRev
   } catch { return []; }
 }
 /** Passive only: no network lookup, evaluation, or execution of untrusted code. */
-export function analyzeClientAsset(input: { url: string; sourceUrl: string; contentType: string; body: string; database?: ComponentDatabase }): AssetObservation | null {
+export function analyzeClientAsset(input: { url: string; sourceUrl: string; contentType: string; body: string; headers?: Readonly<Record<string, string>>; database?: ComponentDatabase }): AssetObservation | null {
   const { body } = input;
   const bytes = Buffer.byteLength(body);
   if (bytes > MAX_ASSET_BYTES || body.includes('\0') || !allowedTextAsset(input.url, input.contentType) || new URL(input.url).origin !== new URL(input.sourceUrl).origin) return null;
@@ -73,6 +92,11 @@ export function analyzeClientAsset(input: { url: string; sourceUrl: string; cont
     const component = { name, ...(version && versionParts(version) ? { version } : {}) };
     components.set(`${name}@${component.version ?? '?'}`, component);
   };
+  for (const name of ['server', 'x-powered-by']) {
+    const value = input.headers?.[name] ?? '';
+    const match = value.match(/^(nginx|apache|express|php)[ /](\d+\.\d+\.\d+)(?:$|[ ;])/i);
+    if (match) addComponent(match[1]!, match[2]);
+  }
   // Versioned banner signatures and package metadata; never infer a version from an API name.
   for (const match of body.matchAll(/\b(jquery|lodash|angular|react|moment)[ /@v-]+(\d+\.\d+\.\d+)\b/gi)) addComponent(match[1]!, match[2]);
   try {
@@ -125,5 +149,5 @@ export function analyzeClientAsset(input: { url: string; sourceUrl: string; cont
     if (signals.length >= 256) break;
     signals.push(...reviewJwt(match[0]));
   }
-  return { url: input.url, sourceUrl: input.sourceUrl, contentType: input.contentType, bytes, sha256: assetHash(body), analyzerVersion: CLIENT_ANALYZER_VERSION, signals: signals.slice(0, 256), ...(input.database ? { database: { source: input.database.source, version: input.database.version, sha256: input.database.sha256 } } : {}) };
+  return { url: sanitiseObservationUrl(input.url), sourceUrl: sanitiseObservationUrl(input.sourceUrl), contentType: input.contentType, bytes, sha256: assetHash(body), analyzerVersion: CLIENT_ANALYZER_VERSION, signals: signals.slice(0, 256), ...(input.database ? { database: { source: input.database.source, version: input.database.version, sha256: input.database.sha256 } } : {}) };
 }

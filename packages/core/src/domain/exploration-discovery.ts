@@ -6,6 +6,7 @@ export const DISCOVERY_VERSION = 'discovery-1';
 export const DISCOVERY_WORDLIST = ['/admin/', '/backup/', '/api/', '/.well-known/security.txt'] as const;
 export function discoverySeeds(origins: readonly string[], sources: readonly DiscoverySource[]): readonly string[] {
   return [...new Set(origins.flatMap((origin) => [
+    ...(sources.length ? [new URL('/.scopepilot-missing-7d4f92c1', origin).href] : []),
     ...(sources.includes('robots') ? [new URL('/robots.txt', origin).href] : []),
     ...(sources.includes('sitemap') ? [new URL('/sitemap.xml', origin).href] : []),
     ...(sources.includes('manifest') ? [new URL('/manifest.json', origin).href] : []),

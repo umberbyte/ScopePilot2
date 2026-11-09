@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
-import { ScopePolicy, type InteractiveBrowserFile, type InteractiveBrowserPort } from '@scopepilot2/core';
+import { sanitiseObservationUrl, ScopePolicy, type InteractiveBrowserFile, type InteractiveBrowserPort } from '@scopepilot2/core';
+
+import { requestInputPoints } from './playwright-explorer.ts';
+import type { ObservedHttpRequest } from '@scopepilot2/contracts';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -21,12 +24,20 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
     if (input.steps.length === 0 || input.steps.length > 20) {
       throw new Error('interactive browser plan must contain between 1 and 20 steps');
     }
+    input.signal?.throwIfAborted();
+    const maxRequests = input.maxRequests ?? 256;
+    const maxDurationMs = input.maxDurationMs ?? 60_000;
+    if (!Number.isInteger(maxRequests) || maxRequests < 1 || maxRequests > 10000 || !Number.isFinite(maxDurationMs) || maxDurationMs < 1 || maxDurationMs > 300_000) throw new Error('invalid interactive browser limits');
     const playwright = await import('playwright');
     const browser = await playwright.chromium.launch();
     const context = await browser.newContext({ serviceWorkers: 'block' });
     let lastStatus: number | null = null;
     let lastHeaders: readonly (readonly [string, string])[] = [];
     const startedAt = Date.now();
+    let requests = 0;
+    const abort = () => { void context.close().catch(() => undefined); };
+    const timer = setTimeout(abort, maxDurationMs);
+    input.signal?.addEventListener('abort', abort, { once: true });
     try {
       await context.route('**/*', async (route) => {
         const url = route.request().url();
@@ -34,7 +45,7 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
           await route.continue();
           return;
         }
-        if (ScopePolicy.decide(input.scope, url).allowed) await route.continue();
+        if (!input.signal?.aborted && Date.now() - startedAt < maxDurationMs && requests < maxRequests && ScopePolicy.decide(input.scope, url).allowed) { requests++; await route.continue(); }
         else await route.abort('blockedbyclient');
       });
       await context.routeWebSocket(/.*/, async (webSocket) => {
@@ -60,7 +71,23 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
           for (const entry of current.sessionStorage) globalThis.sessionStorage.setItem(entry.name, entry.value);
         }, { origins: sessionOrigins });
       }
+      await context.addInitScript(() => {
+        const routes: { url: string; source: 'history' | 'hash' }[] = [];
+        Object.defineProperty(globalThis, '__scopepilotRoutes', { value: routes });
+        const record = (source: 'history' | 'hash') => { if (routes.length < 128) routes.push({ url: location.href, source }); };
+        for (const method of ['pushState', 'replaceState'] as const) {
+          const original = history[method].bind(history);
+          history[method] = (...args) => { original(...args); record('history'); };
+        }
+        addEventListener('hashchange', () => record('hash'));
+        addEventListener('popstate', () => record('history'));
+      });
       const page = await context.newPage();
+      const observedRequests: ObservedHttpRequest[] = [];
+      page.on('request', (request) => {
+        if (observedRequests.length >= 256 || !ScopePolicy.decide(input.scope, request.url()).allowed) return;
+        observedRequests.push({ requestId: `workflow-${observedRequests.length + 1}`, url: sanitiseObservationUrl(request.url()), method: request.method(), resourceType: request.resourceType(), sourceUrl: sanitiseObservationUrl(input.targetUrl), inputPoints: requestInputPoints(request) });
+      });
       page.on('response', (response) => {
         if (!response.request().isNavigationRequest() || response.frame() !== page.mainFrame()) return;
         lastStatus = response.status();
@@ -71,6 +98,8 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
       const files = new Map((input.files ?? []).map((file) => [file.inputRef, file]));
       const assertions: { kind: 'assert' | 'assertValue'; target: string; passed: boolean }[] = [];
       for (const step of input.steps) {
+        input.signal?.throwIfAborted();
+        if (requests >= maxRequests || Date.now() - startedAt >= maxDurationMs) throw new Error('interactive browser budget exhausted');
         if (step.kind === 'navigate') {
           if (!ScopePolicy.decide(input.scope, step.target).allowed) throw new Error(`interactive navigation is out of scope: ${step.target}`);
           const response = await page.goto(step.target, { waitUntil: 'domcontentloaded', timeout: 30_000 });
@@ -94,10 +123,15 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
           await page.locator(step.target).setInputFiles({ name: file.name, mimeType: file.mimeType, buffer: decodeFile(file) });
         }
       }
+      await page.waitForLoadState('networkidle', { timeout: 1000 }).catch(() => undefined);
+      const routes = await page.evaluate(() => (globalThis as unknown as { __scopepilotRoutes?: { url: string; source: 'history' | 'hash' }[] }).__scopepilotRoutes ?? []);
+      const clientRoutes = routes.filter((route) => ScopePolicy.decide(input.scope, route.url).allowed).map((route) => ({ ...route, url: sanitiseObservationUrl(route.url) }));
       const body = await page.content();
       const bodyText = (await page.locator('body').innerText().catch(() => '')).slice(0, 1024 * 1024);
       return {
-        finalUrl: page.url(),
+        finalUrl: sanitiseObservationUrl(page.url()),
+        observedRequests,
+        clientRoutes,
         status: lastStatus,
         bodyHash: createHash('sha256').update(body, 'utf8').digest('hex'),
         bodyText,
@@ -106,6 +140,8 @@ export class PlaywrightInteractiveBrowser implements InteractiveBrowserPort {
         assertions,
       };
     } finally {
+      clearTimeout(timer);
+      input.signal?.removeEventListener('abort', abort);
       await context.close();
       await browser.close();
     }

@@ -130,6 +130,7 @@ export const jaStrings = {
   'wizard.s04.clearAll': 'すべて解除',
   'wizard.s04.summary': '表示 {shown} / 全 {total} 件・選択 {selected} 件',
   'wizard.s04.dynamicDefault': '動的候補は初期選択済みです。',
+  'wizard.s04.priority': '優先度: {score}',
   'wizard.s04.observedAt': '観測元: {url}',
   'wizard.s04.guidelineBasis': '選定根拠: {basis}',
   'wizard.s04.dynamic': '動的',

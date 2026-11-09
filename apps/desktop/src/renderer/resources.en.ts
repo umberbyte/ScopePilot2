@@ -131,6 +131,7 @@ export const enStrings: Readonly<Record<StringKey, string>> = {
   'wizard.s04.clearAll': 'Clear all',
   'wizard.s04.summary': 'Showing {shown} of {total}; {selected} selected',
   'wizard.s04.dynamicDefault': 'Dynamic candidates are selected by default.',
+  'wizard.s04.priority': 'Priority: {score}',
   'wizard.s04.observedAt': 'Observed at: {url}',
   'wizard.s04.guidelineBasis': 'Selection basis: {basis}',
   'wizard.s04.dynamic': 'Dynamic',

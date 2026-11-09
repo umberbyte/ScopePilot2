@@ -49,6 +49,7 @@ export function planHashOf(plan: ExecutionPlan): string {
     targetRole: plan.targetRole,
     guidelineIds: plan.guidelineIds,
     steps: plan.steps.map((step) => ({
+      ...(step.discoverySources === undefined ? {} : { discoverySources: step.discoverySources }),
       kind: step.kind,
       operationClass: step.operationClass,
       targetSnapshot: step.targetSnapshot,
@@ -84,6 +85,7 @@ export function validatePlan(plan: ExecutionPlan, context: PlanValidationContext
   }
 
   for (const step of plan.steps) {
+    if (step.discoverySources?.length && (step.operationClass !== 'ActiveCrawl' || step.discoverySources.some((source) => !['robots', 'sitemap', 'manifest', 'wordlist'].includes(source)))) issues.push('discovery requires an ActiveCrawl step and known sources');
     if (!context.authorization.allowedOperationClasses.includes(step.operationClass)) {
       issues.push(`step ${step.stepId} requires operation class ${step.operationClass} which is not authorized`);
     }
@@ -143,6 +145,7 @@ export interface BuildPlanInput {
   readonly targetRole: string;
   readonly guidelineIds?: readonly string[];
   readonly steps: readonly {
+    readonly discoverySources?: PlanStep['discoverySources'];
     readonly kind: PlanStepKind;
     readonly operationClass: OperationClass;
     readonly targets: readonly string[];
@@ -161,6 +164,7 @@ export interface BuildPlanInput {
 export function buildPlan(input: BuildPlanInput): ExecutionPlan {
   const steps: PlanStep[] = input.steps.map((step, index) => ({
     stepId: `${input.planId}-s${index + 1}`,
+    ...(step.discoverySources === undefined ? {} : { discoverySources: [...new Set(step.discoverySources)].sort() }),
     kind: step.kind,
     operationClass: step.operationClass,
     targetSnapshot: [...new Set(step.targets.map((url) => ScopePolicy.canonicalUrl(url)))].sort(),

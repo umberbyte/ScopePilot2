@@ -322,3 +322,32 @@ gated('Playwright explorer adapter (実 browser 結合)', () => {
     }
   });
 });
+
+gated('GO-31 owned workflow observation', () => {
+  test('reviewed click records runtime history/hash routes and request metadata without body values', { timeout: 30000 }, async () => {
+    const server = createServer((req, res) => {
+      if (req.url === '/api/events') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); return; }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(`<button id="open">Open</button><script>
+        document.querySelector('#open').onclick = async () => {
+          await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ note: 'private-canary-value' }) });
+          history.pushState({}, '', '/runtime/' + (20 + 22));
+          location.hash = '/panel/' + (40 + 2);
+          document.body.insertAdjacentHTML('beforeend', '<p id="ready">Ready</p>');
+        };
+      </script>`);
+    });
+    const origin = await listenOnLoopback(server);
+    try {
+      const browser = new PlaywrightInteractiveBrowser();
+      const result = await browser.execute({ targetUrl: origin, scope: { allowedOrigins: [origin], deniedOrigins: [] }, steps: [{ kind: 'navigate', target: origin }, { kind: 'click', target: '#open' }, { kind: 'wait', target: '#ready' }], maxRequests: 20 });
+      assert.ok(result.clientRoutes?.some((route) => route.source === 'history' && route.url.endsWith('/runtime/42')));
+      assert.ok(result.clientRoutes?.some((route) => route.source === 'hash' && route.url.includes('#/panel/42')));
+      const request = result.observedRequests?.find((request) => request.method === 'POST');
+      assert.equal(request?.inputPoints[0]?.name, 'note');
+      assert.equal(JSON.stringify(result.observedRequests).includes('private-canary-value'), false);
+      const controller = new AbortController(); controller.abort();
+      await assert.rejects(browser.execute({ targetUrl: origin, scope: { allowedOrigins: [origin], deniedOrigins: [] }, steps: [{ kind: 'navigate', target: origin }], signal: controller.signal }), /abort/i);
+    } finally { await closeServer(server); }
+  });
+});

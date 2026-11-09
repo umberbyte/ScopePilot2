@@ -23,6 +23,7 @@ export const PlanStepKinds = ['explore', 'active-scan', 'workflow-scan', 'nuclei
 export type PlanStepKind = (typeof PlanStepKinds)[number];
 
 export interface PlanStep {
+  readonly discoverySources?: readonly import('../explore/assets.ts').DiscoverySource[];
   readonly stepId: string;
   readonly kind: PlanStepKind;
   readonly operationClass: OperationClass;
@@ -60,6 +61,7 @@ export interface PlanHashInput {
   readonly targetRole: string;
   readonly guidelineIds: readonly string[];
   readonly steps: readonly {
+    readonly discoverySources?: readonly import('../explore/assets.ts').DiscoverySource[];
     readonly kind: PlanStepKind;
     readonly operationClass: OperationClass;
     readonly targetSnapshot: readonly string[];
@@ -81,6 +83,7 @@ export interface PlanConfirmation {
   readonly confirmedAt: string;
   readonly guidelineIds: readonly string[];
   readonly confirmedView: readonly {
+    readonly discoverySources?: readonly import('../explore/assets.ts').DiscoverySource[];
     readonly kind: PlanStepKind;
     readonly targets: readonly string[];
     readonly limits: PlanLimits;

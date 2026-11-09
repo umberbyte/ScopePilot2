@@ -11,15 +11,22 @@ export interface PayloadExecutionVerification {
 }
 
 /** 探索 (Playwright 相当)。実 adapter は browser context の request interception で scope を強制する。 */
+export interface ExplorationControl {
+  readonly signal?: AbortSignal;
+  readonly timeoutMs: number;
+  /** Called before every network request, including redirects and subresources. */
+  readonly consumeRequest: () => boolean;
+}
+
 export interface ExplorationPort {
   readonly engineVersion: string;
-  observe(url: string): Promise<PageObservation | null>;
+  observe(url: string, control?: ExplorationControl): Promise<PageObservation | null>;
   /**
    * Observe with an authenticated browser state. Implementations must keep
    * storage values in memory only and must not place them in observations,
    * events, evidence, or API responses.
    */
-  observeWithSession?(url: string, session: BrowserSessionState): Promise<PageObservation | null>;
+  observeWithSession?(url: string, session: BrowserSessionState, control?: ExplorationControl): Promise<PageObservation | null>;
   /**
    * 検証用 URL (payload 付き) を実 browser で開き、攻撃コードの実行 (dialog 発火等)
    * を観測する (design/f08: 反射の所見と実行確認を区別する)。未実装は省略可能。
@@ -373,6 +380,9 @@ export interface InteractiveBrowserFile {
 export interface InteractiveBrowserPort {
   readonly engineVersion: string;
   execute(input: {
+    readonly signal?: AbortSignal;
+    readonly maxRequests?: number;
+    readonly maxDurationMs?: number;
     readonly targetUrl: string;
     readonly scope: {
       readonly allowedOrigins: readonly string[];
@@ -385,6 +395,8 @@ export interface InteractiveBrowserPort {
     readonly sessionCookies?: readonly LoginSessionCookie[];
     readonly files?: readonly InteractiveBrowserFile[];
   }): Promise<{
+    readonly observedRequests?: readonly ObservedHttpRequest[];
+    readonly clientRoutes?: NonNullable<PageObservation['clientRoutes']>;
     readonly finalUrl: string;
     readonly status: number | null;
     readonly bodyHash: string;

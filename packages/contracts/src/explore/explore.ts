@@ -40,6 +40,7 @@ export interface FormDescriptor {
 }
 
 export interface PageObservation {
+  readonly authenticationReview?: readonly import('./assets.ts').ClientReviewSignal[];
   readonly assets?: readonly import('./assets.ts').AssetObservation[];
   readonly clientRoutes?: readonly { readonly url: string; readonly source: 'history' | 'hash' | 'workflow' }[];
   readonly discoveryLinks?: readonly { readonly url: string; readonly source: string }[];

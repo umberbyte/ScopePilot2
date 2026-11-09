@@ -150,7 +150,9 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return;
       }
       try {
-        const result = service.buildExplorationPlan(operator, stringArrayField(body, 'seeds'), optionalLimitsField(body));
+        const sources = body.discoverySources === undefined ? undefined : stringArrayField(body, 'discoverySources');
+        if (sources?.some((source) => !['robots', 'sitemap', 'manifest', 'wordlist'].includes(source))) throw new DomainError('ValidationFailed', 'unknown discovery source');
+        const result = service.buildExplorationPlan(operator, stringArrayField(body, 'seeds'), optionalLimitsField(body), sources === undefined ? undefined : { discoverySources: sources as import('@scopepilot2/contracts').DiscoverySource[] });
         service.authorizePlan(result.plan);
         return respondJson(response, 200, { plan: result.plan, planHash: result.planHash });
       } catch (cause) {
@@ -389,6 +391,9 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
     }
     if (route === 'GET /api/findings') {
       return respondJson(response, 200, { findings: service.listFindings() });
+    }
+    if (route === 'GET /api/observations/assets') {
+      return respondJson(response, 200, { assets: service.listAssetObservations() });
     }
     if (route === 'GET /api/observations') {
       // site map の素材 (design/02 A04)。観測 URL と scope 拒否を開示する。
