@@ -41,6 +41,8 @@ function parseCanonicalRequest(requestBytes: string): ParsedRequest {
 }
 
 export class NodeRepeaterTransport implements RepeaterTransportPort {
+  readonly adapterKind = 'real' as const;
+  readonly version = `node:${process.versions.node}`;
   private readonly timeoutMs: number;
 
   constructor(options: NodeRepeaterTransportOptions = {}) {

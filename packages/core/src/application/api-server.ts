@@ -216,7 +216,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       }
     }
     if (route === 'GET /api/capabilities') {
-      return respondJson(response, 200, { capabilities: service.capabilities() });
+      return respondJson(response, 200, { capabilities: service.capabilities(), runtimeProfile: service.runtimeProfile, adapters: service.toolCapabilities(), runtimeBundle: service.runtimeBundleManifest() });
     }
     if (route === 'POST /api/plan/confirm') {
       const body = await readJsonBody(request, response);

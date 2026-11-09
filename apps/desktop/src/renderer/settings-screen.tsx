@@ -6,7 +6,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Field, Input, MessageBar, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, tokens } from '@fluentui/react-components';
-import type { EngineCapabilitySnapshot } from '@scopepilot2/contracts';
+import type { EngineCapabilitySnapshot, RuntimeAdapterCapability, RuntimeProfile } from '@scopepilot2/contracts';
 import { t } from './resources.ts';
 
 const CONTROL_ASPECTS = ['preSendScopeEnforcement', 'stopControl', 'budgetLease', 'rateLimit'] as const;
@@ -29,6 +29,8 @@ async function callJson<T>(apiBase: string, path: string, body?: unknown): Promi
 
 export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const styles = useStyles();
+  const [adapters, setAdapters] = useState<readonly RuntimeAdapterCapability[]>([]);
+  const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('production');
   const [capabilities, setCapabilities] = useState<readonly EngineCapabilitySnapshot[]>([]);
   const [extensions, setExtensions] = useState<readonly { extensionId: string; version: string; permissions: readonly string[]; apiRange: readonly string[] }[]>([]);
   const [extensionId, setExtensionId] = useState('');
@@ -74,8 +76,10 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
   useEffect(() => {
     void (async () => {
       try {
-        const body = await callJson<{ capabilities: readonly EngineCapabilitySnapshot[] }>(apiBase, '/api/capabilities');
+        const body = await callJson<{ capabilities: readonly EngineCapabilitySnapshot[]; adapters?: readonly RuntimeAdapterCapability[]; runtimeProfile?: RuntimeProfile }>(apiBase, '/api/capabilities');
         setCapabilities(body.capabilities);
+        setAdapters(body.adapters ?? []);
+        setRuntimeProfile(body.runtimeProfile ?? 'production');
       } catch (cause) {
         setError(String(cause));
       }
@@ -109,6 +113,14 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
   return (
     <div className={styles.section}>
       <Text weight="semibold">{t('a13.title')}</Text>
+      <Text>Runtime: {runtimeProfile}</Text>
+      <Table aria-label="Runtime adapters">
+        <TableHeader><TableRow><TableHeaderCell>機能</TableHeaderCell><TableHeaderCell>Adapter</TableHeaderCell><TableHeaderCell>版</TableHeaderCell><TableHeaderCell>制約</TableHeaderCell></TableRow></TableHeader>
+        <TableBody>{adapters.map((adapter) => <TableRow key={adapter.capability}>
+          <TableCell>{adapter.capability}</TableCell><TableCell>{adapter.adapterKind}</TableCell>
+          <TableCell>{adapter.version}</TableCell><TableCell>{adapter.constraints.join('; ') || '—'}</TableCell>
+        </TableRow>)}</TableBody>
+      </Table>
       {error !== '' && (
         <MessageBar intent="error">
           {`Error: ${error}`}

@@ -226,6 +226,8 @@ export interface FuzzTransportResponse {
 
 /** Fuzz の実 transport。未構成の service は fixture 応答を使う。 */
 export interface FuzzTransportPort {
+  readonly adapterKind?: import('@scopepilot2/contracts').AdapterKind;
+  readonly version?: string;
   send(input: {
     readonly targetUrl: string;
     readonly combination: readonly string[];
@@ -248,9 +250,12 @@ export interface SequencerTransportResponse {
 
 /** Sequencer の実収集 transport。adapter 内で rate を守り、応答を逐次 core へ渡す。 */
 export interface SequencerTransportPort {
+  readonly adapterKind?: import('@scopepilot2/contracts').AdapterKind;
+  readonly version?: string;
   collect(input: {
     readonly targetUrl: string;
     readonly samples: number;
+    readonly extractor?: import('../domain/sequencer.ts').SequencerExtractor;
     /** Coreで検証済みの採取専用再送要求。値はtransport外へ保存しない。 */
     readonly replayRequest: import('../domain/sequencer.ts').SequencerReplayRequest;
     /** Stop before the next request and abort an in-flight request when signalled. */
@@ -273,6 +278,8 @@ export interface OastProviderEvent {
  * callback を逐次 core へ渡す。token/config secret は監査へ渡さない。
  */
 export interface OastProviderPort {
+  readonly adapterKind?: import('@scopepilot2/contracts').AdapterKind;
+  readonly version?: string;
   readonly supportedProtocols: readonly ('http' | 'dns' | 'smtp' | 'icmp')[];
   startSession(input: {
     readonly attemptId: string;
@@ -283,6 +290,8 @@ export interface OastProviderPort {
 
 /** WebSocket text message の実送受信。scope と size は core、rate は adapter でも強制する。 */
 export interface WebSocketTransportPort {
+  readonly adapterKind?: import('@scopepilot2/contracts').AdapterKind;
+  readonly version?: string;
   exchange(input: {
     /** 案件 scope と同じ http(s) URL。adapter 内で ws(s) へ写像する。 */
     readonly targetUrl: string;
@@ -317,6 +326,8 @@ export interface TransportProbeResponseEvidence {
 }
 
 export interface AdvancedTransportPort {
+  readonly adapterKind?: import('@scopepilot2/contracts').AdapterKind;
+  readonly version?: string;
   probe(input: {
     readonly targetUrl: string;
     /** Protocol selected by the caller. HTTP/3 is rejected by core before this port is called. */
@@ -398,6 +409,8 @@ export interface InteractiveBrowserPort {
 
 /** Repeater の実 transport (実 HTTP 送信)。未構成の service は fixture 応答を使う。 */
 export interface RepeaterTransportPort {
+  readonly adapterKind?: import('@scopepilot2/contracts').AdapterKind;
+  readonly version?: string;
   send(input: {
     readonly targetUrl: string;
     readonly requestBytes: string;

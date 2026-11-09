@@ -1,11 +1,13 @@
 /**
  * 基準シナリオ「案件作成→認可→探索→候補採用→能動診断→取込→所見→報告」の
- * application service seed。`docs/design/19-cli-automation.md` 5章、`docs/design/22-execution-control.md`。
+ * application service。`docs/design/19-cli-automation.md` 5章、`docs/design/22-execution-control.md`。
  *
  * 本体実装より先に simulation fixture で自動完走させる回帰基準となる層で、
  * command pipeline の順序 (権限判定 → 認可 → 確認 → domain 処理 → 証跡 → event) を
  * 最初から踏襲する (SYS-UT-001/005 の土台)。
  */
+import type { AdapterKind, RuntimeProfile, RuntimeAdapterCapability } from '@scopepilot2/contracts';
+import { UnavailableCapability } from '../ports/runtime-capability.ts';
 import {
   canonicalJson,
   DomainError,
@@ -165,8 +167,8 @@ import {
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
 import { assess, createSamplePlan, createSequencerExtractor, createSequencerReplayRequest, extractSequencerToken, reportProjection, SampleCollector, type AlphabetClassCounts, type NumericDeltaSignCounts } from '../domain/sequencer.ts';
 import { parseOpenApiDocument, type ParsedOpenApiEndpoint } from '../domain/api-scanning.ts';
-import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, TokenIssuer, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
-import { buildWsSendPlan, importFrames, sendWithPolicy, validateWsSubprotocols, wsEvidence, type WsFrame } from '../domain/websocket.ts';
+import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
+import { buildWsSendPlan, importFrames, validateWsSubprotocols, wsEvidence, type WsFrame } from '../domain/websocket.ts';
 import { checkAuthorityScope, negotiateTransport, transportCapability, transportEvidence, validateHeaderValues, validatePseudoHeaders } from '../domain/advanced-transport.ts';
 import { buildDomCandidate, domEvidenceProjection } from '../domain/dom-investigation.ts';
 import {
@@ -203,7 +205,11 @@ const PAYLOAD_EXECUTION_FINDING_PATTERN = /xss|cross[\s-]?site[\s-]?scripting/i;
 const PAYLOAD_URL_MARKER_PATTERN = /(?:%3C|<script|javascript:|onerror\s*=|onload\s*=|alert\s*\(|<img|<svg|<iframe)/i;
 const PAYLOAD_VERIFICATION_MAX = 5;
 
+const TOOL_PORTS = ['repeaterTransport', 'fuzzTransport', 'sequencerTransport', 'oastProvider', 'webSocketTransport', 'advancedTransport'] as const;
+type ToolPortName = typeof TOOL_PORTS[number];
+
 export interface BaselineFlowDeps {
+  readonly runtimeProfile?: RuntimeProfile;
   readonly clock: Clock;
   readonly ids: IdGenerator;
   readonly evidence: EvidenceStorePort;
@@ -234,17 +240,17 @@ export interface BaselineFlowDeps {
   readonly initialFindings?: readonly Finding[];
   /** 実 engine 診断の完了後、alert 生成の遅れを待つ時間 (ms)。fixture では 0。 */
   readonly scanAlertSettleMs?: number;
-  /** Repeater の実 transport (design/f04)。未構成なら fixture 応答を使う。 */
+  /** Repeater の実 transport (design/f04)。未構成なら CapabilityUnavailable。 */
   readonly repeaterTransport?: import('../ports/engines.ts').RepeaterTransportPort;
-  /** Fuzz の実 transport (design/f05)。未構成なら fixture 応答を使う。 */
+  /** Fuzz の実 transport (design/f05)。未構成なら CapabilityUnavailable。 */
   readonly fuzzTransport?: import('../ports/engines.ts').FuzzTransportPort;
-  /** Sequencer の実収集 transport (design/f07)。未構成なら fixture 応答を使う。 */
+  /** Sequencer の実収集 transport (design/f07)。未構成なら CapabilityUnavailable。 */
   readonly sequencerTransport?: import('../ports/engines.ts').SequencerTransportPort;
-  /** OAST の実 provider session (design/f13)。未構成なら fixture token を発行する。 */
-  readonly oastProvider?: import('../ports/engines.ts').OastProviderPort;
-  /** WebSocket の実 text transport (design/f14)。未構成なら fixture 台帳だけを使う。 */
+  /** OAST の実 provider session (design/f13)。未構成なら CapabilityUnavailable。 */
+  readonly oastProvider?: import('../ports/engines.ts').OastProviderPort | UnavailableCapability;
+  /** WebSocket の実 text transport (design/f14)。未構成なら CapabilityUnavailable。 */
   readonly webSocketTransport?: import('../ports/engines.ts').WebSocketTransportPort;
-  /** HTTP/2 negotiation/request probe (design/f15). Omitted for deterministic fixtures. */
+  /** HTTP/2 negotiation/request probe (design/f15). Unavailable when omitted. */
   readonly advancedTransport?: import('../ports/engines.ts').AdvancedTransportPort;
   /** Playwright-backed live DOM observation (design/f16). */
   readonly domObserver?: import('../ports/engines.ts').DomObservationPort;
@@ -333,6 +339,7 @@ export interface InteractiveDiagnosticItemResult {
 
 type SequencerTokenSource = 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom';
 type SequencerSessionRecord = {
+  adapterKind: AdapterKind;
   sessionId: string;
   targetUrl: string;
   tokenSource: SequencerTokenSource;
@@ -510,11 +517,10 @@ export class BaselineFlowService {
   private readonly payloadCatalog = new PayloadCatalog();
   private readonly payloadSetNames: string[] = [];
   private readonly payloadRegistrations = new Map<string, PayloadSetRegistration>();
-  private readonly fuzzRuns: readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] = [];
+  private readonly fuzzRuns: readonly { adapterKind: AdapterKind; runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] = [];
 
   /** OAST の attempt・観測 (design/f13)。token は発行時に一度だけ応答し、一覧には出さない。 */
-  private readonly oastIssuer = new TokenIssuer();
-  private readonly oastAttempts: { attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; issuedAtMs: number }[] = [];
+  private readonly oastAttempts: { adapterKind: AdapterKind; attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; issuedAtMs: number }[] = [];
   private readonly oastSeenEventIds = new Set<string>();
   private readonly oastInteractions: { token: string; payload: string; recordedAt: string }[] = [];
   private readonly oastUncorrelated: { token: string; reason: string; recordedAt: string }[] = [];
@@ -593,7 +599,10 @@ export class BaselineFlowService {
   private readonly deps: BaselineFlowDeps;
 
   constructor(deps: BaselineFlowDeps) {
-    this.deps = deps;
+    this.deps = { ...deps };
+    this.runtimeProfile = deps.runtimeProfile ?? 'production';
+    this.configuredAt = deps.clock.now().toISOString();
+    this.adapterSnapshot = this.describeToolAdapters();
     this.importer = new FindingImporter(deps.initialFindings ?? []);
   }
 
@@ -1286,8 +1295,7 @@ export class BaselineFlowService {
       return this.deps.interactiveBrowser;
     };
     const repeater = () => {
-      if (this.deps.repeaterTransport === undefined) throw domainError('CapabilityUnavailable', 'repeater transport is not configured for this service');
-      return this.deps.repeaterTransport;
+      return this.requireToolAdapter('repeaterTransport');
     };
     const probes: (Omit<ThemeCheckProbeResult, 'outcome'> & { outcome: AuthBypassProbeOutcome | null })[] = [];
     let skipped: string[] = [];
@@ -1971,10 +1979,10 @@ export class BaselineFlowService {
         const extraValues = (params.extraValues ?? '').split(',').map((value) => value.trim()).filter((value) => value !== '');
         const values = [...INPUT_ROBUSTNESS_PAYLOADS, ...extraValues].slice(0, INPUT_ROBUSTNESS_MAX_VALUES);
         requestBudget(values.length);
-        if (this.deps.fuzzTransport === undefined) throw domainError('CapabilityUnavailable', 'fuzz transport is not configured for this service');
+        const fuzzAdapter = this.requireToolAdapter('fuzzTransport');
         const sessionCookies = input.role === undefined ? undefined : applicableSessionCookies([...requireSession().cookies], target);
         for (const value of values) {
-          const response = await this.deps.fuzzTransport.send({
+          const response = await fuzzAdapter.send({
             targetUrl: target,
             combination: [value],
             positions: [{ name: paramName, values: [value] }],
@@ -2147,7 +2155,7 @@ export class BaselineFlowService {
         // Cookie認証WebSocketをsame-originとcross-originのOriginで比較し、CSWSHを確認する。
         const target = targets[0];
         if (target === undefined) throw domainError('ValidationFailed', 'theme 27 requires a WebSocket target URL');
-        if (this.deps.webSocketTransport === undefined) throw domainError('CapabilityUnavailable', 'websocket transport is not configured for this service');
+        const wsAdapter = this.requireToolAdapter('webSocketTransport');
         const origins = (params.evilOrigins ?? 'https://scopepilot.invalid').split(',').map((origin) => origin.trim()).filter((origin) => origin !== '');
         if (origins.length === 0 || origins.length > 3) throw domainError('ValidationFailed', 'theme 27 accepts 1..3 evil origins');
         const message = params.message ?? '{"action":"report"}';
@@ -2156,7 +2164,7 @@ export class BaselineFlowService {
         requestBudget(origins.length + 1);
         const exchange = async (origin: string): Promise<boolean> => {
           try {
-            const result = await this.deps.webSocketTransport!.exchange({
+            const result = await wsAdapter.exchange({
               targetUrl: target,
               messages: [message],
               origin,
@@ -2665,8 +2673,10 @@ export class BaselineFlowService {
   async runFuzzSession(
     operator: OperatorProfile,
     input: { readonly targetUrl: string; readonly positions: readonly FuzzPosition[]; readonly maxRequests?: number; readonly role?: string },
-  ): Promise<{ runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; sessionCookieNames?: readonly string[] }> {
+  ): Promise<{ adapterKind: AdapterKind; runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
+    const adapter = this.requireToolAdapter('fuzzTransport');
+    const adapterKind = adapter.adapterKind ?? 'real';
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
     const decision = ScopePolicy.decide(caseRecord.scope, canonical);
@@ -2688,48 +2698,41 @@ export class BaselineFlowService {
     const cap = input.maxRequests ?? Math.min(200, caseRecord.scope.limits.maxRequests);
     const { total } = planCombinations(input.positions, cap);
     // 実 transport 構成時は rate (2 req/s) を実時間で守る。fixture は仮想時計のまま。
-    const realTransport = this.deps.fuzzTransport;
     let virtualNowMs = 0;
     const outcomes: FuzzResponseOutcome[] = [];
     const result = await runFuzz(
       {
         send: async (_index, combination) => {
-          if (realTransport !== undefined) {
-            const response = await realTransport.send({
-              targetUrl: canonical,
-              combination,
-              positions: input.positions,
-              ...(appliedCookies === undefined
-                ? {}
-                : {
-                    sessionCookies: appliedCookies.map((cookie) => ({
-                      name: cookie.name,
-                      value: cookie.value,
-                      domain: cookie.domain,
-                      path: cookie.path,
-                    })),
-                  }),
-            });
-            outcomes.push({ status: response.status, contentLength: response.contentLength, bodyHash: response.bodyHash });
-            this.recordObservedExchange(
-              { url: response.requestUrl, method: 'GET', status: response.status, contentType: response.contentType },
-              this.deps.clock.now().toISOString(),
-              'fuzzer',
-            );
-            return;
-          }
-          // fixture adapter: 応答は先頭 position の値だけで決まる (cluster 集約の実演)。
-          const body = `resp:${combination[0] ?? ''}`;
-          outcomes.push({ status: 200, contentLength: body.length, bodyHash: hashStable('scopepilot2.fuzz.body', body) });
+          const response = await adapter.send({
+            targetUrl: canonical,
+            combination,
+            positions: input.positions,
+            ...(appliedCookies === undefined
+              ? {}
+              : {
+                  sessionCookies: appliedCookies.map((cookie) => ({
+                    name: cookie.name,
+                    value: cookie.value,
+                    domain: cookie.domain,
+                    path: cookie.path,
+                  })),
+                }),
+          });
+          outcomes.push({ status: response.status, contentLength: response.contentLength, bodyHash: response.bodyHash });
+          this.recordObservedExchange(
+            { url: response.requestUrl, method: 'GET', status: response.status, contentType: response.contentType },
+            this.deps.clock.now().toISOString(),
+            'fuzzer',
+          );
         },
       },
       input.positions,
       total,
       {
         isCancelled: () => false,
-        now: () => (realTransport === undefined ? virtualNowMs : Date.now()),
+        now: () => (adapterKind === 'fixture' ? virtualNowMs : Date.now()),
         sleep: async (ms) => {
-          if (realTransport === undefined) {
+          if (adapterKind === 'fixture') {
             virtualNowMs += ms;
           } else {
             await new Promise((resolve) => {
@@ -2744,10 +2747,11 @@ export class BaselineFlowService {
       representative: combinationAt(input.positions, cluster.members[0] ?? 0),
     }));
     const runId = this.deps.ids.next('fuzz');
-    const record = { runId, targetUrl: canonical, total, sent: result.sent, clusters, executedAt: this.deps.clock.now().toISOString() };
-    (this.fuzzRuns as { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[]).push(record);
+    const record = { adapterKind, runId, targetUrl: canonical, total, sent: result.sent, clusters, executedAt: this.deps.clock.now().toISOString() };
+    (this.fuzzRuns as { adapterKind: AdapterKind; runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[]).push(record);
     this.record({ type: 'FuzzRunCompleted', at: record.executedAt, runId, targetUrl: canonical, total, sent: result.sent });
     return {
+      adapterKind,
       runId,
       targetUrl: canonical,
       total,
@@ -2758,14 +2762,13 @@ export class BaselineFlowService {
     };
   }
 
-  listFuzzRuns(): readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] {
+  listFuzzRuns(): readonly { adapterKind: AdapterKind; runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] {
     return [...this.fuzzRuns];
   }
 
   /**
    * Sequencer session の実行 (design/f07)。sample 数は domain 検証 (30..10000)。
-   * fixture adapter は対象 URL から決定的な token 応答を作る (URL に fixed が
-   * 含まれる場合は毎回同一 token = 低 entropy・重複の実演、no-token は欠落混入)。
+   * 応答は明示注入された adapter からだけ受け取る。
    * token 原文は応答・監査・台帳のいずれにも出さない (F07-UT-006)。
    */
   async runSequencerSession(
@@ -2773,6 +2776,8 @@ export class BaselineFlowService {
     input: { readonly targetUrl: string; readonly samples: number; readonly role?: string; readonly tokenSource?: SequencerTokenSource; readonly tokenCookieName?: string; readonly tokenFieldName?: string; readonly tokenStartDelimiter?: string; readonly tokenEndDelimiter?: string; readonly replayRequest?: { readonly method?: string; readonly headers?: readonly (readonly [string, string])[]; readonly body?: string }; readonly signal?: AbortSignal },
   ): Promise<SequencerSessionResult> {
     this.requirePermission(operator, 'run.manage');
+    const adapter = this.requireToolAdapter('sequencerTransport');
+    const adapterKind = adapter.adapterKind ?? 'real';
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
     const decision = ScopePolicy.decide(caseRecord.scope, canonical);
@@ -2798,65 +2803,36 @@ export class BaselineFlowService {
       }
     };
     throwIfCancelled();
-    if (this.deps.sequencerTransport === undefined) {
-      for (let index = 0; index < plan.target; index += 1) {
-        throwIfCancelled();
-        if (input.signal !== undefined) {
-          await new Promise<void>((resolve) => setImmediate(resolve));
-          throwIfCancelled();
-        }
-        let token: string | undefined;
-        if (canonical.includes('no-token') && index % 5 === 4) {
-          token = undefined;
-        } else if (canonical.includes('fixed')) {
-          token = 'fixed-token-value';
-        } else {
-          token = `sample-${index.toString(36)}-${(index * 7 + 3).toString(36)}`;
-        }
-        const response = extractor.source === 'cookie'
-          ? {
-              body: 'cookie token response',
-              ...(token === undefined ? {} : { setCookieHeaders: [`${extractor.cookieName}=${token}; Path=/; HttpOnly`] }),
-            }
-          : extractor.source === 'hidden'
-            ? { body: token === undefined ? '<form></form>' : `<form><input value="${token}" name="${extractor.fieldName}" type="hidden"></form>` }
-            : extractor.source === 'bearer'
-              ? { body: 'bearer token response', ...(token === undefined ? {} : { authorizationHeader: `Bearer ${token}` }) }
-              : extractor.source === 'custom'
-                ? { body: token === undefined ? 'no token in this response' : `${extractor.startDelimiter}${token}${extractor.endDelimiter}` }
-                : { body: token === undefined ? 'no token in this response' : `token=${token}` };
-        collector.record(extractSequencerToken(response, extractor, pattern));
+
+    try {
+      await adapter.collect({
+        targetUrl: canonical,
+        samples: plan.target,
+        extractor,
+        replayRequest,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        ...(appliedCookies === undefined ? {} : {
+          sessionCookies: appliedCookies.map((cookie) => ({
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+          })),
+        }),
+        onResponse: (response) => {
+          collector.record(extractSequencerToken(response, extractor, pattern));
+          this.recordObservedExchange(
+            { url: response.requestUrl, method: replayRequest.method, status: response.status, contentType: response.contentType },
+            this.deps.clock.now().toISOString(),
+            'sequencer',
+          );
+        },
+      });
+    } catch (cause) {
+      if (input.signal?.aborted === true) {
+        throw domainError('Cancelled', 'sequencer session cancelled');
       }
-    } else {
-      try {
-        await this.deps.sequencerTransport.collect({
-          targetUrl: canonical,
-          samples: plan.target,
-          replayRequest,
-          ...(input.signal === undefined ? {} : { signal: input.signal }),
-          ...(appliedCookies === undefined ? {} : {
-            sessionCookies: appliedCookies.map((cookie) => ({
-              name: cookie.name,
-              value: cookie.value,
-              domain: cookie.domain,
-              path: cookie.path,
-            })),
-          }),
-          onResponse: (response) => {
-            collector.record(extractSequencerToken(response, extractor, pattern));
-            this.recordObservedExchange(
-              { url: response.requestUrl, method: replayRequest.method, status: response.status, contentType: response.contentType },
-              this.deps.clock.now().toISOString(),
-              'sequencer',
-            );
-          },
-        });
-      } catch (cause) {
-        if (input.signal?.aborted === true) {
-          throw domainError('Cancelled', 'sequencer session cancelled');
-        }
-        throw cause;
-      }
+      throw cause;
     }
     throwIfCancelled();
     const collection = collector.snapshot();
@@ -2865,6 +2841,7 @@ export class BaselineFlowService {
     const sessionId = this.deps.ids.next('seq');
     const verdict = assessment.verdict;
     const record = {
+      adapterKind,
       sessionId,
       targetUrl: canonical,
       tokenSource: extractor.source,
@@ -2972,24 +2949,24 @@ export class BaselineFlowService {
   async startOastAttempt(
     operator: OperatorProfile,
     input: { readonly targetUrl: string; readonly protocol: OastProtocol },
-  ): Promise<{ attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; waitMs: number }> {
+  ): Promise<{ adapterKind: AdapterKind; attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; waitMs: number }> {
     this.requirePermission(operator, 'run.manage');
+    const adapter = this.requireToolAdapter('oastProvider');
+    const adapterKind = adapter.adapterKind ?? 'real';
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
     const decision = ScopePolicy.decide(caseRecord.scope, canonical);
     if (!decision.allowed) {
       throw domainError('OutOfScope', `oast target is out of scope: ${decision.reason}`);
     }
-    const supportedProtocols = this.deps.oastProvider?.supportedProtocols ?? ['http', 'dns'];
+    const supportedProtocols = adapter.supportedProtocols;
     if (providerCapability(supportedProtocols, input.protocol) === 'Unsupported') {
       throw domainError('CapabilityUnavailable', `oast provider does not support protocol ${input.protocol}`);
     }
     const attemptId = this.deps.ids.next('oast');
     const pendingEvents: OastProviderEvent[][] = [];
     let attemptRegistered = false;
-    const { token } = this.deps.oastProvider === undefined
-      ? this.oastIssuer.issue(attemptId)
-      : await this.deps.oastProvider.startSession({
+    const { token } = await adapter.startSession({
           attemptId,
           protocol: input.protocol,
           onEvents: (events) => {
@@ -3000,13 +2977,13 @@ export class BaselineFlowService {
             this.recordProviderOastCallbacks(events);
           },
         });
-    this.oastAttempts.push({ attemptId, targetUrl: canonical, protocol: input.protocol, token, issuedAtMs: this.deps.clock.now().getTime() });
+    this.oastAttempts.push({ adapterKind, attemptId, targetUrl: canonical, protocol: input.protocol, token, issuedAtMs: this.deps.clock.now().getTime() });
     attemptRegistered = true;
     this.record({ type: 'OastAttemptStarted', at: this.deps.clock.now().toISOString(), attemptId, targetUrl: canonical, protocol: input.protocol });
     for (const events of pendingEvents) {
       this.recordProviderOastCallbacks(events);
     }
-    return { attemptId, targetUrl: canonical, protocol: input.protocol, token, waitMs: OAST_DEFAULT_WAIT_MS };
+    return { adapterKind, attemptId, targetUrl: canonical, protocol: input.protocol, token, waitMs: OAST_DEFAULT_WAIT_MS };
   }
 
   /**
@@ -3052,7 +3029,7 @@ export class BaselineFlowService {
   }
 
   /** attempt 一覧 (token なし。interactions と曖昧判定のみ)。 */
-  listOastAttempts(): readonly { attemptId: string; targetUrl: string; protocol: OastProtocol; status: 'waiting' | 'expired'; interactions: number; candidateOnly: boolean }[] {
+  listOastAttempts(): readonly { attemptId: string; targetUrl: string; protocol: OastProtocol; adapterKind: AdapterKind; status: 'waiting' | 'expired'; interactions: number; candidateOnly: boolean }[] {
     const nowMs = this.deps.clock.now().getTime();
     return this.oastAttempts.map((attempt) => {
       const interactions = this.oastInteractions.filter((interaction) => interaction.token === attempt.token);
@@ -3061,6 +3038,7 @@ export class BaselineFlowService {
         attemptId: attempt.attemptId,
         targetUrl: attempt.targetUrl,
         protocol: attempt.protocol,
+        adapterKind: attempt.adapterKind,
         status: pollDeadline(attempt.issuedAtMs, nowMs).expired ? ('expired' as const) : ('waiting' as const),
         interactions: interactions.length,
         // 複数 token にまたがる相関は無い (attempt 単位) が、観測 0 件は候補にもしない。
@@ -3131,8 +3109,10 @@ export class BaselineFlowService {
   async sendWsMessages(
     operator: OperatorProfile,
     input: { readonly targetUrl: string; readonly messages: readonly string[]; readonly role?: string; readonly subprotocols?: readonly string[] },
-  ): Promise<{ planHash: string; sent: number; rejected: 'size' | 'rate' | null; sessionCookieNames?: readonly string[]; negotiatedSubprotocol?: string }> {
+  ): Promise<{ adapterKind: AdapterKind; planHash: string; sent: number; rejected: 'size' | 'rate' | null; sessionCookieNames?: readonly string[]; negotiatedSubprotocol?: string }> {
     this.requirePermission(operator, 'run.manage');
+    const adapter = this.requireToolAdapter('webSocketTransport');
+    const adapterKind = adapter.adapterKind ?? 'real';
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
     const decision = ScopePolicy.decide(caseRecord.scope, canonical);
@@ -3157,63 +3137,37 @@ export class BaselineFlowService {
       sessionRevision: this.wsSessionRevision,
       subprotocols,
     });
-    if (this.deps.webSocketTransport !== undefined) {
-      if (input.messages.some((message) => Buffer.byteLength(message, 'utf8') > 1_000_000)) {
-        this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: 0, rejected: 'size' });
-        return { planHash: plan.planHash, sent: 0, rejected: 'size' };
-      }
-      const recordFrame = (direction: 'sent' | 'received', payload: string): void => {
-        const frame: WsFrame = { frameId: this.deps.ids.next('ws'), direction, payload, receivedAtMs: this.deps.clock.now().getTime() };
-        this.wsFrames.push(frame);
-        this.wsSeenFingerprints.add(`${frame.direction}:${frame.payload}`);
-      };
-      const transported = await this.deps.webSocketTransport.exchange({
-        targetUrl: canonical,
-        messages: input.messages,
-        ...(subprotocols.length === 0 ? {} : { subprotocols }),
-        ...(appliedCookies === undefined ? {} : {
-          sessionCookies: appliedCookies.map((cookie) => ({
-            name: cookie.name,
-            value: cookie.value,
-            domain: cookie.domain,
-            path: cookie.path,
-          })),
-        }),
-        onSentFrame: (payload) => recordFrame('sent', payload),
-        onTextFrame: (payload) => recordFrame('received', payload),
-      });
-      this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: transported.sent });
-      return {
-        planHash: plan.planHash,
-        sent: transported.sent,
-        rejected: null,
-        ...(transported.negotiatedSubprotocol === undefined ? {} : { negotiatedSubprotocol: transported.negotiatedSubprotocol }),
-        ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
-      };
+    if (input.messages.some((message) => Buffer.byteLength(message, 'utf8') > 1_000_000)) {
+      this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: 0, rejected: 'size' });
+      return { adapterKind, planHash: plan.planHash, sent: 0, rejected: 'size' };
     }
-    let virtualMs = 0;
-    const result = await sendWithPolicy(
-      input.messages,
-      { maxMessageBytes: 1_000_000, messagesPerSecond: 10, now: () => (virtualMs += 1000) },
-      {
-        send: async (message) => {
-          const frame: WsFrame = { frameId: this.deps.ids.next('ws'), direction: 'sent', payload: message, receivedAtMs: this.deps.clock.now().getTime() };
-          this.wsFrames.push(frame);
-          this.wsSeenFingerprints.add(`${frame.direction}:${frame.payload}`);
-        },
-      },
-    );
-    this.record({
-      type: 'WsMessagesSent',
-      at: this.deps.clock.now().toISOString(),
+    const recordFrame = (direction: 'sent' | 'received', payload: string): void => {
+      const frame: WsFrame = { frameId: this.deps.ids.next('ws'), direction, payload, receivedAtMs: this.deps.clock.now().getTime() };
+      this.wsFrames.push(frame);
+      this.wsSeenFingerprints.add(`${frame.direction}:${frame.payload}`);
+    };
+    const transported = await adapter.exchange({
       targetUrl: canonical,
-      sent: result.sent,
-      ...(result.rejected === null ? {} : { rejected: result.rejected }),
+      messages: input.messages,
+      ...(subprotocols.length === 0 ? {} : { subprotocols }),
+      ...(appliedCookies === undefined ? {} : {
+        sessionCookies: appliedCookies.map((cookie) => ({
+          name: cookie.name,
+          value: cookie.value,
+          domain: cookie.domain,
+          path: cookie.path,
+        })),
+      }),
+      onSentFrame: (payload) => recordFrame('sent', payload),
+      onTextFrame: (payload) => recordFrame('received', payload),
     });
+    this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: transported.sent });
     return {
+      adapterKind,
       planHash: plan.planHash,
-      sent: result.sent,
-      rejected: result.rejected,
+      sent: transported.sent,
+      rejected: null,
+      ...(transported.negotiatedSubprotocol === undefined ? {} : { negotiatedSubprotocol: transported.negotiatedSubprotocol }),
       ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
     };
   }
@@ -3221,11 +3175,12 @@ export class BaselineFlowService {
   /**
    * transport の選択 (design/f15)。HTTP/3 は能力表で Unsupported。peer が h2 を
    * offer しない場合、fallback 未許可なら CapabilityUnavailable (F15-UT-004)。
-   * 実 port 構成時は bounded request probe を行い、未構成時は URL に h1-only を含む
-   * fixture peer だけが h2 を offer しない。結果は ALPN/runtime を保持する (F15-UT-007)。
+   * 明示注入された port で bounded request probe を行い、ALPN/runtime を保持する (F15-UT-007)。
    */
-  async negotiateTransportFor(operator: OperatorProfile, input: { readonly targetUrl: string; readonly allowFallback: boolean; readonly requested?: 'h2' | 'http/1.1' | 'h3' }): Promise<{ protocol: 'h2' | 'http/1.1'; downgraded: boolean; alpn: string; runtime: string; response?: import('../ports/engines.ts').TransportProbeResponseEvidence }> {
+  async negotiateTransportFor(operator: OperatorProfile, input: { readonly targetUrl: string; readonly allowFallback: boolean; readonly requested?: 'h2' | 'http/1.1' | 'h3' }): Promise<{ adapterKind: AdapterKind; protocol: 'h2' | 'http/1.1'; downgraded: boolean; alpn: string; runtime: string; response?: import('../ports/engines.ts').TransportProbeResponseEvidence }> {
     this.requirePermission(operator, 'run.manage');
+    const adapter = this.requireToolAdapter('advancedTransport');
+    const adapterKind = adapter.adapterKind ?? 'real';
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
     const decision = ScopePolicy.decide(caseRecord.scope, canonical);
@@ -3236,19 +3191,7 @@ export class BaselineFlowService {
     if (requested === 'h3' || transportCapability(requested) === 'Unsupported') {
       throw domainError('CapabilityUnavailable', `transport ${requested} is Unsupported`);
     }
-    const probe = this.deps.advancedTransport === undefined
-      ? requested === 'http/1.1'
-        ? {
-            offered: ['http/1.1'] as const,
-            alpn: 'http/1.1 (explicit)',
-            runtime: 'fixture-transport',
-          }
-        : {
-          offered: canonical.includes('h1-only') ? ['http/1.1'] as const : ['h2'] as const,
-          alpn: canonical.includes('h1-only') ? 'http/1.1' : 'h2',
-          runtime: 'fixture-transport',
-        }
-      : await this.deps.advancedTransport.probe({ targetUrl: canonical, requested, allowFallback: input.allowFallback });
+    const probe = await adapter.probe({ targetUrl: canonical, requested, allowFallback: input.allowFallback });
     const negotiated = requested === 'http/1.1'
       ? { protocol: 'http/1.1' as const, downgraded: false }
       : negotiateTransport({ offered: probe.offered, allowFallback: input.allowFallback });
@@ -3261,6 +3204,7 @@ export class BaselineFlowService {
       downgraded: negotiated.downgraded,
     });
     return {
+      adapterKind,
       protocol: negotiated.protocol,
       downgraded: negotiated.downgraded,
       ...evidence,
@@ -3521,8 +3465,10 @@ export class BaselineFlowService {
     draftId: string,
     confirmedPlanHash: string,
     role?: string,
-  ): Promise<{ sent: boolean; reason?: string; attempt?: SendAttemptRecord; response?: ReturnType<typeof summarizeResponse>; sessionCookieNames?: readonly string[] }> {
+  ): Promise<{ adapterKind: AdapterKind; sent: boolean; reason?: string; attempt?: SendAttemptRecord; response?: ReturnType<typeof summarizeResponse>; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
+    const adapter = this.requireToolAdapter('repeaterTransport');
+    const adapterKind = adapter.adapterKind ?? 'real';
     const draft = this.repeaterDrafts.get(draftId);
     if (draft === undefined) {
       throw domainError('ValidationFailed', `repeater draft ${draftId} does not exist`);
@@ -3539,13 +3485,7 @@ export class BaselineFlowService {
     let transportResponse: import('../ports/engines.ts').RepeaterTransportResponse | undefined;
     const outcome = await sendCommand(draft, confirmedPlanHash, {
       send: async (command) => {
-        if (this.deps.repeaterTransport === undefined) {
-          // fixture adapter: 対象 URL から決定的な text 応答を返す。実 transport 未構成時の経路。
-          this.repeaterSentCommands.push(command);
-          this.recordObservedExchange({ url: draft.targetUrl, method: 'GET', status: 200, contentType: 'text/html' }, this.deps.clock.now().toISOString(), 'repeater');
-          return;
-        }
-        transportResponse = await this.deps.repeaterTransport.send({
+        transportResponse = await adapter.send({
           targetUrl: draft.targetUrl,
           requestBytes: draft.requestBytes,
           ...(appliedCookies === undefined ? {} : { sessionCookies: appliedCookies.map((cookie) => ({ name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path })) }),
@@ -3564,7 +3504,7 @@ export class BaselineFlowService {
       },
     }, appliedCookies === undefined ? undefined : [...appliedCookies]);
     if (!outcome.sent) {
-      return { sent: false, reason: 'confirmed plan hash does not match the current draft (revision が進んでいないか確認してください)' };
+      return { adapterKind, sent: false, reason: 'confirmed plan hash does not match the current draft (revision が進んでいないか確認してください)' };
     }
     // 実 transport の redirect は domain と同じ規則で評価する (scope 外 Location は
     // hop 前に停止 — F04-UT-004)。停止した場合は応答を返さない。
@@ -3574,16 +3514,16 @@ export class BaselineFlowService {
         this.currentCase().scope,
       );
       if (redirects.outcome !== 'completed') {
-        return { sent: false, reason: `redirect stopped: ${redirects.outcome}${redirects.lastReason === undefined ? '' : ` (${redirects.lastReason})`}` };
+        return { adapterKind, sent: false, reason: `redirect stopped: ${redirects.outcome}${redirects.lastReason === undefined ? '' : ` (${redirects.lastReason})`}` };
       }
     }
-    const body = transportResponse?.body ?? Buffer.from(`<html><body>fixture response for ${new URL(draft.targetUrl).pathname}</body></html>`, 'utf8');
+    if (transportResponse === undefined) throw domainError('CapabilityUnavailable', 'repeater returned no response');
+    const body = transportResponse.body;
     const attempt = recordSendAttempt(draft.draftId, body);
     this.repeaterAttempts.push(attempt);
-    const summaryInput = transportResponse === undefined
-      ? { status: 200, headers: [['content-type', 'text/html']] as readonly (readonly [string, string])[], body }
-      : { status: transportResponse.status, headers: transportResponse.headers, body };
+    const summaryInput = { status: transportResponse.status, headers: transportResponse.headers, body };
     return {
+      adapterKind,
       sent: true,
       attempt,
       response: summarizeResponse(summaryInput),
@@ -3646,6 +3586,51 @@ export class BaselineFlowService {
     this.persistFindings([updated]);
     this.record({ type: 'FindingStatusChanged', at, findingId: input.findingId, from: before.status, to: input.next, changedBy: operator.operatorId });
     return updated;
+  }
+
+  readonly runtimeProfile: RuntimeProfile;
+  private readonly configuredAt: string;
+  private readonly adapterSnapshot: readonly RuntimeAdapterCapability[];
+
+  toolCapabilities(): readonly RuntimeAdapterCapability[] {
+    return structuredClone(this.adapterSnapshot);
+  }
+
+  runtimeBundleManifest() {
+    const content = { runtimeBundleHash: this.deps.runtimeBundleHash, runtimeProfile: this.runtimeProfile,
+      adapters: this.toolCapabilities(), engines: this.capabilities() };
+    return { ...content, manifestHash: hashStable('scopepilot2.runtime.adapters', content) };
+  }
+
+  private async saveRuntimeBundle(runId: string): Promise<void> {
+    await this.deps.evidence.saveText(`runtime-bundle:${runId}`, canonicalJson(this.runtimeBundleManifest()), { kind: 'runtime-bundle', runId });
+  }
+
+  private requireProductionPlan(plan: ExecutionPlan): void {
+    if (this.runtimeProfile === 'production' && plan.steps.some((step) =>
+      this.deps.capabilities.some((capability) => capability.engineKind === step.engineKind && capability.source === 'fixture'))) {
+      throw domainError('CapabilityUnavailable', 'production plans cannot contain fixture engine routes');
+    }
+  }
+
+  private describeToolAdapters(): readonly RuntimeAdapterCapability[] {
+    return TOOL_PORTS.map((name) => {
+      const port = this.deps[name];
+      const kind = port?.adapterKind ?? (port === undefined || this.runtimeProfile === 'production' ? 'unavailable' : 'real');
+      const allowed = kind !== 'unavailable' && (this.runtimeProfile !== 'production' || kind === 'real');
+      return { capability: name, adapterKind: kind, available: allowed, configuredAt: this.configuredAt,
+        version: port?.version ?? 'unspecified', constraints: allowed ? [] : [port instanceof UnavailableCapability ? port.reason : `${name} is not configured with an allowed adapter for ${this.runtimeProfile}`],
+        ...(kind === 'fixture' ? { fixtureHash: hashStable('scopepilot2.tool.fixture', { name, implementation: Object.entries(port ?? {}).map(([key, value]) => [key, typeof value === 'function' ? value.toString() : value]) }) } : {}) };
+    });
+  }
+
+  private requireToolAdapter<K extends ToolPortName>(name: K): Exclude<NonNullable<BaselineFlowDeps[K]>, UnavailableCapability> {
+    const port = this.deps[name];
+    if (port === undefined || port instanceof UnavailableCapability || port.adapterKind === 'unavailable'
+      || (this.runtimeProfile === 'production' && port.adapterKind !== 'real')) {
+      throw domainError('CapabilityUnavailable', `${name} requires a configured adapter for ${this.runtimeProfile}`, { details: { capability: name, runtimeProfile: this.runtimeProfile, adapterKind: port?.adapterKind ?? 'unavailable' } });
+    }
+    return port as Exclude<NonNullable<BaselineFlowDeps[K]>, UnavailableCapability>;
   }
 
   /** 能力表 (fixture または実測)。API 経由で UI/CLI が版と fixture hash を確認するのに使う。 */
@@ -3941,6 +3926,7 @@ export class BaselineFlowService {
 
   /** 計画の検証と認可結び付け。問題があれば最初の問題を domain error へ変換する。 */
   authorizePlan(plan: ExecutionPlan): { planHash: string } {
+    this.requireProductionPlan(plan);
     const caseRecord = this.currentCase();
     const authorization = this.currentAuthorization();
     const issues = validatePlan(plan, {
@@ -3968,6 +3954,7 @@ export class BaselineFlowService {
   confirmPlan(plan: ExecutionPlan, operator: OperatorProfile): PlanConfirmation {
     this.requirePermission(operator, 'run.manage');
     const aggregate = this.currentAggregate();
+    this.requireProductionPlan(plan);
     const confirmation: PlanConfirmation = {
       confirmationId: this.deps.ids.next('confirm'),
       planHash: planHashOf(plan),
@@ -3997,6 +3984,7 @@ export class BaselineFlowService {
     input: ExploreRunInput,
   ): Promise<ExploreRunResult> {
     this.requirePermission(operator, 'run.manage');
+    this.requireProductionPlan(plan);
     this.requireMatchingConfirmation(plan, confirmation);
     const caseRecord = this.currentCase();
     this.assessmentStartedAt ??= this.deps.clock.now().toISOString();
@@ -4023,6 +4011,7 @@ export class BaselineFlowService {
     }
 
     const runId = this.deps.ids.next('run');
+    await this.saveRuntimeBundle(runId);
     const planHash = planHashOf(plan);
     this.record({ type: 'RunStarted', at: this.deps.clock.now().toISOString(), runId, planHash });
     const machine = new RunStateMachine('Confirmed');
@@ -4287,6 +4276,7 @@ export class BaselineFlowService {
     control: ActiveScanExecutionControl = {},
   ): Promise<ActiveScanRunResult> {
     this.requirePermission(operator, 'run.manage');
+    this.requireProductionPlan(plan);
     this.requireMatchingConfirmation(plan, confirmation);
     const caseRecord = this.currentCase();
     const step = plan.steps[0];
@@ -4379,6 +4369,7 @@ export class BaselineFlowService {
     }
 
     const runId = this.deps.ids.next('run');
+    await this.saveRuntimeBundle(runId);
     const planHash = planHashOf(plan);
     this.record({ type: 'RunStarted', at: this.deps.clock.now().toISOString(), runId, planHash });
     const machine = new RunStateMachine('Confirmed');

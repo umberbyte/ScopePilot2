@@ -68,6 +68,11 @@ describe('production engine composition', () => {
       assert.ok(engines.explorer instanceof PlaywrightExplorerAdapter);
       assert.ok(engines.scanEngine instanceof ZapEngineAdapter);
       assert.equal(engines.scanEngine.engineVersion, 'zap 2.17.0');
+      assert.equal(engines.oastProvider.adapterKind, 'unavailable');
+      for (const port of [engines.repeaterTransport, engines.fuzzTransport, engines.sequencerTransport, engines.webSocketTransport, engines.advancedTransport]) {
+        assert.equal(port.adapterKind, 'real');
+        assert.ok(port.version);
+      }
       assert.equal(engines.capabilities.find((item) => item.engineKind === 'zap')?.source, 'measured');
       assert.ok(engines.otpInbox instanceof HttpSecurityFixtureOtpInbox);
       assert.ok(engines.samlFixture instanceof HttpSecurityFixtureSaml);

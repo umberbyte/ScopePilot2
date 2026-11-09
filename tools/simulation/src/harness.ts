@@ -1,3 +1,4 @@
+import { createFixtureToolAdapters } from './adapters/fixture-tools.ts';
 /**
  * simulation harness の組み立て。固定 clock・連番 ID・in-memory 証拠保存と
  * fixture adapter を配線し、決定的に基準シナリオを実行できる環境を作る。
@@ -7,7 +8,7 @@
  * 実 engine 時は SystemClock と実測能力表を渡すこと (呼出側の責務)。
  */
 import { BaselineFlowService } from '@scopepilot2/core';
-import { FixedClock, InMemoryEvidenceStore, SequentialIdGenerator } from '@scopepilot2/core';
+import { FixedClock, InMemoryEvidenceStore, SequentialIdGenerator, SystemClock } from '@scopepilot2/core';
 import type { ActiveScanEnginePort, Clock, ExplorationPort, LoginExecutorPort } from '@scopepilot2/core';
 import type { EngineCapabilitySnapshot, OperatorProfile } from '@scopepilot2/contracts';
 import { FixtureExplorer } from './adapters/fixture-explorer.ts';
@@ -65,7 +66,7 @@ export interface HarnessOptions {
     readonly repeaterTransport?: import('@scopepilot2/core').RepeaterTransportPort;
     readonly fuzzTransport?: import('@scopepilot2/core').FuzzTransportPort;
     readonly sequencerTransport?: import('@scopepilot2/core').SequencerTransportPort;
-    readonly oastProvider?: import('@scopepilot2/core').OastProviderPort;
+    readonly oastProvider?: import('@scopepilot2/core').OastProviderPort | import('@scopepilot2/core').UnavailableCapability;
     readonly webSocketTransport?: import('@scopepilot2/core').WebSocketTransportPort;
     readonly advancedTransport?: import('@scopepilot2/core').AdvancedTransportPort;
     readonly domObserver?: import('@scopepilot2/core').DomObservationPort;
@@ -76,19 +77,22 @@ export function createHarness(options: HarnessOptions = {}): SimulationHarness {
   const explorer: ExplorationPort = options.engines?.explorer ?? new FixtureExplorer();
   const scanEngine: ActiveScanEnginePort = options.engines?.scanEngine ?? new FixtureZapEngine();
   const capabilities = options.engines?.capabilities ?? fixtureCapabilitySnapshots();
-  const runtimeBundleHash = options.engines?.runtimeBundleHash ?? FIXTURE_RUNTIME_BUNDLE_HASH;
+  const runtimeBundleHash = options.engines === undefined ? FIXTURE_RUNTIME_BUNDLE_HASH
+    : options.engines.runtimeBundleHash ?? `production-engines:${explorer.engineVersion}:${scanEngine.engineVersion}`;
   // login 実行器は既定も fixture (認証付き workflow を fixture 構成で回帰できる)。
-  const loginExecutor: LoginExecutorPort = options.engines?.loginExecutor ?? new FixtureLoginExecutor();
+  const loginExecutor = options.engines === undefined ? new FixtureLoginExecutor() : options.engines.loginExecutor;
   const service = new BaselineFlowService({
+    runtimeProfile: options.engines === undefined ? 'simulation' : 'production',
+    ...(options.engines === undefined ? createFixtureToolAdapters() : {}),
     // 実 engine 時は実時間 (認可の有効期間・監査記録)。既定は決定的な固定 clock。
-    clock: options.engines?.clock ?? new FixedClock(FIXTURE_CLOCK_TIMES),
+    clock: options.engines?.clock ?? (options.engines === undefined ? new FixedClock(FIXTURE_CLOCK_TIMES) : new SystemClock()),
     ids: new SequentialIdGenerator(),
     evidence: options.evidenceStore ?? new InMemoryEvidenceStore(),
     explorer,
     scanEngine,
     capabilities,
     runtimeBundleHash,
-    loginExecutor,
+    ...(loginExecutor === undefined ? {} : { loginExecutor }),
     ...(options.engines?.repeaterTransport === undefined ? {} : { repeaterTransport: options.engines.repeaterTransport }),
     ...(options.engines?.fuzzTransport === undefined ? {} : { fuzzTransport: options.engines.fuzzTransport }),
     ...(options.engines?.sequencerTransport === undefined ? {} : { sequencerTransport: options.engines.sequencerTransport }),

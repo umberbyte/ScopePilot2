@@ -17,6 +17,8 @@ export interface NodeSequencerTransportOptions {
 }
 
 export class NodeSequencerTransport implements SequencerTransportPort {
+  readonly adapterKind = 'real' as const;
+  readonly version = `node:${process.versions.node}`;
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
   private readonly requestsPerSecond: number;

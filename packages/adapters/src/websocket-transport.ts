@@ -33,6 +33,8 @@ const NodeWebSocket = WebSocket as unknown as new (
 ) => WebSocket;
 
 export class NodeWebSocketTransport implements WebSocketTransportPort {
+  readonly adapterKind = 'real' as const;
+  readonly version = `node:${process.versions.node}`;
   private readonly connectTimeoutMs: number;
   private readonly responseWaitMs: number;
   private readonly messagesPerSecond: number;

@@ -2,11 +2,12 @@
  * A06 Repeater。`docs/detailed-design/f04-repeater.md`。
  * draft (tab 上限 20) の作成・header/body 編集・表示 plan hash による確認送信を扱う。
  * 編集のたびに revision と plan hash が進み、表示時の hash と一致しない送信は行われない。
- * 実送信は fixture adapter (決定的応答)。実 adapter は後続増分。
+ * 実送信の利用可否は Core の runtime capability に従う。
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Button, Field, Input, makeStyles, Text, Textarea, tokens } from '@fluentui/react-components';
 import { t } from './resources.ts';
+import { useRuntimeCapabilities } from './use-runtime-capabilities.ts';
 
 interface DraftView {
   readonly draftId: string;
@@ -44,6 +45,7 @@ const useStyles = makeStyles({
 });
 
 export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactElement {
+  const runtime = useRuntimeCapabilities(apiBase);
   const styles = useStyles();
   const [drafts, setDrafts] = useState<readonly DraftView[]>([]);
   const [selected, setSelected] = useState<DraftView | null>(null);
@@ -174,7 +176,7 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
             <Input value={sessionRole} onChange={(_, data) => setSessionRole(data.value)} />
           </Field>
           <div className={styles.tabs}>
-            <Button appearance="primary" disabled={busy} onClick={() => void send(selected.planHash)}>
+            <Button appearance="primary" disabled={busy || !runtime.available('repeaterTransport')} onClick={() => void send(selected.planHash)}>
               {t('a06.send')}
             </Button>
             {drafts.find((draft) => draft.draftId === selected.draftId)?.planHash !== undefined &&
@@ -185,6 +187,7 @@ export function RepeaterScreen({ apiBase }: { apiBase: string }): React.ReactEle
                 return null;
               })()}
           </div>
+          {runtime.notice('repeaterTransport') && <Text role="status">{runtime.notice('repeaterTransport')}</Text>}
           {sendResult !== null && (
             <div className={styles.section}>
               {sendResult.sent ? (
