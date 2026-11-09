@@ -2,6 +2,7 @@ import { constants as fsConstants, existsSync } from 'node:fs';
 import { access, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { delimiter, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import {
+  EMPTY_RUNTIME_ENVIRONMENT, RuntimeEnvironmentKeys, type RuntimeEnvironment,
   AiCliProviders,
   AiCliLaunchModeValues,
   DEFAULT_APP_AI_SELECTION,
@@ -88,12 +89,15 @@ export interface RuntimeSettingsStoreOptions {
   readonly filePath: string;
   readonly applicationDirectory: string;
   readonly pathValue?: string;
+  readonly environment?: Readonly<Record<string, string | undefined>>;
 }
 
 export class RuntimeSettingsStore {
   private readonly filePath: string;
   private readonly applicationDirectory: string;
   private readonly pathValue: string;
+  private environment: RuntimeEnvironment = EMPTY_RUNTIME_ENVIRONMENT;
+  private readonly startupEnvironment: Readonly<Record<string, string | undefined>>;
   private saved: RuntimeToolPaths = EMPTY_RUNTIME_TOOL_PATHS;
   private aiSelection: AppAiSelection = DEFAULT_APP_AI_SELECTION;
   private aiLaunchModes: AiCliLaunchModes = DEFAULT_AI_CLI_LAUNCH_MODES;
@@ -101,6 +105,7 @@ export class RuntimeSettingsStore {
   private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(options: RuntimeSettingsStoreOptions) {
+    this.startupEnvironment = options.environment ?? process.env;
     this.filePath = resolve(options.filePath);
     this.applicationDirectory = resolve(options.applicationDirectory);
     this.pathValue = options.pathValue ?? process.env.PATH ?? '';
@@ -110,15 +115,18 @@ export class RuntimeSettingsStore {
     let loaded: Partial<Record<RuntimeToolId, unknown>> = {};
     let loadedSelection: unknown;
     let loadedLaunchModes: unknown;
+    let loadedEnvironment: unknown;
     try {
-      const parsed = JSON.parse(await readFile(this.filePath, 'utf8')) as { paths?: Partial<Record<RuntimeToolId, unknown>>; aiSelection?: unknown; aiLaunchModes?: unknown };
-      loaded = parsed.paths ?? {};
-      loadedSelection = parsed.aiSelection;
-      loadedLaunchModes = parsed.aiLaunchModes;
+      const parsed = JSON.parse(await readFile(this.filePath, 'utf8')) as { paths?: Partial<Record<RuntimeToolId, unknown>>; aiSelection?: unknown; aiLaunchModes?: unknown; environment?: unknown };
+      loaded = parsed?.paths ?? {};
+      loadedEnvironment = parsed?.environment;
+      loadedSelection = parsed?.aiSelection;
+      loadedLaunchModes = parsed?.aiLaunchModes;
     } catch (cause) {
       const code = (cause as NodeJS.ErrnoException).code;
       if (code !== 'ENOENT' && !(cause instanceof SyntaxError)) throw cause;
     }
+    this.environment = normalizeRuntimeEnvironment(loadedEnvironment ?? EMPTY_RUNTIME_ENVIRONMENT);
     this.saved = Object.fromEntries(RuntimeToolIds.map((id) => [id, typeof loaded[id] === 'string' ? loaded[id].trim() : ''])) as unknown as RuntimeToolPaths;
     if (typeof loadedSelection === 'object' && loadedSelection !== null) {
       const selection = loadedSelection as { provider?: unknown; model?: unknown };
@@ -154,6 +162,7 @@ export class RuntimeSettingsStore {
 
   async save(input: RuntimeSettingsInput): Promise<RuntimeSettingsSnapshot> {
     const { paths, aiLaunchModes } = input;
+    const environment = normalizeRuntimeEnvironment(input.environment ?? this.environment);
     const normalizedEntries: [RuntimeToolId, string][] = [];
     for (const id of RuntimeToolIds) {
       const value = paths[id].trim();
@@ -164,8 +173,11 @@ export class RuntimeSettingsStore {
     for (const provider of AiCliProviders) {
       if (!AiCliLaunchModeValues.includes(aiLaunchModes[provider])) throw new Error(`${provider} の起動方式が不正です`);
     }
+    runtimeEnvironment({ ...this.current(), environment }, this.startupEnvironment);
+    if (environment.SCOPEPILOT_INTERACTSH_CONFIG !== '' && !(await isUsableFile(environment.SCOPEPILOT_INTERACTSH_CONFIG))) throw new Error('Interactsh設定ファイルが見つからないか読み取れません');
     this.saved = Object.fromEntries(normalizedEntries) as unknown as RuntimeToolPaths;
     this.aiLaunchModes = { ...aiLaunchModes };
+    this.environment = environment;
     await this.persist();
     this.snapshot = await this.resolveSnapshot();
     return this.snapshot;
@@ -185,7 +197,7 @@ export class RuntimeSettingsStore {
     const next = this.persistQueue.catch(() => undefined).then(async () => {
       await mkdir(dirname(this.filePath), { recursive: true });
       const temporaryPath = `${this.filePath}.tmp`;
-      await writeFile(temporaryPath, `${JSON.stringify({ schemaVersion: 2, paths: this.saved, aiLaunchModes: this.aiLaunchModes, aiSelection: this.aiSelection }, null, 2)}\n`, 'utf8');
+      await writeFile(temporaryPath, `${JSON.stringify({ schemaVersion: 2, environment: this.environment, paths: this.saved, aiLaunchModes: this.aiLaunchModes, aiSelection: this.aiSelection }, null, 2)}\n`, 'utf8');
       await rename(temporaryPath, this.filePath);
     });
     this.persistQueue = next;
@@ -200,6 +212,12 @@ export class RuntimeSettingsStore {
         tools.push({ id, path: configured, source: 'saved', exists: await isUsableFile(configured) });
         continue;
       }
+      const envKey = ({ zapExecutable: 'SCOPEPILOT_ZAP_EXECUTABLE', nucleiExecutable: 'SCOPEPILOT_NUCLEI_EXECUTABLE', nucleiTemplateManifest: 'SCOPEPILOT_NUCLEI_TEMPLATE_MANIFEST' } as Partial<Record<RuntimeToolId, string>>)[id];
+      const fromEnvironment = envKey === undefined ? '' : this.startupEnvironment[envKey]?.trim() ?? '';
+      if (fromEnvironment !== '') {
+        tools.push({ id, path: fromEnvironment, source: 'environment', exists: await isUsableFile(fromEnvironment) });
+        continue;
+      }
       const fromPath = findOnPath(TOOL_COMMANDS[id], this.pathValue);
       if (fromPath !== '') {
         tools.push({ id, path: fromPath, source: 'path', exists: true });
@@ -211,10 +229,48 @@ export class RuntimeSettingsStore {
         : { id, path: resolve(known), source: 'known-location', exists: true });
     }
     const paths = Object.fromEntries(tools.map((tool) => [tool.id, tool.path])) as unknown as RuntimeToolPaths;
-    return { schemaVersion: 2, paths, aiLaunchModes: this.aiLaunchModes, tools, aiSelection: this.aiSelection };
+    return { schemaVersion: 2, environment: this.environment, paths, aiLaunchModes: this.aiLaunchModes, tools, aiSelection: this.aiSelection };
   }
 }
 
 function inferAiLaunchMode(path: string): AiCliLaunchModes[AiCliProvider] {
   return /\.(?:ps1|cmd|bat)$/iu.test(path) ? 'node' : 'file';
+}
+
+/** Only supported non-secret settings are persisted; blank values inherit startup environment. */
+export function normalizeRuntimeEnvironment(input: unknown): RuntimeEnvironment {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new Error('環境設定の形式が不正です');
+  const record = input as Record<string, unknown>;
+  const values = Object.fromEntries(RuntimeEnvironmentKeys.map((key) => {
+    const value = record[key] ?? '';
+    if (typeof value !== 'string' || /[\u0000-\u001f\u007f]/u.test(value)) throw new Error(`${key} が不正です`);
+    return [key, value.trim()];
+  })) as unknown as RuntimeEnvironment;
+  const port = values.SCOPEPILOT_API_PORT;
+  if (port !== '' && (!/^\d+$/u.test(port) || Number(port) > 65535)) throw new Error('APIポートは0〜65535の整数で指定してください');
+  for (const key of ['SCOPEPILOT_ZAP_BASE_URL', 'SCOPEPILOT_OAST_SERVER_URL'] as const) {
+    const value = values[key];
+    if (value === '') continue;
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error(`${key} は認証情報を含まないHTTP(S) Originで指定してください`);
+    if (key === 'SCOPEPILOT_OAST_SERVER_URL' && url.protocol !== 'https:') throw new Error('OASTサーバーはHTTPSで指定してください');
+  }
+  const config = values.SCOPEPILOT_INTERACTSH_CONFIG;
+  if (config !== '' && !isAbsolute(config)) throw new Error('Interactsh設定ファイルは絶対パスで指定してください');
+  return values;
+}
+
+export function runtimeEnvironment(snapshot: RuntimeSettingsSnapshot, inherited: Readonly<Record<string, string | undefined>>): Record<string, string | undefined> {
+  const env = { ...inherited };
+  for (const key of RuntimeEnvironmentKeys) if (snapshot.environment[key] !== '') env[key] = snapshot.environment[key];
+  for (const [id, key] of Object.entries({ zapExecutable: 'SCOPEPILOT_ZAP_EXECUTABLE', nucleiExecutable: 'SCOPEPILOT_NUCLEI_EXECUTABLE', nucleiTemplateManifest: 'SCOPEPILOT_NUCLEI_TEMPLATE_MANIFEST' })) {
+    const value = snapshot.paths[id as RuntimeToolId];
+    if (value !== '') env[key] = value;
+  }
+  if (inherited.SCOPEPILOT_DISABLE_NUCLEI === '1') {
+    delete env.SCOPEPILOT_NUCLEI_EXECUTABLE;
+    delete env.SCOPEPILOT_NUCLEI_TEMPLATE_MANIFEST;
+  }
+  if (env.SCOPEPILOT_OAST_SERVER_URL && !env.SCOPEPILOT_INTERACTSH_CONFIG) throw new Error('OASTサーバーにはInteractsh設定ファイルが必要です');
+  return env;
 }

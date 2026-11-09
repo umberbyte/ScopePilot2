@@ -16,7 +16,9 @@ import type { ReportFindingNarrative } from './assurance-report.ts';
 import { observeLoginPage } from './login-page-observer.ts';
 import { AiAuthService } from './ai-auth.ts';
 import { AiCatalogService } from './ai-catalog.ts';
-import { RuntimeSettingsStore } from './runtime-settings.ts';
+import { testRuntimeConnections } from './runtime-connections.ts';
+import { resolveApiBinding } from './config.ts';
+import { runtimeEnvironment, RuntimeSettingsStore } from './runtime-settings.ts';
 import { presentActivatedWorkspace } from './workspace-presentation.ts';
 import { AiCliLaunchModeValues, AiCliProviders, RuntimeToolIds, type AiCliLaunchModes, type AiCliProvider, type AppAiSelection, type RuntimeSettingsInput, type RuntimeToolId } from '../shared/runtime-settings.ts';
 
@@ -321,6 +323,11 @@ function requireSettingsWindow(event: IpcMainInvokeEvent): BrowserWindow {
   return settingsWindow;
 }
 
+function requireRuntimeSettingsWindow(event: IpcMainInvokeEvent): BrowserWindow {
+  if (window !== null && event.sender.id === window.webContents.id) return window;
+  return requireSettingsWindow(event);
+}
+
 function requireMainWindow(event: IpcMainInvokeEvent): BrowserWindow {
   if (window === null || event.sender.id !== window.webContents.id) {
     throw new Error('この操作はメインウィンドウからのみ実行できます');
@@ -366,11 +373,15 @@ function registerRuntimeSettingsHandlers(
 ): void {
   ipcMain.handle('scopepilot:open-settings', () => createSettingsWindow(apiBase()));
   ipcMain.handle('scopepilot:runtime-settings-get', (event) => {
-    requireSettingsWindow(event);
+    requireRuntimeSettingsWindow(event);
     return runtimeSettings.current();
   });
+  ipcMain.handle('scopepilot:runtime-settings-test', async (event) => {
+    requireRuntimeSettingsWindow(event);
+    return await testRuntimeConnections(runtimeSettings.current());
+  });
   ipcMain.handle('scopepilot:runtime-settings-save', async (event, input: unknown) => {
-    requireSettingsWindow(event);
+    requireRuntimeSettingsWindow(event);
     if (typeof input !== 'object' || input === null) throw new Error('設定値の形式が不正です');
     const value = input as Partial<Record<RuntimeToolId, unknown>> & { paths?: Partial<Record<RuntimeToolId, unknown>>; aiLaunchModes?: Partial<Record<AiCliProvider, unknown>> };
     if (typeof value.paths === 'object' && value.paths !== null) Object.assign(value, value.paths);
@@ -384,7 +395,7 @@ function registerRuntimeSettingsHandlers(
     return await runtimeSettings.save(value as RuntimeSettingsInput);
   });
   ipcMain.handle('scopepilot:runtime-settings-select-file', async (event, toolId: unknown, currentPath: unknown) => {
-    const owner = requireSettingsWindow(event);
+    const owner = requireRuntimeSettingsWindow(event);
     if (!RuntimeToolIds.includes(toolId as RuntimeToolId)) throw new Error('設定項目が不正です');
     const manifest = toolId === 'nucleiTemplateManifest';
     const selected = await dialog.showOpenDialog(owner, {
@@ -404,11 +415,11 @@ function registerRuntimeSettingsHandlers(
     requireSettingsWindow(event).close();
   });
   ipcMain.handle('scopepilot:ai-auth-status', async (event) => {
-    requireSettingsWindow(event);
+    requireRuntimeSettingsWindow(event);
     return await aiAuth.statuses();
   });
   ipcMain.handle('scopepilot:ai-auth-login', (event, provider: unknown) => {
-    requireSettingsWindow(event);
+    requireRuntimeSettingsWindow(event);
     if (!AiCliProviders.includes(provider as AiCliProvider)) throw new Error('AIプロバイダーが不正です');
     aiAuth.launchLogin(provider as AiCliProvider);
   });
@@ -465,16 +476,8 @@ async function bootstrap(): Promise<void> {
   });
   // 製品起動は常に実 engine。Playwright は案件 scope を送信前に強制し、ZAP は
   // 明示 endpoint またはローカル導入済み daemon を使用する。fixture への fallback はない。
-  const engines = await composeEngines({
-    ...process.env,
-    ...(initialRuntimeSettings.paths.zapExecutable === '' ? {} : { SCOPEPILOT_ZAP_EXECUTABLE: initialRuntimeSettings.paths.zapExecutable }),
-    ...(process.env.SCOPEPILOT_DISABLE_NUCLEI === '1' || initialRuntimeSettings.paths.nucleiExecutable === ''
-      ? {}
-      : { SCOPEPILOT_NUCLEI_EXECUTABLE: initialRuntimeSettings.paths.nucleiExecutable }),
-    ...(process.env.SCOPEPILOT_DISABLE_NUCLEI === '1' || initialRuntimeSettings.paths.nucleiTemplateManifest === ''
-      ? {}
-      : { SCOPEPILOT_NUCLEI_TEMPLATE_MANIFEST: initialRuntimeSettings.paths.nucleiTemplateManifest }),
-  });
+  const effectiveEnvironment = runtimeEnvironment(initialRuntimeSettings, process.env);
+  const engines = await composeEngines(effectiveEnvironment);
   closeEngines = () => engines.close();
   const engineOptions = {
     explorer: engines.explorer,
@@ -581,7 +584,7 @@ async function bootstrap(): Promise<void> {
   const server = createCoreApiServer({ service: serviceProxy, operator: desktopOperator, runRepository: runRepositoryProxy });
   const binding = await new Promise<{ host: string; port: number }>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(resolveApiBinding(effectiveEnvironment).port, '127.0.0.1', () => {
       const address = server.address();
       if (address === null || typeof address === 'string') {
         reject(new Error('expected a TCP address for the core api server'));

@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('scopepilotDesktop', {
   generateAiReport: (request: unknown) => ipcRenderer.invoke('scopepilot:generate-ai-report', request),
   openSelectedPath: (path: string) => ipcRenderer.invoke('scopepilot:open-selected-path', path),
   openSettings: () => ipcRenderer.invoke('scopepilot:open-settings'),
+  testRuntimeConnections: () => ipcRenderer.invoke('scopepilot:runtime-settings-test'),
   getRuntimeSettings: () => ipcRenderer.invoke('scopepilot:runtime-settings-get'),
   saveRuntimeSettings: (settings: unknown) => ipcRenderer.invoke('scopepilot:runtime-settings-save', settings),
   selectRuntimeToolFile: (toolId: string, currentPath: string) => ipcRenderer.invoke('scopepilot:runtime-settings-select-file', toolId, currentPath),
