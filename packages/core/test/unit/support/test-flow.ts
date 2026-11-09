@@ -1,3 +1,4 @@
+import { toolFixtures } from './tool-fixtures.ts';
 /**
  * core 単体テスト用の最小 fake 群と flow の組み立て helper。
  * `docs/detailed-design/03-unit-test-strategy.md` 4章: 呼出し記録と明示した結果だけを提供する。
@@ -196,7 +197,12 @@ export function createTestService(
 ): TestFlow {
   const explorer = options.explorer ?? new FakeExplorer();
   const scanEngine = options.scanEngine ?? new FakeScanEngine();
+  const fixtures = toolFixtures();
   const service = new BaselineFlowService({
+    ...fixtures,
+    runtimeProfile: 'test',
+    adapterKinds: { repeaterTransport: options.repeaterTransport === undefined ? 'fixture' : 'real', fuzzTransport: options.fuzzTransport === undefined ? 'fixture' : 'real', sequencerTransport: options.sequencerTransport === undefined ? 'fixture' : 'real', oastProvider: options.oastProvider === undefined ? 'fixture' : 'real', webSocketTransport: options.webSocketTransport === undefined ? 'fixture' : 'real' },
+    sleep: options.sleep ?? (async () => {}),
     clock: new FixedClock([TEST_NOW]),
     ids: new SequentialIdGenerator(),
     evidence: options.evidenceFailure === true ? new FailingAlertEvidenceStore() : new InMemoryEvidenceStore(),

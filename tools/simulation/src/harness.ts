@@ -1,3 +1,4 @@
+import { toolFixtures } from './fixture-tools.ts';
 /**
  * simulation harness の組み立て。固定 clock・連番 ID・in-memory 証拠保存と
  * fixture adapter を配線し、決定的に基準シナリオを実行できる環境を作る。
@@ -80,6 +81,15 @@ export function createHarness(options: HarnessOptions = {}): SimulationHarness {
   // login 実行器は既定も fixture (認証付き workflow を fixture 構成で回帰できる)。
   const loginExecutor: LoginExecutorPort = options.engines?.loginExecutor ?? new FixtureLoginExecutor();
   const service = new BaselineFlowService({
+    ...toolFixtures(),
+    runtimeProfile: 'simulation',
+    adapterKinds: {
+      repeaterTransport: options.engines?.repeaterTransport === undefined ? 'fixture' : 'real',
+      fuzzTransport: options.engines?.fuzzTransport === undefined ? 'fixture' : 'real',
+      sequencerTransport: options.engines?.sequencerTransport === undefined ? 'fixture' : 'real',
+      oastProvider: options.engines?.oastProvider === undefined ? 'fixture' : 'real',
+      webSocketTransport: options.engines?.webSocketTransport === undefined ? 'fixture' : 'real',
+    },
     // 実 engine 時は実時間 (認可の有効期間・監査記録)。既定は決定的な固定 clock。
     clock: options.engines?.clock ?? new FixedClock(FIXTURE_CLOCK_TIMES),
     ids: new SequentialIdGenerator(),

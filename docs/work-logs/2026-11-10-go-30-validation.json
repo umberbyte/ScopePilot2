@@ -1,0 +1,248 @@
+{
+  "date": "2026-11-10",
+  "issue": "GO-30",
+  "baseCommit": "c86e452d936ca2ace3789886ce3db901c43e93dc",
+  "baselineFlowBlob": "cfb2646add3a1ea2e54f608acbfe92c5be448edd",
+  "design": {
+    "path": "C:/Users/GoSugawara/orca/workspaces/ScopePilot2/spec-gap-resolution/docs/design/41-spec-gap-resolution.md",
+    "sha256": "2c1e13d3ff76ba8f2b19f46c7262821ca0fd61996667accd9c7b096dc0c79c02",
+    "sections": [
+      "10",
+      "13 stages 6-7",
+      "9 runtime policy"
+    ]
+  },
+  "note": "commandLog names identify local console captures used to produce this summary; console captures are not committed. Counts and failing test names are retained here.",
+  "stages": [
+    {
+      "stage": "baseline",
+      "coreUnit": {
+        "commandLog": "go30-baseline-unit.log",
+        "tests": 360,
+        "pass": 360,
+        "fail": 0,
+        "skipped": 0,
+        "failures": []
+      },
+      "coreIntegration": {
+        "commandLog": "go30-baseline-integration.log",
+        "tests": 39,
+        "pass": 36,
+        "fail": 3,
+        "skipped": 0,
+        "failures": [
+          "✖ documents/hints は hint を登録し、探索計画と観測の由来へ統合する (AGENTS.md)",
+          "✖ business-logic check は role 差分検証を inconclusive/pass/fail で返す (design/f17)",
+          "✖ GET /api/findings と POST /api/findings/status は所見確認状態を監査付きで扱う"
+        ]
+      },
+      "simulationFixture": {
+        "commandLog": "go30-baseline-simulation.log",
+        "tests": 10,
+        "pass": 7,
+        "fail": 3,
+        "skipped": 0,
+        "failures": [
+          "✖ [F21-FT-001] 案件作成→認可→探索→候補採用→能動診断→取込→所見→報告が UI なしで自動完走する",
+          "✖ [F21-FT-003] 探索 (Enforced) は scope 外 URL を adapter へ渡さず拒否記録を残す",
+          "✖ [F21-FT-006] 報告は委譲範囲・限界・未確認表示を省略しない"
+        ]
+      }
+    },
+    {
+      "stage": "stage1",
+      "coreUnit": {
+        "commandLog": "go30-stage1-unit.log",
+        "tests": 360,
+        "pass": 360,
+        "fail": 0,
+        "skipped": 0,
+        "failures": []
+      },
+      "coreIntegration": {
+        "commandLog": "go30-stage1-integration.log",
+        "tests": 39,
+        "pass": 36,
+        "fail": 3,
+        "skipped": 0,
+        "failures": [
+          "✖ documents/hints は hint を登録し、探索計画と観測の由来へ統合する (AGENTS.md)",
+          "✖ business-logic check は role 差分検証を inconclusive/pass/fail で返す (design/f17)",
+          "✖ GET /api/findings と POST /api/findings/status は所見確認状態を監査付きで扱う"
+        ]
+      },
+      "simulationFixture": {
+        "commandLog": "go30-stage1-simulation.log",
+        "tests": 10,
+        "pass": 7,
+        "fail": 3,
+        "skipped": 0,
+        "failures": [
+          "✖ [F21-FT-001] 案件作成→認可→探索→候補採用→能動診断→取込→所見→報告が UI なしで自動完走する",
+          "✖ [F21-FT-003] 探索 (Enforced) は scope 外 URL を adapter へ渡さず拒否記録を残す",
+          "✖ [F21-FT-006] 報告は委譲範囲・限界・未確認表示を省略しない"
+        ]
+      }
+    },
+    {
+      "stage": "stage2",
+      "coreUnit": {
+        "commandLog": "go30-stage2-unit.log",
+        "tests": 360,
+        "pass": 360,
+        "fail": 0,
+        "skipped": 0,
+        "failures": []
+      },
+      "coreIntegration": {
+        "commandLog": "go30-stage2-integration.log",
+        "tests": 39,
+        "pass": 36,
+        "fail": 3,
+        "skipped": 0,
+        "failures": [
+          "✖ documents/hints は hint を登録し、探索計画と観測の由来へ統合する (AGENTS.md)",
+          "✖ business-logic check は role 差分検証を inconclusive/pass/fail で返す (design/f17)",
+          "✖ GET /api/findings と POST /api/findings/status は所見確認状態を監査付きで扱う"
+        ]
+      },
+      "simulationFixture": {
+        "commandLog": "go30-stage2-simulation.log",
+        "tests": 10,
+        "pass": 7,
+        "fail": 3,
+        "skipped": 0,
+        "failures": [
+          "✖ [F21-FT-001] 案件作成→認可→探索→候補採用→能動診断→取込→所見→報告が UI なしで自動完走する",
+          "✖ [F21-FT-003] 探索 (Enforced) は scope 外 URL を adapter へ渡さず拒否記録を残す",
+          "✖ [F21-FT-006] 報告は委譲範囲・限界・未確認表示を省略しない"
+        ]
+      }
+    },
+    {
+      "stage": "stage3",
+      "coreUnit": {
+        "commandLog": "go30-stage3-unit.log",
+        "tests": 360,
+        "pass": 360,
+        "fail": 0,
+        "skipped": 0,
+        "failures": []
+      },
+      "coreIntegration": {
+        "commandLog": "go30-stage3-integration.log",
+        "tests": 39,
+        "pass": 36,
+        "fail": 3,
+        "skipped": 0,
+        "failures": [
+          "✖ documents/hints は hint を登録し、探索計画と観測の由来へ統合する (AGENTS.md)",
+          "✖ business-logic check は role 差分検証を inconclusive/pass/fail で返す (design/f17)",
+          "✖ GET /api/findings と POST /api/findings/status は所見確認状態を監査付きで扱う"
+        ]
+      },
+      "simulationFixture": {
+        "commandLog": "go30-stage3-simulation.log",
+        "tests": 10,
+        "pass": 7,
+        "fail": 3,
+        "skipped": 0,
+        "failures": [
+          "✖ [F21-FT-001] 案件作成→認可→探索→候補採用→能動診断→取込→所見→報告が UI なしで自動完走する",
+          "✖ [F21-FT-003] 探索 (Enforced) は scope 外 URL を adapter へ渡さず拒否記録を残す",
+          "✖ [F21-FT-006] 報告は委譲範囲・限界・未確認表示を省略しない"
+        ]
+      }
+    },
+    {
+      "stage": "stage4",
+      "coreUnit": {
+        "commandLog": "go30-stage4-unit.log",
+        "tests": 360,
+        "pass": 360,
+        "fail": 0,
+        "skipped": 0,
+        "failures": []
+      },
+      "coreIntegration": {
+        "commandLog": "go30-stage4-integration.log",
+        "tests": 39,
+        "pass": 36,
+        "fail": 3,
+        "skipped": 0,
+        "failures": [
+          "✖ documents/hints は hint を登録し、探索計画と観測の由来へ統合する (AGENTS.md)",
+          "✖ business-logic check は role 差分検証を inconclusive/pass/fail で返す (design/f17)",
+          "✖ GET /api/findings と POST /api/findings/status は所見確認状態を監査付きで扱う"
+        ]
+      },
+      "simulationFixture": {
+        "commandLog": "go30-stage4-simulation.log",
+        "tests": 10,
+        "pass": 7,
+        "fail": 3,
+        "skipped": 0,
+        "failures": [
+          "✖ [F21-FT-001] 案件作成→認可→探索→候補採用→能動診断→取込→所見→報告が UI なしで自動完走する",
+          "✖ [F21-FT-003] 探索 (Enforced) は scope 外 URL を adapter へ渡さず拒否記録を残す",
+          "✖ [F21-FT-006] 報告は委譲範囲・限界・未確認表示を省略しない"
+        ]
+      }
+    }
+  ],
+  "final": {
+    "workspaces": {
+      "commandLog": "go30-final-workspaces.log",
+      "tests": 552,
+      "pass": 551,
+      "fail": 0,
+      "skipped": 1,
+      "failures": [],
+      "exitCode": 0
+    },
+    "coreIntegration": {
+      "commandLog": "go30-final-integration.log",
+      "tests": 39,
+      "pass": 36,
+      "fail": 3,
+      "skipped": 0,
+      "failures": [
+        "✖ documents/hints は hint を登録し、探索計画と観測の由来へ統合する (AGENTS.md)",
+        "✖ business-logic check は role 差分検証を inconclusive/pass/fail で返す (design/f17)",
+        "✖ GET /api/findings と POST /api/findings/status は所見確認状態を監査付きで扱う"
+      ],
+      "exitCode": 1
+    },
+    "fixture": {
+      "commandLog": "go30-final-fixture.log",
+      "tests": 10,
+      "pass": 7,
+      "fail": 3,
+      "skipped": 0,
+      "failures": [
+        "✖ [F21-FT-001] 案件作成→認可→探索→候補採用→能動診断→取込→所見→報告が UI なしで自動完走する",
+        "✖ [F21-FT-003] 探索 (Enforced) は scope 外 URL を adapter へ渡さず拒否記録を残す",
+        "✖ [F21-FT-006] 報告は委譲範囲・限界・未確認表示を省略しない"
+      ],
+      "exitCode": 1
+    },
+    "boundary": {
+      "commandLog": "go30-boundary-tests.log",
+      "tests": 10,
+      "pass": 10,
+      "fail": 0,
+      "skipped": 0,
+      "failures": []
+    },
+    "typecheck": {
+      "command": "npm run typecheck",
+      "pass": true
+    },
+    "catalogFixture": {
+      "command": "npm run test:fixture --workspace @scopepilot2/guideline-catalog",
+      "tests": 2,
+      "pass": 2,
+      "fail": 0
+    }
+  }
+}
