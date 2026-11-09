@@ -9547,43 +9547,66 @@
         "additionalProperties": false
       },
       "StartJobRequest": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "const": "active-scan"
-          },
-          "plan": {
-            "$ref": "#/components/schemas/ExecutionPlan"
-          },
-          "confirmation": {
-            "$ref": "#/components/schemas/PlanConfirmation"
-          },
-          "params": {
+        "oneOf": [
+          {
             "type": "object",
             "properties": {
-              "adopted": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ScanCandidate"
-                }
+              "kind": {
+                "const": "active-scan"
               },
-              "role": {
-                "type": "string"
+              "plan": {
+                "$ref": "#/components/schemas/ExecutionPlan"
+              },
+              "confirmation": {
+                "$ref": "#/components/schemas/PlanConfirmation"
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "adopted": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ScanCandidate"
+                    }
+                  },
+                  "role": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "adopted"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
-              "adopted"
+              "kind",
+              "plan",
+              "confirmation",
+              "params"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "sequencer"
+              },
+              "params": {
+                "$ref": "#/components/schemas/SequencerJobParams"
+              }
+            },
+            "required": [
+              "kind",
+              "params"
             ],
             "additionalProperties": false
           }
-        },
-        "required": [
-          "kind",
-          "plan",
-          "confirmation",
-          "params"
         ],
-        "additionalProperties": false
+        "discriminator": {
+          "propertyName": "kind"
+        }
       },
       "JobDetail": {
         "type": "object",
@@ -9823,6 +9846,82 @@
             ]
           }
         },
+        "additionalProperties": false
+      },
+      "SequencerJobParams": {
+        "type": "object",
+        "properties": {
+          "targetUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "samples": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 10000
+          },
+          "role": {
+            "type": "string"
+          },
+          "tokenSource": {
+            "type": "string",
+            "enum": [
+              "body",
+              "cookie",
+              "hidden",
+              "bearer",
+              "custom"
+            ],
+            "default": "body"
+          },
+          "tokenCookieName": {
+            "type": "string"
+          },
+          "tokenFieldName": {
+            "type": "string"
+          },
+          "tokenStartDelimiter": {
+            "type": "string"
+          },
+          "tokenEndDelimiter": {
+            "type": "string"
+          },
+          "replayRequest": {
+            "type": "object",
+            "properties": {
+              "method": {
+                "type": "string",
+                "default": "GET"
+              },
+              "headers": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              "body": {
+                "type": "string",
+                "description": "At most 1 MiB in UTF-8. Values are never persisted."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "targetUrl",
+          "samples"
+        ],
         "additionalProperties": false
       }
     },

@@ -28,6 +28,7 @@ export type UiRoute =
   | 'decoder'
   | 'adv.tools.decoder'
   | 'adv.tools.comparer'
+  | 'adv.tools.sequencer'
   | 'findings'
   | 'settings';
 
@@ -62,6 +63,7 @@ const ROUTE_PERMISSIONS: Readonly<Record<UiRoute, OperatorPermission>> = {
   decoder: 'case.read',
   'adv.tools.decoder': 'case.read',
   'adv.tools.comparer': 'case.read',
+  'adv.tools.sequencer': 'run.manage',
   findings: 'finding.confirm',
   settings: 'case.manage',
 };

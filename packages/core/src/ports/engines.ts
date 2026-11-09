@@ -257,6 +257,8 @@ export interface SequencerTransportPort {
     readonly signal?: AbortSignal;
     /** Core-filtered role cookies for this target. Values must stay inside the transport. */
     readonly sessionCookies?: readonly LoginSessionCookie[];
+    /** Recheck current scope and budgets immediately before each request. */
+    readonly beforeRequest?: () => void;
     readonly onResponse: (response: SequencerTransportResponse) => void;
   }): Promise<void>;
 }

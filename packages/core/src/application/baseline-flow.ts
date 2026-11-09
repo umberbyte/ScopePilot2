@@ -6,6 +6,7 @@
  * command pipeline の順序 (権限判定 → 認可 → 確認 → domain 処理 → 証跡 → event) を
  * 最初から踏襲する (SYS-UT-001/005 の土台)。
  */
+import type { SequencerJobParams, SequencerTokenSource, SequencerSessionRecord, SequencerSessionResult } from '@scopepilot2/contracts';
 import { JobRegistry, jobContext, type JobStore, redactJobText } from './job-registry.ts';
 import {
   canonicalJson,
@@ -164,7 +165,7 @@ import {
   type SendAttemptRecord,
 } from '../domain/repeater.ts';
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
-import { assess, createSamplePlan, createSequencerExtractor, createSequencerReplayRequest, extractSequencerToken, reportProjection, SampleCollector, type AlphabetClassCounts, type NumericDeltaSignCounts } from '../domain/sequencer.ts';
+import { assess, createSamplePlan, createSequencerExtractor, createSequencerReplayRequest, extractSequencerToken, reportProjection, SampleCollector } from '../domain/sequencer.ts';
 import { parseOpenApiDocument, type ParsedOpenApiEndpoint } from '../domain/api-scanning.ts';
 import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, TokenIssuer, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
 import { buildWsSendPlan, importFrames, sendWithPolicy, validateWsSubprotocols, wsEvidence, type WsFrame } from '../domain/websocket.ts';
@@ -333,48 +334,6 @@ export interface InteractiveDiagnosticItemResult {
   readonly detail: string;
   readonly evidenceId?: string;
 }
-
-type SequencerTokenSource = 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom';
-type SequencerSessionRecord = {
-  sessionId: string;
-  targetUrl: string;
-  tokenSource: SequencerTokenSource;
-  tokenCookieName?: string;
-  tokenFieldName?: string;
-  tokenStartDelimiter?: string;
-  tokenEndDelimiter?: string;
-  requestMethod: string;
-  requestHeaderNames: readonly string[];
-  requestBodyBytes: number;
-  verdict: 'assessed' | 'insufficient';
-  sampleCount: number;
-  duplicates: number;
-  missing: number;
-  shannonEntropyBitsPerByte?: number;
-  shannonEntropyBitsPerToken?: number;
-  distinctByteValues?: number;
-  byteFrequencyBuckets?: readonly number[];
-  tokenLengthBucketMinimums?: readonly number[];
-  tokenByteLengthBuckets?: readonly number[];
-  tokenCharacterLengthBuckets?: readonly number[];
-  tokenMaximumCharacterRunLengthBuckets?: readonly number[];
-  adjacentTokenBitHammingDistanceBuckets?: readonly number[];
-  adjacentTokenHammingUnequalByteLengthPairs?: number;
-  adjacentNumericAbsoluteDeltaBuckets?: readonly number[];
-  adjacentNumericDeltaSignCounts?: NumericDeltaSignCounts;
-  adjacentNumericIneligiblePairs?: number;
-  adjacentNumericSerialCorrelationPairs?: number;
-  adjacentNumericSerialCorrelation?: number;
-  observedAlphabetSize?: number;
-  alphabetClassCounts?: AlphabetClassCounts;
-  positionAnalysisLimit?: number;
-  positionAlphabetClassCounts?: readonly AlphabetClassCounts[];
-  positionOverflowSamples?: number;
-  minimum?: number;
-  sessionCookieNames?: readonly string[];
-  executedAt: string;
-};
-type SequencerSessionResult = Omit<SequencerSessionRecord, 'executedAt'>;
 
 export interface ActiveScanRunResult {
   readonly runRecord: RunRecord;
@@ -836,12 +795,12 @@ export class BaselineFlowService {
   }
 
   /** 観測通信の記録 (traffic log と endpoint 集約の両方に入れる)。 */
-  private recordObservedExchange(summary: { url: string; method: string; status: number; contentType: string }, at: string, source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' | 'workflow-scan'): void {
+  private recordObservedExchange(summary: { url: string; method: string; status: number; contentType: string }, at: string, source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' | 'workflow-scan', requestAlreadyCounted = false): void {
     const context = jobContext.getStore();
     const exchangeId = this.deps.ids.next('exchange');
     if (context) {
       const counters = context.registry.get(context.jobId)!.summary.counters;
-      context.registry.emit(context.jobId, { category: 'request', messageKey: 'job.request.sent', message: 'HTTP request observed', params: { method: summary.method, status: summary.status }, refs: { url: summary.url, exchangeId }, counters: { budget: { ...counters.budget, used: counters.budget.used + 1 }, requestsSent: counters.requestsSent + 1, ...(summary.status >= 500 ? { errors: counters.errors + 1 } : {}) } });
+      context.registry.emit(context.jobId, { category: 'request', messageKey: 'job.request.sent', message: 'HTTP request observed', params: { method: summary.method, status: summary.status }, refs: { url: summary.url, exchangeId }, counters: { budget: { ...counters.budget, used: counters.budget.used + (requestAlreadyCounted ? 0 : 1) }, requestsSent: counters.requestsSent + (requestAlreadyCounted ? 0 : 1), ...(summary.status >= 500 ? { errors: counters.errors + 1 } : {}) } });
     }
     (this.trafficLog as { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' | 'workflow-scan'; jobId?: string }[]).push({
       exchangeId,
@@ -2784,9 +2743,43 @@ export class BaselineFlowService {
    * 含まれる場合は毎回同一 token = 低 entropy・重複の実演、no-token は欠落混入)。
    * token 原文は応答・監査・台帳のいずれにも出さない (F07-UT-006)。
    */
+  validateSequencerJob(operator: OperatorProfile, input: SequencerJobParams): void {
+    this.requirePermission(operator, 'run.manage');
+    const scope = this.currentCase().scope;
+    const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
+    if (!ScopePolicy.decide(scope, canonical).allowed) throw domainError('OutOfScope', 'sequencer target is out of scope');
+    createSamplePlan(input.samples);
+    if (input.samples > scope.limits.maxRequests) throw domainError('ValidationFailed', 'sequencer samples exceed the case request limit');
+    createSequencerReplayRequest(input.replayRequest);
+    createSequencerExtractor(input.tokenSource ?? 'body', input.tokenCookieName, input.tokenFieldName, input.tokenStartDelimiter, input.tokenEndDelimiter);
+    if (input.role !== undefined && !this.roleSessionCookies.has(input.role)) throw domainError('ValidationFailed', 'run login for the selected role first');
+  }
+
+  startSequencerJob(operator: OperatorProfile, input: SequencerJobParams): string {
+    this.validateSequencerJob(operator, input);
+    // Credentials remain only in this closure, never in persisted job metadata.
+    const params = structuredClone(input);
+    const id = this.jobs.create({ kind: 'sequencer', label: 'Sequencer', guarantee: 'Enforced',
+      transport: this.deps.sequencerTransport === undefined ? 'fixture' : 'live', budgetLimit: input.samples });
+    void this.jobs.execute(id, async signal => {
+      this.validateSequencerJob(operator, params);
+      this.jobs.emit(id, { category: 'phase', messageKey: 'job.phase', message: 'Collecting samples', params: { phase: 'collect' },
+        counters: { progress: { done: 0, total: params.samples, unit: 'samples' } } });
+      try {
+        const result = await this.runSequencerSession(operator, { ...params, signal, partialOnStop: true });
+        return { ...result, targetUrl: redactJobText(result.targetUrl) };
+      } catch (cause) {
+        if (signal.aborted) throw domainError('Cancelled', 'sequencer session cancelled');
+        // Transport errors may contain response text or replay values. Keep job diagnostics bounded and secret-free.
+        throw domainError('EngineFailure', 'sequencer collection failed; inspect transport configuration');
+      }
+    });
+    return id;
+  }
+
   async runSequencerSession(
     operator: OperatorProfile,
-    input: { readonly targetUrl: string; readonly samples: number; readonly role?: string; readonly tokenSource?: SequencerTokenSource; readonly tokenCookieName?: string; readonly tokenFieldName?: string; readonly tokenStartDelimiter?: string; readonly tokenEndDelimiter?: string; readonly replayRequest?: { readonly method?: string; readonly headers?: readonly (readonly [string, string])[]; readonly body?: string }; readonly signal?: AbortSignal },
+    input: SequencerJobParams & { readonly signal?: AbortSignal; readonly partialOnStop?: boolean },
   ): Promise<SequencerSessionResult> {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
@@ -2807,6 +2800,37 @@ export class BaselineFlowService {
     const replayRequest = createSequencerReplayRequest(input.replayRequest);
     const collector = new SampleCollector();
     const extractor = createSequencerExtractor(input.tokenSource ?? 'body', input.tokenCookieName, input.tokenFieldName, input.tokenStartDelimiter, input.tokenEndDelimiter);
+    const context = jobContext.getStore();
+    const collectionJob = context?.registry.get(context.jobId)?.summary.kind === 'sequencer' ? context : undefined;
+    const collectionStartedAt = Date.now();
+    let sent = 0;
+    const beforeRequest = (): void => {
+      throwIfCancelled();
+      const current = this.currentCase();
+      if (current.caseId !== caseRecord.caseId || !ScopePolicy.decide(current.scope, canonical).allowed) {
+        const context = jobContext.getStore();
+        context?.registry.emit(context.jobId, { category: 'egress-denied', messageKey: 'job.egress.denied', message: 'Sequencer target denied before sending', params: {} });
+        throw domainError('OutOfScope', 'sequencer scope changed during collection');
+      }
+      if (sent >= Math.min(plan.target, current.scope.limits.maxRequests) || Date.now() - collectionStartedAt >= current.scope.limits.maxDurationMinutes * 60_000) {
+        throw domainError('ValidationFailed', 'sequencer collection limit reached');
+      }
+      sent++;
+      if (collectionJob !== undefined) {
+        const counters = collectionJob.registry.get(collectionJob.jobId)!.summary.counters;
+        collectionJob.registry.emit(collectionJob.jobId, { category: 'budget', messageKey: 'job.request.sent', message: 'Collection request dispatched', params: { method: replayRequest.method },
+          counters: { requestsSent: counters.requestsSent + 1, budget: { ...counters.budget, used: counters.budget.used + 1 } } });
+      }
+    };
+    let attempted = 0;
+    const recordSample = (response: Parameters<typeof extractSequencerToken>[0]): void => {
+      collector.record(extractSequencerToken(response, extractor, pattern));
+      attempted++;
+      if (collectionJob !== undefined) {
+        collectionJob.registry.emit(collectionJob.jobId, { category: 'phase', messageKey: 'job.phase', message: 'Sample collected',
+          params: { phase: 'collect', samples: attempted }, counters: { progress: { done: attempted, total: plan.target, unit: 'samples' } } });
+      }
+    };
     const pattern = /token=([A-Za-z0-9_-]+)/;
     const throwIfCancelled = (): void => {
       if (input.signal?.aborted === true) {
@@ -2816,9 +2840,11 @@ export class BaselineFlowService {
     throwIfCancelled();
     if (this.deps.sequencerTransport === undefined) {
       for (let index = 0; index < plan.target; index += 1) {
+        if (input.partialOnStop && input.signal?.aborted) break;
         throwIfCancelled();
         if (input.signal !== undefined) {
           await new Promise<void>((resolve) => setImmediate(resolve));
+          if (input.partialOnStop && input.signal.aborted) break;
           throwIfCancelled();
         }
         let token: string | undefined;
@@ -2841,7 +2867,7 @@ export class BaselineFlowService {
               : extractor.source === 'custom'
                 ? { body: token === undefined ? 'no token in this response' : `${extractor.startDelimiter}${token}${extractor.endDelimiter}` }
                 : { body: token === undefined ? 'no token in this response' : `token=${token}` };
-        collector.record(extractSequencerToken(response, extractor, pattern));
+        recordSample(response);
       }
     } else {
       try {
@@ -2849,6 +2875,7 @@ export class BaselineFlowService {
           targetUrl: canonical,
           samples: plan.target,
           replayRequest,
+          beforeRequest,
           ...(input.signal === undefined ? {} : { signal: input.signal }),
           ...(appliedCookies === undefined ? {} : {
             sessionCookies: appliedCookies.map((cookie) => ({
@@ -2859,22 +2886,21 @@ export class BaselineFlowService {
             })),
           }),
           onResponse: (response) => {
-            collector.record(extractSequencerToken(response, extractor, pattern));
+            recordSample(response);
             this.recordObservedExchange(
               { url: response.requestUrl, method: replayRequest.method, status: response.status, contentType: response.contentType },
               this.deps.clock.now().toISOString(),
               'sequencer',
+              sent > 0 && collectionJob !== undefined,
             );
           },
         });
       } catch (cause) {
-        if (input.signal?.aborted === true) {
-          throw domainError('Cancelled', 'sequencer session cancelled');
-        }
-        throw cause;
+        if (!input.signal?.aborted) throw cause;
+        if (!input.partialOnStop) throw domainError('Cancelled', 'sequencer session cancelled');
       }
     }
-    throwIfCancelled();
+    if (!input.partialOnStop) throwIfCancelled();
     const collection = collector.snapshot();
     const projection = reportProjection(collection);
     const assessment = assess(collection.tokens);
@@ -2918,7 +2944,7 @@ export class BaselineFlowService {
       executedAt: this.deps.clock.now().toISOString(),
     };
     (this.sequencerSessions as typeof record[]).push(record);
-    this.record({
+    if (!input.signal?.aborted) this.record({
       type: 'SequencerSessionCompleted',
       at: record.executedAt,
       sessionId,

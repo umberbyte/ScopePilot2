@@ -1,3 +1,4 @@
+import type { SequencerJobParams } from '../sequencer.ts';
 import type { ExecutionPlan, PlanConfirmation } from '../plan/plan.ts';
 import type { ScanCandidate } from '../explore/explore.ts';
 import type { StopReason } from '../common/runtime.ts';
@@ -36,13 +37,13 @@ export interface JobSummary {
   readonly counters: JobCounters;
   readonly lastEventSeq: number;
 }
-/** P0 exposes active-scan; subsequent stages extend this discriminated union. */
+/** Executions supported by POST /api/jobs. */
 export type StartJobRequest = {
   readonly kind: 'active-scan';
   readonly plan: ExecutionPlan;
   readonly confirmation: PlanConfirmation;
   readonly params: { readonly adopted: readonly ScanCandidate[]; readonly role?: string };
-};
+} | { readonly kind: 'sequencer'; readonly params: SequencerJobParams };
 export interface ScanExecutionStatus {
   readonly executionId: string;
   readonly state: 'queued' | 'running' | 'stopping' | 'completed' | 'stopped' | 'failed' | 'interrupted';

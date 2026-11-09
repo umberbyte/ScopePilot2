@@ -16,3 +16,5 @@ export * from './openapi-routes.ts';
 export * from './jobs/jobs.ts';
 export * from './jobs/job-events.ts';
 export * from './analysis-tools.ts';
+
+export * from './sequencer.ts';

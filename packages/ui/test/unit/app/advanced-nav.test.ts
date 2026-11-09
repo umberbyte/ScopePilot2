@@ -6,15 +6,15 @@ import { resolveRoute } from '../../../src/app/mode-policy.ts';
 const FULL_PERMISSIONS = ['case.manage', 'case.read', 'run.manage', 'finding.confirm', 'report.export'] as const;
 
 describe('advanced navigation (legacy routes plus design/40 analysis screens)', () => {
-  test('UI-UT-012: A50/A51 are independent Advanced routes alongside legacy screens', () => {
+  test('UI-UT-012: A50/A51/A52 are independent Advanced routes alongside legacy screens', () => {
     const items = advancedNavItems(FULL_PERMISSIONS);
-    assert.equal(items.length, 15);
+    assert.equal(items.length, 16);
     assert.deepEqual(
       items.map((item) => item.screenId),
-      ['A01', 'A02', 'A03', 'A04', 'A05', 'A06', 'A07', 'A08', 'A09', 'A10', 'A50', 'A51', 'A11', 'A12', 'A13'],
+      ['A01', 'A02', 'A03', 'A04', 'A05', 'A06', 'A07', 'A08', 'A09', 'A10', 'A50', 'A51', 'A52', 'A11', 'A12', 'A13'],
     );
     const routes = new Set(items.map((item) => item.route));
-    assert.equal(routes.size, 15);
+    assert.equal(routes.size, 16);
     for (const route of routes) {
       const decision = resolveRoute('simple', route, FULL_PERMISSIONS);
       assert.equal(decision.allowed, false, `route ${route} must be Advanced-only`);

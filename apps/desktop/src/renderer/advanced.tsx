@@ -1196,11 +1196,12 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {activeRoute === 'repeater' && <RepeaterScreen apiBase={apiBase} />}
         {activeRoute === 'fuzzer' && <FuzzerScreen apiBase={apiBase} />}
         {activeRoute === 'advanced.sessions' && <SessionsScreen apiBase={apiBase} />}
+        {activeRoute === 'adv.tools.sequencer' && <DecoderComparerScreen apiBase={apiBase} sequencerOnly />}
         {activeRoute === 'decoder' && <DecoderComparerScreen apiBase={apiBase} />}
         {activeRoute === 'adv.tools.decoder' && <DecoderScreen apiBase={apiBase} />}
         {activeRoute === 'adv.tools.comparer' && <ComparerScreen apiBase={apiBase} />}
         {activeRoute === 'settings' && <SettingsScreen apiBase={apiBase} />}
-        {activeRoute !== 'adv.tools.decoder' && activeRoute !== 'adv.tools.comparer' && activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'advanced.sessions' && (
+        {activeRoute !== 'adv.tools.sequencer' && activeRoute !== 'adv.tools.decoder' && activeRoute !== 'adv.tools.comparer' && activeRoute !== 'advanced.dashboard' && activeRoute !== 'advanced.jobs' && activeRoute !== 'advanced.scope' && activeRoute !== 'findings' && activeRoute !== 'scan-plans' && activeRoute !== 'browser.site-map' && activeRoute !== 'advanced.guidelines' && activeRoute !== 'settings' && activeRoute !== 'decoder' && activeRoute !== 'proxy.intercept' && activeRoute !== 'repeater' && activeRoute !== 'fuzzer' && activeRoute !== 'advanced.sessions' && (
           <Text className={styles.muted}>{t('common.unimplemented')}</Text>
         )}
       </div>

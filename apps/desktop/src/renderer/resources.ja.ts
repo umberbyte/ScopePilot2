@@ -359,6 +359,9 @@ export const jaStrings = {
   'a10.diff': '差分 {lines} 行 (左 {left} 行 / 右 {right} 行)',
   'a10.col.line': '行',
   'a10.provenance': 'provenance: 左 {leftHash}… / 右 {rightHash}…',
+  'a52.jobStatus': 'ジョブ: {state}・{transport}・{guarantee}',
+  'a52.progress': 'サンプル: {done} / {total}',
+  'a52.progressLabel': 'サンプル収集の進捗',
   'a10.sequencerTitle': 'Sequencer',
   'a10.sequencerIntro':
     '対象 URL から token sample を収集して乱数性の統計を返します (design/f07)。統計は観測に対するもので、暗号学的安全性は断定しません。token 原文は保持しません。custom抽出は正規表現を実行せず、上限付きdelimiter対を使います。',
