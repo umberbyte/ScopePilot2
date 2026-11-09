@@ -889,35 +889,104 @@ function SiteMapScreen({ apiBase }: { apiBase: string }): React.ReactElement {
   const [endpoints, setEndpoints] = useState<readonly { key: string; path: string; method: string; status: number; observedUrls: number }[]>([]);
   // 通信一覧の仮想化 (仕様書 6.5): 一度に描画する窓。50 件ずつ広げる。
   const [trafficWindow, setTrafficWindow] = useState(50);
+  const [explorationStatus, setExplorationStatus] = useState<{ running: boolean; pagesVisited: number; requestsSent: number; maxPages: number; maxRequests: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const body = await callJson<{ observations: readonly ObservationView[]; deniedUrls: readonly { url: string; reason: string }[] }>(apiBase, 'GET', '/api/observations');
+      setObservations(body.observations);
+      setDeniedUrls(body.deniedUrls);
+      setLoaded(true);
+      const trafficBody = await callJson<{ mode: 'list' | 'summary'; total: number; entries?: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: string }[] }>(apiBase, 'GET', '/api/traffic?limit=500');
+      setTraffic(trafficBody);
+      const endpointBody = await callJson<{ endpoints: readonly { key: string; path: string; method: string; status: number; observedUrls: number }[] }>(apiBase, 'GET', '/api/traffic/site-map');
+      setEndpoints(endpointBody.endpoints);
+      const statusBody = await callJson<{ running: boolean; pagesVisited: number; requestsSent: number; maxPages: number; maxRequests: number }>(apiBase, 'GET', '/api/explore/status').catch(() => ({ running: false, pagesVisited: 0, requestsSent: 0, maxPages: 500, maxRequests: 5000 }));
+      setExplorationStatus(statusBody);
+    } catch (cause) {
+      setError(String(cause));
+    }
+  }, [apiBase]);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const body = await callJson<{ observations: readonly ObservationView[]; deniedUrls: readonly { url: string; reason: string }[] }>(apiBase, 'GET', '/api/observations');
-        setObservations(body.observations);
-        setDeniedUrls(body.deniedUrls);
-        setLoaded(true);
-        const trafficBody = await callJson<{ mode: 'list' | 'summary'; total: number; entries?: readonly { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: string }[] }>(apiBase, 'GET', '/api/traffic?limit=500');
-        setTraffic(trafficBody);
-        const endpointBody = await callJson<{ endpoints: readonly { key: string; path: string; method: string; status: number; observedUrls: number }[] }>(apiBase, 'GET', '/api/traffic/site-map');
-        setEndpoints(endpointBody.endpoints);
-      } catch (cause) {
-        setError(String(cause));
-      }
-    })();
-  }, [apiBase]);
+    void load();
+    const interval = setInterval(() => {
+      void load();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [load]);
 
   const originLabel = (originType: ObservationView['originType']): string =>
     originType === 'crawl' ? t('a04.origin.crawl') : t('a04.origin.documentHint');
 
+  const startExploration = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await callJson(apiBase, 'POST', '/api/explore/start', {});
+      setNotice('Exploration started.');
+      await load();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, load]);
+
+  const stopExploration = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await callJson(apiBase, 'POST', '/api/explore/stop', {});
+      setNotice('Exploration stopped.');
+      await load();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiBase, load]);
+
   return (
     <div className={styles.section}>
-      <Text weight="semibold">{t('a04.pagesTitle', { count: observations.length })}</Text>
       {error !== '' && (
         <MessageBar intent="error">
           {`Error: ${error}`}
         </MessageBar>
       )}
+      {notice !== '' && <Text role="status">{notice}</Text>}
+      <div className={styles.section}>
+        <Text weight="semibold">Exploration Controls</Text>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {explorationStatus?.running ? (
+            <>
+              <Text>Exploration running…</Text>
+              <Button appearance="secondary" disabled={busy} onClick={() => void stopExploration()}>
+                Stop Exploration
+              </Button>
+            </>
+          ) : (
+            <Button appearance="primary" disabled={busy} onClick={() => void startExploration()}>
+              Start Exploration
+            </Button>
+          )}
+        </div>
+        {explorationStatus && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '12px', backgroundColor: tokens.colorNeutralBackground2, borderRadius: '6px' }}>
+            <Text size={200}>
+              Pages: {explorationStatus.pagesVisited} / {explorationStatus.maxPages}
+            </Text>
+            <Text size={200}>
+              Requests: {explorationStatus.requestsSent} / {explorationStatus.maxRequests}
+            </Text>
+          </div>
+        )}
+      </div>
+      <Text weight="semibold">{t('a04.pagesTitle', { count: observations.length })}</Text>
       {observations.length === 0 ? (
         loaded && <Text className={styles.muted}>{t('a04.empty')}</Text>
       ) : (
