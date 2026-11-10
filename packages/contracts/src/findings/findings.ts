@@ -58,5 +58,12 @@ export interface Finding {
   /** 重複除外後の再観測回数。1 が初回。 */
   readonly occurrences: number;
   readonly enginePluginId?: string;
+  /** GO-14: provenance for the passive projection of the shared Findings ledger. */
+  readonly passive?: {
+    readonly ruleId: string;
+    readonly ruleVersion: string;
+    readonly detail: string;
+    readonly observationUrl: string;
+  };
   readonly humanReview?: FindingHumanReview;
 }

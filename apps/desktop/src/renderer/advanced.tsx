@@ -18,6 +18,7 @@ import { ComparerScreen } from './comparer-screen.tsx';
 import { ProxyInterceptScreen } from './proxy-intercept-screen.tsx';
 import { RepeaterScreen } from './repeater-screen.tsx';
 import { FuzzerScreen } from './fuzzer-screen.tsx';
+import { PassiveScreen } from './passive-screen.tsx';
 import { SessionsScreen } from './sessions-screen.tsx';
 import { ActiveScanScreen } from './active-scan-screen.tsx';
 import { ScanPolicyScreen } from './scan-policy-screen.tsx';
@@ -37,6 +38,7 @@ type ScreenHost =
   | 'scanPlans'
   | 'activeScan'
   | 'scanPolicy'
+  | 'passive'
   | 'proxy'
   | 'repeater'
   | 'fuzzer'
@@ -67,6 +69,7 @@ const SCREEN_HOSTS: Partial<Record<AdvancedRoute, ScreenHost>> = {
   'adv.manual.oast': 'decoder',
   'adv.manual.dom': 'decoder',
   'adv.scan.active': 'activeScan',
+  'adv.scan.passive': 'passive',
   'adv.scan.templates': 'guidelines',
   'adv.scan.policies': 'scanPolicy',
   'adv.tools.decoder': 'decoderOnly',
@@ -1380,6 +1383,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {host === 'scanPlans' && <ScanPlansScreen apiBase={apiBase} />}
         {host === 'activeScan' && <ActiveScanScreen apiBase={apiBase} />}
         {host === 'scanPolicy' && <ScanPolicyScreen apiBase={apiBase} />}
+        {host === 'passive' && <PassiveScreen apiBase={apiBase} onFindings={() => setActiveRoute('adv.results.findings')} />}
         {host === 'siteMap' && <SiteMapScreen apiBase={apiBase} />}
         {host === 'guidelines' && <GuidelinesCatalogScreen apiBase={apiBase} />}
         {host === 'proxy' && <ProxyInterceptScreen apiBase={apiBase} />}

@@ -20,3 +20,4 @@ export * from './jobs/job-events.ts';
 export * from './analysis-tools.ts';
 export * from './sequencer.ts';
 export * from './plan/guideline-automation.ts';
+export * from './scan/passive.ts';

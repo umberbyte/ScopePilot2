@@ -210,11 +210,15 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["candidates"],
+                  "required": [
+                    "candidates"
+                  ],
                   "properties": {
                     "candidates": {
                       "type": "array",
-                      "items": { "$ref": "#/components/schemas/ScanCandidate" }
+                      "items": {
+                        "$ref": "#/components/schemas/ScanCandidate"
+                      }
                     }
                   },
                   "additionalProperties": false
@@ -222,7 +226,9 @@
               }
             }
           },
-          "403": { "$ref": "#/components/responses/Error" }
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -237,11 +243,15 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["policies"],
+                  "required": [
+                    "policies"
+                  ],
                   "properties": {
                     "policies": {
                       "type": "array",
-                      "items": { "$ref": "#/components/schemas/ScanPolicy" }
+                      "items": {
+                        "$ref": "#/components/schemas/ScanPolicy"
+                      }
                     }
                   },
                   "additionalProperties": false
@@ -249,7 +259,9 @@
               }
             }
           },
-          "403": { "$ref": "#/components/responses/Error" }
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       },
       "post": {
@@ -258,7 +270,11 @@
         "requestBody": {
           "required": true,
           "content": {
-            "application/json": { "schema": { "$ref": "#/components/schemas/SaveScanPolicyRequest" } }
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveScanPolicyRequest"
+              }
+            }
           }
         },
         "responses": {
@@ -268,13 +284,23 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["policy", "changed", "invalidatedConfirmationIds"],
+                  "required": [
+                    "policy",
+                    "changed",
+                    "invalidatedConfirmationIds"
+                  ],
                   "properties": {
-                    "policy": { "$ref": "#/components/schemas/ScanPolicy" },
-                    "changed": { "type": "boolean" },
+                    "policy": {
+                      "$ref": "#/components/schemas/ScanPolicy"
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    },
                     "invalidatedConfirmationIds": {
                       "type": "array",
-                      "items": { "type": "string" }
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "additionalProperties": false
@@ -282,9 +308,15 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/Error" },
-          "403": { "$ref": "#/components/responses/Error" },
-          "409": { "$ref": "#/components/responses/Error" }
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -5766,6 +5798,103 @@
           }
         }
       }
+    },
+    "/api/passive/rules": {
+      "get": {
+        "operationId": "listPassiveRules",
+        "summary": "PassiveRules",
+        "responses": {
+          "200": {
+            "description": "PassiveRules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassiveRules"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/passive/status": {
+      "get": {
+        "operationId": "getPassiveStatus",
+        "summary": "PassiveStatus",
+        "responses": {
+          "200": {
+            "description": "PassiveStatus",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassiveStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/passive/alerts": {
+      "get": {
+        "operationId": "listPassiveAlerts",
+        "summary": "PassiveAlerts",
+        "responses": {
+          "200": {
+            "description": "PassiveAlerts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassiveAlerts"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/passive/evidence": {
+      "get": {
+        "operationId": "getPassiveEvidence",
+        "summary": "PassiveEvidence",
+        "responses": {
+          "200": {
+            "description": "PassiveEvidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassiveEvidence"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "Passive finding not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "findingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -6482,15 +6611,23 @@
           },
           "guidelines": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "routeOverrides": {
             "type": "object",
             "description": "ポリシーで有効な経路をこの計画だけ外す。無効経路の追加には使わない。",
             "properties": {
-              "zap": { "type": "boolean" },
-              "genericHttp": { "type": "boolean" },
-              "nuclei": { "type": "boolean" }
+              "zap": {
+                "type": "boolean"
+              },
+              "genericHttp": {
+                "type": "boolean"
+              },
+              "nuclei": {
+                "type": "boolean"
+              }
             },
             "additionalProperties": false
           },
@@ -6998,7 +7135,13 @@
         ]
       },
       "ScanAlertThreshold": {
-        "enum": ["Off", "Default", "Low", "Medium", "High"]
+        "enum": [
+          "Off",
+          "Default",
+          "Low",
+          "Medium",
+          "High"
+        ]
       },
       "GenericHttpCheckId": {
         "enum": [
@@ -7015,27 +7158,48 @@
       },
       "ScanPolicyRoutes": {
         "type": "object",
-        "required": ["zap", "genericHttp", "nuclei"],
+        "required": [
+          "zap",
+          "genericHttp",
+          "nuclei"
+        ],
         "properties": {
           "zap": {
             "type": "object",
-            "required": ["enabled", "attackStrength", "alertThreshold"],
+            "required": [
+              "enabled",
+              "attackStrength",
+              "alertThreshold"
+            ],
             "properties": {
-              "enabled": { "type": "boolean" },
-              "attackStrength": { "$ref": "#/components/schemas/ScanAttackStrength" },
-              "alertThreshold": { "$ref": "#/components/schemas/ScanAlertThreshold" }
+              "enabled": {
+                "type": "boolean"
+              },
+              "attackStrength": {
+                "$ref": "#/components/schemas/ScanAttackStrength"
+              },
+              "alertThreshold": {
+                "$ref": "#/components/schemas/ScanAlertThreshold"
+              }
             },
             "additionalProperties": false,
             "description": "ZAP policy 全体の設定。rule/plugin ID 単位の設定は契約に含めない。"
           },
           "genericHttp": {
             "type": "object",
-            "required": ["enabled", "checkIds"],
+            "required": [
+              "enabled",
+              "checkIds"
+            ],
             "properties": {
-              "enabled": { "type": "boolean" },
+              "enabled": {
+                "type": "boolean"
+              },
               "checkIds": {
                 "type": "array",
-                "items": { "$ref": "#/components/schemas/GenericHttpCheckId" },
+                "items": {
+                  "$ref": "#/components/schemas/GenericHttpCheckId"
+                },
                 "uniqueItems": true
               }
             },
@@ -7043,12 +7207,19 @@
           },
           "nuclei": {
             "type": "object",
-            "required": ["enabled", "templateIds"],
+            "required": [
+              "enabled",
+              "templateIds"
+            ],
             "properties": {
-              "enabled": { "type": "boolean" },
+              "enabled": {
+                "type": "boolean"
+              },
               "templateIds": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "uniqueItems": true,
                 "description": "空配列は審査済み HTTP manifest の全 template。"
               }
@@ -7060,29 +7231,78 @@
       },
       "ScanPolicy": {
         "type": "object",
-        "required": ["schemaVersion", "policyId", "caseId", "name", "revision", "isDefault", "routes", "policyHash", "updatedAt"],
+        "required": [
+          "schemaVersion",
+          "policyId",
+          "caseId",
+          "name",
+          "revision",
+          "isDefault",
+          "routes",
+          "policyHash",
+          "updatedAt"
+        ],
         "properties": {
-          "schemaVersion": { "const": "scopepilot2.scan-policy.v1" },
-          "policyId": { "type": "string" },
-          "caseId": { "type": "string" },
-          "name": { "type": "string" },
-          "revision": { "type": "integer", "minimum": 1 },
-          "isDefault": { "type": "boolean" },
-          "routes": { "$ref": "#/components/schemas/ScanPolicyRoutes" },
-          "policyHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-          "updatedAt": { "type": "string", "format": "date-time" }
+          "schemaVersion": {
+            "const": "scopepilot2.scan-policy.v1"
+          },
+          "policyId": {
+            "type": "string"
+          },
+          "caseId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "routes": {
+            "$ref": "#/components/schemas/ScanPolicyRoutes"
+          },
+          "policyHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         },
         "additionalProperties": false
       },
       "SaveScanPolicyRequest": {
         "type": "object",
-        "required": ["expectedRevision", "name", "isDefault", "routes"],
+        "required": [
+          "expectedRevision",
+          "name",
+          "isDefault",
+          "routes"
+        ],
         "properties": {
-          "expectedRevision": { "type": "integer", "minimum": 0 },
-          "policyId": { "type": "string" },
-          "name": { "type": "string", "minLength": 1, "maxLength": 80 },
-          "isDefault": { "type": "boolean" },
-          "routes": { "$ref": "#/components/schemas/ScanPolicyRoutes" }
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "policyId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "routes": {
+            "$ref": "#/components/schemas/ScanPolicyRoutes"
+          }
         },
         "additionalProperties": false
       },
@@ -7242,6 +7462,9 @@
           },
           "enginePluginId": {
             "type": "string"
+          },
+          "passive": {
+            "$ref": "#/components/schemas/PassiveObservation"
           }
         }
       },
@@ -10428,6 +10651,168 @@
             ]
           }
         }
+      },
+      "PassiveObservation": {
+        "type": "object",
+        "properties": {
+          "ruleId": {
+            "type": "string"
+          },
+          "ruleVersion": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "observationUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ruleId",
+          "ruleVersion",
+          "detail",
+          "observationUrl"
+        ],
+        "additionalProperties": false
+      },
+      "PassiveRule": {
+        "type": "object",
+        "properties": {
+          "ruleId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ruleId",
+          "name",
+          "description",
+          "enabled",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "PassiveRules": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PassiveRule"
+            }
+          }
+        },
+        "required": [
+          "rules"
+        ],
+        "additionalProperties": false
+      },
+      "PassiveStatus": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "const": "scopepilot-observation",
+            "type": "string"
+          },
+          "queued": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "processed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "alerts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "source",
+          "queued",
+          "processed",
+          "failed",
+          "alerts",
+          "limitations"
+        ],
+        "additionalProperties": false
+      },
+      "PassiveAlerts": {
+        "type": "object",
+        "properties": {
+          "alerts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            }
+          }
+        },
+        "required": [
+          "alerts"
+        ],
+        "additionalProperties": false
+      },
+      "PassiveEvidence": {
+        "type": "object",
+        "properties": {
+          "findingId": {
+            "type": "string"
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "observation": {
+            "$ref": "#/components/schemas/PassiveObservation"
+          },
+          "reproduction": {
+            "type": "object",
+            "properties": {
+              "method": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "method",
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "findingId",
+          "evidenceRefs",
+          "observation",
+          "reproduction"
+        ],
+        "additionalProperties": false
       }
     },
     "responses": {
