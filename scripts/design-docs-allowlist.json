@@ -1,0 +1,42 @@
+[
+  {
+    "path": "docs/design/20-storage-evidence.md",
+    "line": "本リポジトリに削除済みの C#/WPF 形式を起点とする段階移行は設けない。旧 ScopePilot 案件の import は独立した one-way importer とし、元データを変更しない。schema migration は開始前バックアップ、事前容量確認、適用履歴、失敗時 rollback を備える。",
+    "reason": "不採用の決定・旧版からの移行記録（GO-27で確認）"
+  },
+  {
+    "path": "docs/design/23-ui-and-migration.md",
+    "line": "Electron renderer に React/TypeScript のデスクトップ UI を実装し、案件、通信、診断、所見を同じ文脈で移動できるようにする。UI のコンポーネント・デザインシステムは [Fluent UI](https://developer.microsoft.com/en-us/fluentui) を採用し、React + Fluent UI React v9 (`@fluentui/react-components`) で構築する。Simple/Advanced 両モードを同じコンポーネント・design token 基盤の上に置き、版は [21](21-update-management.md) の規律で固定する。旧 WPF 画面の移植ではなく、[18](18-extension-api.md) の契約を利用する新規 UI とする。",
+    "reason": "不採用の決定・旧版からの移行記録（GO-27で確認）"
+  },
+  {
+    "path": "docs/design/23-ui-and-migration.md",
+    "line": "ScopePilot2 に旧 C#/WPF コードは持ち込まない。移行対象は案件データと利用者 workflow である。",
+    "reason": "不採用の決定・旧版からの移行記録（GO-27で確認）"
+  },
+  {
+    "path": "docs/design/23-ui-and-migration.md",
+    "line": "- 旧版の画面名や ViewModel 構造を新 UI の API に反映しない。",
+    "reason": "不採用の決定・旧版からの移行記録（GO-27で確認）"
+  },
+  {
+    "path": "docs/design/26-requirements-traceability.md",
+    "line": "| C#/WPF/Avalonia と削除済み class の再利用が前提 | TypeScript/Electron の新規 package と依存方向へ置換 |",
+    "reason": "不採用の決定・旧版からの移行記録（GO-27で確認）"
+  },
+  {
+    "path": "docs/design/26-requirements-traceability.md",
+    "line": "| UI と CLI が ViewModel を共有 | UI 非依存 ApplicationService と contracts を共有 |",
+    "reason": "不採用の決定・旧版からの移行記録（GO-27で確認）"
+  },
+  {
+    "path": "docs/design/26-requirements-traceability.md",
+    "line": "| 旧版のセキュリティガイドライン参照・候補選定（`GuidelineContext`/`GuidelineSelectionPolicy`/`GuidelineBasis`）が新設計から欠落 | [27](27-security-guidelines.md) を新設。案件ごとの有効ガイドライン、観測の分類と項目参照、候補の guidelineBasis、報告の参照ガイドライン/参照基準を定義。triage 根拠と所見の実影響を分離 |",
+    "reason": "旧版の意図をfixtureと契約で再現する移行記録。ソース再利用の指示ではない。"
+  },
+  {
+    "path": "docs/design/27-security-guidelines.md",
+    "line": "旧 `GuidelineContext`・`GuidelineSelectionPolicy`・`CandidateSelector`・`FindingReportService` の挙動を、ソース移植ではなく fixture と契約で再現する。",
+    "reason": "旧版の意図をfixtureと契約で再現する移行記録。ソース再利用の指示ではない。"
+  }
+]

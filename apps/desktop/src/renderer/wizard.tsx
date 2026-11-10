@@ -1,7 +1,7 @@
 /**
  * Simple wizard 画面 (S01〜S07)。`docs/detailed-design/02-ui-information-architecture.md` §2。
  * S02 はガイドライン選択のみ、S03 の crawl 上限は表示専用。進行は wizard-state の判定のみを使う。
- * S04〜S07 は次増分で接続する (この file では案内のみ)。
+ * S04〜S07 は対象選定、最終確認、診断実行、結果・報告へ接続する。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {

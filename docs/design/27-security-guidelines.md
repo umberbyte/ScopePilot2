@@ -111,14 +111,21 @@ CandidateSelector（core）:
 
 ## 10. 実行計画への反映
 
+件数の正本は実装の registry とそこから生成される artifact とし、文書の固定値を独立した正本にしない。
+GO-22 マージ後に coverage registry から `workflowAssertionCount` とプロファイル別件数を完全自動生成する。
+それまでは `packages/core/src/domain/workflow-scan.ts` の `WORKFLOW_SCAN_CHECK_IDS` と
+`resolveWorkflowScanCheckIds`（DS-221 は `DS221_CHECKS`）を参照する。2026-11-10 の基準値は workflow 9 / DS-221 6。
+件数は workflow assertion の数であり、ガイドライン全項目の coverage や脆弱性検出率を意味しない。
+項目 mapping 導入後は項目ごとの route・未対応理由と実行記録を合わせて確認する。
+
 - Simple の選択値は `ExecutionPlan.guidelineIds` へ正規化して保存し、plan hash と確認内容の対象にする。
   選択を変更した場合は既存 confirmation を再利用できず、再確認を要求する。
 - `workflow-scan` は選択ガイドラインからチェックID集合を解決してから実行する。未指定の旧計画は互換性のため
-  21チェックを実行する。ASVS、WSTG、OWASP Top 10、国内Web診断プロファイルは21チェック、DS-221は
-  workbookでDS項目へ直接対応づけられた9チェックを実行する。
+  9チェックを実行する。ASVS、WSTG、OWASP Top 10、国内Web診断プロファイルは9チェック、DS-221は
+  workbookでDS項目へ直接対応づけられた6チェックを実行する。
 - 実行済み表示は、実際に検出または未検出として記録されたチェックIDと診断経路の対応がある場合だけ更新する。
   選択外の経路を「実施済」と表示しない。
-- 実DVWAでASVS（21チェック）とDS-221（9チェック）の切替を回帰確認する。DVWAに存在しない機能は
+- 実DVWAでASVSとDS-221のチェックID集合の切替を回帰確認する。DVWAに存在しない機能は
   vulnerabilitiesBoxを補助対象にし、対象機能も検証前提もない項目をモデルの推測だけで実施済みにしない。
 
 公式参照: [OWASP WSTG](https://github.com/OWASP/wstg)、[OWASP ASVS](https://owasp.org/projects/asvs)、
