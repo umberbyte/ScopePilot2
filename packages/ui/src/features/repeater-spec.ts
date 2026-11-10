@@ -10,7 +10,7 @@ import type { FeatureSpec } from './feature-spec.ts';
  */
 export const REPEATER_SPEC: FeatureSpec = {
   screenId: 'A31',
-  route: 'repeater',
+  route: 'adv.manual.repeater',
   group: 'manual', // TODO: 将来的に具体的な NavGroupId に置き換え
   titleKey: 'feature.repeater.title',
   purposeKey: 'feature.repeater.purpose',

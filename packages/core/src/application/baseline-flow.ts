@@ -185,8 +185,8 @@ import {
 import { importMatches, parseNucleiJsonl } from '../domain/known-vulnerabilities.ts';
 import { assess, createSamplePlan, createSequencerExtractor, createSequencerReplayRequest, extractSequencerToken, reportProjection, SampleCollector, type AlphabetClassCounts, type NumericDeltaSignCounts } from '../domain/sequencer.ts';
 import { parseOpenApiDocument, type ParsedOpenApiEndpoint } from '../domain/api-scanning.ts';
-import { correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
-import { buildWsSendPlan, importFrames, validateWsSubprotocols, wsEvidence, type WsFrame } from '../domain/websocket.ts';
+import { TokenIssuer, correlate, linkFinding, normalizeCallbacks, OAST_DEFAULT_WAIT_MS, pollDeadline, providerCapability, type OastProtocol, type ProviderEvent } from '../domain/oast.ts';
+import { buildWsSendPlan, importFrames, sendWithPolicy, validateWsSubprotocols, wsEvidence, type WsFrame } from '../domain/websocket.ts';
 import { checkAuthorityScope, negotiateTransport, transportCapability, transportEvidence, validateHeaderValues, validatePseudoHeaders } from '../domain/advanced-transport.ts';
 import { buildDomCandidate, domEvidenceProjection } from '../domain/dom-investigation.ts';
 import {
@@ -461,6 +461,7 @@ export interface ActiveScanExecutionEvent {
   readonly message: string;
   readonly command?: string;
   readonly progress?: number;
+  readonly requestsReportedByEngine?: number;
 }
 
 export interface ActiveScanExecutionControl {
@@ -570,7 +571,7 @@ export class BaselineFlowService {
     return this.getFuzzJob(runId);
   }
 
-  private readonly fuzzRuns: readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] = [];
+  private readonly fuzzRuns: readonly { adapterKind: AdapterKind; runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] = [];
 
   /** OAST の attempt・観測 (design/f13)。token は発行時に一度だけ応答し、一覧には出さない。 */
   private readonly oastIssuer = new TokenIssuer();
@@ -3188,6 +3189,40 @@ export class BaselineFlowService {
    * 応答は明示注入された adapter からだけ受け取る。
    * token 原文は応答・監査・台帳のいずれにも出さない (F07-UT-006)。
    */
+
+  validateSequencerJob(operator: OperatorProfile, input: SequencerJobParams): void {
+    this.requirePermission(operator, 'run.manage');
+    const scope = this.currentCase().scope;
+    const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
+    if (!ScopePolicy.decide(scope, canonical).allowed) throw domainError('OutOfScope', 'sequencer target is out of scope');
+    createSamplePlan(input.samples);
+    if (input.samples > scope.limits.maxRequests) throw domainError('ValidationFailed', 'sequencer samples exceed the case request limit');
+    createSequencerReplayRequest(input.replayRequest);
+    createSequencerExtractor(input.tokenSource ?? 'body', input.tokenCookieName, input.tokenFieldName, input.tokenStartDelimiter, input.tokenEndDelimiter);
+    if (input.role !== undefined && !this.roleSessionCookies.has(input.role)) throw domainError('ValidationFailed', 'run login for the selected role first');
+  }
+
+  startSequencerJob(operator: OperatorProfile, input: SequencerJobParams): string {
+    this.validateSequencerJob(operator, input);
+    // Credentials remain only in this closure, never in persisted job metadata.
+    const params = structuredClone(input);
+    const id = this.jobs.create({ kind: 'sequencer', label: 'Sequencer', guarantee: 'Enforced',
+      transport: this.deps.sequencerTransport === undefined ? 'fixture' : 'live', budgetLimit: input.samples });
+    void this.jobs.execute(id, async signal => {
+      this.validateSequencerJob(operator, params);
+      this.jobs.emit(id, { category: 'phase', messageKey: 'job.phase', message: 'Collecting samples', params: { phase: 'collect' },
+        counters: { progress: { done: 0, total: params.samples, unit: 'samples' } } });
+      try {
+        const result = await this.runSequencerSession(operator, { ...params, signal, partialOnStop: true });
+        return { ...result, targetUrl: redactJobText(result.targetUrl) };
+      } catch (cause) {
+        if (signal.aborted) throw domainError('Cancelled', 'sequencer session cancelled');
+        throw domainError('EngineFailure', 'sequencer collection failed; inspect transport configuration');
+      }
+    });
+    return id;
+  }
+
   async runSequencerSession(
     operator: OperatorProfile,
     input: SequencerJobParams & { readonly signal?: AbortSignal; readonly partialOnStop?: boolean },
@@ -3439,7 +3474,7 @@ export class BaselineFlowService {
     if (transport === 'unavailable') {
       throw domainError('CapabilityUnavailable', 'oast provider is not configured');
     }
-    const supportedProtocols = this.deps.oastProvider?.supportedProtocols ?? ['http', 'dns'];
+    const supportedProtocols: readonly OastProtocol[] = this.deps.oastProvider !== undefined && 'supportedProtocols' in this.deps.oastProvider ? this.deps.oastProvider.supportedProtocols : ['http', 'dns'];
     if (providerCapability(supportedProtocols, input.protocol) === 'Unsupported') {
       throw domainError('CapabilityUnavailable', `oast provider does not support protocol ${input.protocol}`);
     }
@@ -3533,7 +3568,6 @@ export class BaselineFlowService {
         attemptId: attempt.attemptId,
         targetUrl: attempt.targetUrl,
         protocol: attempt.protocol,
-        adapterKind: attempt.adapterKind,
         status: pollDeadline(attempt.issuedAtMs, nowMs).expired ? ('expired' as const) : ('waiting' as const),
         interactions: interactions.length,
         transport: attempt.transport,
@@ -3549,7 +3583,7 @@ export class BaselineFlowService {
     return {
       transport,
       provider: transport === 'real' ? 'interactsh' : transport,
-      supportedProtocols: this.deps.oastProvider?.supportedProtocols ?? ['http', 'dns'],
+      supportedProtocols: (this.deps.oastProvider !== undefined && 'supportedProtocols' in this.deps.oastProvider ? this.deps.oastProvider.supportedProtocols : ['http', 'dns']),
     };
   }
 
@@ -3777,26 +3811,8 @@ export class BaselineFlowService {
       },
     );
     this.wsConnections.push({ connectionId, logicalSessionId, targetUrl: canonical, transport, state: 'closed', openedAt, sentFrames: result.sent, receivedFrames: 0 });
-    this.record({
-      type: 'WsMessagesSent',
-      at: this.deps.clock.now().toISOString(),
-      targetUrl: canonical,
-      messages: input.messages,
-      ...(subprotocols.length === 0 ? {} : { subprotocols }),
-      ...(appliedCookies === undefined ? {} : {
-        sessionCookies: appliedCookies.map((cookie) => ({
-          name: cookie.name,
-          value: cookie.value,
-          domain: cookie.domain,
-          path: cookie.path,
-        })),
-      }),
-      onSentFrame: (payload) => recordFrame('sent', payload),
-      onTextFrame: (payload) => recordFrame('received', payload),
-    });
-    this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: transported.sent });
+    this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: result.sent });
     return {
-      adapterKind,
       planHash: plan.planHash,
       sent: result.sent,
       rejected: result.rejected,
@@ -5147,7 +5163,7 @@ export class BaselineFlowService {
     const guidelineRequestReservation = automaticGuidelineChecksEnabled ? desiredGuidelineRequestCount : 0;
     const engineLease = zapStep === undefined ? 0 : zapStep.limits.maxRequests - reservedRequests - guidelineRequestReservation;
     const context = jobContext.getStore();
-    if (context) context.registry.emit(context.jobId, { category: 'budget', messageKey: 'job.phase', message: 'Scan request budget leased', params: { engineLease, reservedRequests, guidelineRequestReservation }, counters: { budget: { leased: step.limits.maxRequests, used: 0, limit: plan.limits.maxRequests } } });
+    if (context) context.registry.emit(context.jobId, { category: 'budget', messageKey: 'job.phase', message: 'Scan request budget leased', params: { engineLease, reservedRequests, guidelineRequestReservation }, counters: { budget: { leased: engineLease, used: 0, limit: plan.limits.maxRequests } } });
     const zapCandidates = adopted.filter(candidateAllowsAutomatedZap);
     const scanRequest: ActiveScanRequest = {
       runId,

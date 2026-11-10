@@ -176,6 +176,7 @@ export class JobOrchestrator {
             runId,
             targets,
             attackStrength: 'Medium',
+            alertThreshold: 'Medium',
             leasedLimits: { ...step.limits, maxRequests: engineLease },
             authorizationRef: `authorization:${this.ports.currentAuthorization().authorizationId}`,
             ...(sessionCookieNames === undefined ? {} : { sessionCookieNames }),

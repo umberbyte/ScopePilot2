@@ -18,6 +18,8 @@ import {
   Badge,
   shorthands,
   Switch,
+  type SelectTabEvent,
+  type SelectTabData,
 } from '@fluentui/react-components';
 import {
   ChevronUp20Regular,
@@ -31,7 +33,7 @@ import type {
   ActivityJobSummary,
   ActivityTab,
   ActivityEventCategory,
-} from './activity-panel-types';
+} from './activity-panel-types.ts';
 
 const useStyles = makeStyles({
   root: {
@@ -247,8 +249,8 @@ export const ActivityPanel: React.FC<ActivityPanelProps> = ({
     };
   }, [events, jobs]);
 
-  const handleTabSelect = useCallback((_: unknown, data: { value: string }) => {
-    setSelectedTab(data.value as ActivityTab);
+  const handleTabSelect = useCallback((_: SelectTabEvent, data: SelectTabData) => {
+    if (typeof data.value === 'string') setSelectedTab(data.value as ActivityTab);
   }, []);
 
   const renderJobs = () => {
@@ -379,12 +381,12 @@ export const ActivityPanel: React.FC<ActivityPanelProps> = ({
                   appearance="subtle"
                   icon={<Dismiss20Regular />}
                   size="small"
-                  onClick={() => onFilterChange({ ...filter, search: undefined })}
+                  onClick={() => { const { search: _ignored, ...rest } = filter; onFilterChange(rest); }}
                 />
-              ) : undefined
+              ) : null
             }
             value={filter.search || ''}
-            onChange={(_, data) => onFilterChange({ ...filter, search: data.value || undefined })}
+            onChange={(_, data) => { const { search: _ignored, ...rest } = filter; onFilterChange(data.value ? { ...rest, search: data.value } : rest); }}
           />
           <Dropdown
             placeholder="水準"

@@ -35,7 +35,7 @@ const ALL_ROUTES = [
   'advanced.jobs',
   'browser.site-map',
   'proxy.intercept',
-  'repeater',
+  'adv.manual.repeater',
   'fuzzer',
   'scan-plans',
   'decoder',
@@ -59,7 +59,7 @@ describe('FeatureSpec completeness (design/40 §4.3)', () => {
     // }
 
     // 現時点では repeater が定義されていることを確認。
-    assert.ok(specRoutes.has('repeater'));
+    assert.ok(specRoutes.has('adv.manual.repeater'));
   });
 
   test('送信画面は jobKind と guarantee を持つ', () => {
@@ -134,7 +134,7 @@ describe('FeatureSpec completeness (design/40 §4.3)', () => {
   test('REPEATER_SPEC の内容が設計どおり', () => {
     // A31 Repeater の具体的な検証 (設計 40 §4.6)。
     assert.equal(REPEATER_SPEC.screenId, 'A31');
-    assert.equal(REPEATER_SPEC.route, 'repeater');
+    assert.equal(REPEATER_SPEC.route, 'adv.manual.repeater');
     assert.equal(REPEATER_SPEC.sendsTraffic, true);
     assert.equal(REPEATER_SPEC.guarantee, 'Enforced');
     assert.equal(REPEATER_SPEC.jobKind, 'repeater-send');

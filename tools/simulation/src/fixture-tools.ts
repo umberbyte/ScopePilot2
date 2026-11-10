@@ -21,8 +21,8 @@ export function toolFixtures() {
             }
         } };
     const issuer = new TokenIssuer();
-    const oastProvider: OastProviderPort = { supportedProtocols: ['http', 'dns'], async startSession({ attemptId }) { return issuer.issue(attemptId); } };
-    const webSocketTransport: WebSocketTransportPort = { async exchange(input) {
+    const oastProvider: OastProviderPort = { adapterKind: 'fixture', supportedProtocols: ['http', 'dns'], async startSession({ attemptId }) { return issuer.issue(attemptId); } };
+    const webSocketTransport: WebSocketTransportPort = { adapterKind: 'fixture', async exchange(input) {
             for (const message of input.messages)
                 input.onSentFrame(message);
             return { sent: input.messages.length };

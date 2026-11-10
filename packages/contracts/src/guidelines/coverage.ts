@@ -78,43 +78,46 @@ export interface GuidelineCoveragePlan {
 }
 
 export interface GuidelineCoverageSummaryView {
-  /** 繧ｬ繧､繝峨Λ繧､繝ｳID */
+  /** ガイドラインID */
   readonly guidelineId: string;
 
-  /** 繧ｬ繧､繝峨Λ繧､繝ｳ陦ｨ遉ｺ蜷・*/
+  /** ガイドライン表示名 */
   readonly guidelineDisplayName: string;
 
-  /** 邱城・岼謨ｰ */
+  /** 総項目数 */
   readonly totalItems: number;
 
   /**
-   * 閾ｪ蜍募ｮ溯｡御ｺ亥ｮ壹・鬆・岼謨ｰ
-   * automatic 繧ｯ繝ｩ繧ｹ: 謗｡逕ｨ貂医∩蟇ｾ雎｡縺ｨ譌｢螳壹・螳牙・縺ｪprobe縺縺代〒螳溯｡悟庄閭ｽ
+   * 自動実行予定の項目数
+   * automatic クラス: 採用済み対象と既定の安全なprobeだけで実行可能
    */
   readonly automaticCount: number;
 
   /**
-   * 譚｡莉ｶ莉倥″閾ｪ蜍輔・鬆・岼謨ｰ
-   * conditional-automatic 繧ｯ繝ｩ繧ｹ: 譌｢蟄倥・譯井ｻｶ雉・肇縺九ｉ蠢・ｦ∝・蜉帙ｒ荳諢上↓隗｣豎ｺ縺ｧ縺阪ｋ蝣ｴ蜷医□縺題・蜍募ｮ溯｡悟庄閭ｽ
+   * 条件付き自動の項目数
+   * conditional-automatic クラス: 既存の案件資産から必要入力を一意に解決できる場合だけ自動実行可能
    */
   readonly conditionalAutomaticCount: number;
 
   /**
-   * 霑ｽ蜉蜈･蜉帛ｾ・■縺ｮ鬆・岼謨ｰ
-   * operator-workflow 繧ｯ繝ｩ繧ｹ: 迥ｶ諷句､画峩縲∵ｯ碑ｼ・ｸｻ菴薙∝ｾｩ蜈・∝ｯｾ雎｡蝗ｺ譛頴racle縲∝ｯｩ譟ｻ貂医∩payload縺悟ｿ・ｦ・   */
+   * 追加入力待ちの項目数
+   * operator-workflow クラス: 状態変更、比較主体、復元、対象固有oracle、審査済みpayloadが必要
+   */
   readonly needsInputCount: number;
 
   /**
-   * 螳溯｡御ｸ榊庄縺ｮ鬆・岼謨ｰ
-   * external-fixture 縺ｾ縺溘・ unsupported 繧ｯ繝ｩ繧ｹ: 險ｱ蜿ｯ貂医∩螟夜Κ險ｭ蛯吶′蠢・ｦ√√∪縺溘・迴ｾ蝨ｨ縺ｮ陬ｽ蜩∝｢・阜縺ｧ縺ｯ謌千ｫ句愛螳壹〒縺阪↑縺・   */
+   * 実行不可の項目数
+   * external-fixture または unsupported クラス: 許可済み外部設備が必要、または現在の製品境界では成立判定できない
+   */
   readonly unavailableCount: number;
 
   /**
-   * 蟇ｾ雎｡螟悶・鬆・岼謨ｰ
-   * not-applicable: HTTP隕ｳ貂ｬ蟇ｾ雎｡螟悶∵焔蜍瓶eview縺ｮ縺ｿ縲∫ｭ・   */
+   * 対象外の項目数
+   * not-applicable: HTTP観測対象外、手動reviewのみ、等
+   */
   readonly notApplicableCount: number;
 
-  /** 繧ｫ繧ｿ繝ｭ繧ｰ諠・ｱ */
+  /** カタログ情報 */
   readonly catalog: {
     readonly catalogId: string;
     readonly version: string;
@@ -123,23 +126,25 @@ export interface GuidelineCoverageSummaryView {
 }
 
 /**
- * 繧ｬ繧､繝峨Λ繧､繝ｳ鬆・岼縺ｮ隧ｳ邏ｰ繝薙Η繝ｼ
+ * ガイドライン項目の詳細ビュー
  *
- * 蜷・・岼縺ｮroute縲∽ｿ晁ｨｼ遲臥ｴ壹∝ｿ・ｦ∝・蜉帙∽ｺ亥ｮ夐壻ｿ｡謨ｰ縲∫憾諷句､画峩繝ｻ蠕ｩ蜈・・譛臥┌繧定｡ｨ遉ｺ縲・ * 螳溯｡悟ｾ後・縲悟ｮ溯｡檎憾諷九阪→縲悟愛螳壹阪ｒ蛻･蛻励↓縺励√悟ｮ御ｺ・・蛻､螳壻ｿ晉蕗縲阪梧悴螳溯｡後・蜈･蜉帛ｾ・■縲咲ｭ峨ｒ譏手ｨ倥・ */
+ * 各項目のroute、保証等級、必要入力、予定通信数、状態変更・復元の有無を表示。
+ * 実行後は「実行状態」と「判定」を別列にし、「完了・判定保留」「未実行・入力待ち」等を明記。
+ */
 export interface GuidelineCoverageItemView {
-  /** 鬆・岼ID */
+  /** 項目ID */
   readonly itemId: string;
 
-  /** 鬆・岼陦ｨ遉ｺ蜷・*/
+  /** 項目表示名 */
   readonly itemDisplayName: string;
 
-  /** 繝√ぉ繝・け鬆・岼縺ｮ隱ｬ譏・*/
+  /** チェック項目の説明 */
   readonly checkItem: string;
 
-  /** 隕∽ｻｶ */
+  /** 要件 */
   readonly requirement: string;
 
-  /** route諠・ｱ驟榊・・・鬆・岼縺瑚､・焚route繧呈戟縺｡縺・ｋ・・*/
+  /** route情報配列（1項目が複数routeを持ちうる） */
   readonly routes: readonly {
     readonly routeId: string;
     readonly routeKind: GuidelineCoverageRoute['routeKind'];
@@ -152,7 +157,7 @@ export interface GuidelineCoverageItemView {
     readonly limitations: readonly { code: string; description: string }[];
   }[];
 
-  /** 螳溯｡檎ｵ先棡・亥ｮ溯｡悟ｾ後・縺ｿ・・*/
+  /** 実行結果（実行後のみ） */
   readonly execution?: {
     readonly executionStatus: GuidelineItemExecution['executionStatus'];
     readonly assessment: GuidelineItemExecution['assessment'];
@@ -164,29 +169,31 @@ export interface GuidelineCoverageItemView {
 }
 
 /**
- * 繧ｬ繧､繝峨Λ繧､繝ｳ繧ｫ繝舌Ξ繝・ず蠢懃ｭ・ *
- * GET /api/guidelines/coverage 縺ｮ蠢懃ｭ泌梛
+ * ガイドラインカバレッジ応答
+ *
+ * GET /api/guidelines/coverage の応答型
  */
 export interface GuidelineCoverageResponse {
-  /** 繧ｵ繝槭Μ繝ｼ */
+  /** サマリー */
   readonly summary: GuidelineCoverageSummaryView;
 
-  /** 鬆・岼隧ｳ邏ｰ驟榊・ */
+  /** 項目詳細配列 */
   readonly items: readonly GuidelineCoverageItemView[];
 }
 
 /**
- * run蛻･繧ｬ繧､繝峨Λ繧､繝ｳ繧ｫ繝舌Ξ繝・ず蠢懃ｭ・ *
- * GET /api/runs/{runId}/guideline-coverage 縺ｮ蠢懃ｭ泌梛
+ * run別ガイドラインカバレッジ応答
+ *
+ * GET /api/runs/{runId}/guideline-coverage の応答型
  */
 export interface RunGuidelineCoverageResponse {
   /** run ID */
   readonly runId: string;
 
-  /** 繧ｬ繧､繝峨Λ繧､繝ｳID */
+  /** ガイドラインID */
   readonly guidelineId: string;
 
-  /** 繧ｵ繝槭Μ繝ｼ・亥ｮ溯｡檎ｵ先棡繧貞渚譏・・*/
+  /** サマリー（実行結果を反映） */
   readonly summary: GuidelineCoverageSummaryView & {
     readonly completedCount: number;
     readonly passCount: number;
@@ -194,6 +201,6 @@ export interface RunGuidelineCoverageResponse {
     readonly inconclusiveCount: number;
   };
 
-  /** 鬆・岼隧ｳ邏ｰ驟榊・・亥ｮ溯｡檎ｵ先棡莉倥″・・*/
+  /** 項目詳細配列（実行結果付き） */
   readonly items: readonly GuidelineCoverageItemView[];
 }

@@ -6,6 +6,7 @@ import {
   type GuidelineItemExecution, type GuidelineRunCoverage, type GuidelineCoverageForecast,
   type GuidelineCoverageSummaryView, type GuidelineCoverageItemView, type GuidelineCoverageResponse, type RunGuidelineCoverageResponse,
 } from '@scopepilot2/contracts';
+import { resolveGuidelineThemeRoutes, type SupportedHttpGuideline } from './guideline-execution.ts';
 
 export function snapshotGuidelineRoute(route: GuidelineCoverageRoute, label = route.itemId): GuidelineRouteSnapshot {
   return immutable({
@@ -168,32 +169,34 @@ export function assessGuidelineItems(snapshots: readonly GuidelineRouteSnapshot[
     ),
   }));
 }
-import { resolveGuidelineThemeRoutes, type SupportedHttpGuideline } from './guideline-execution.ts';
-
 
 // GO-28 needs-input visibility (summary views). Temporary theme-class implementation until wired fully to GuidelineCoverageService.
 export function buildGuidelineCoverageSummary(
   guidelineId: string,
   catalogVersion: string = 'scopepilot-working-copy-2026-10-18',
 ): GuidelineCoverageResponse {
-  // 迴ｾ蝨ｨ縺ｮ莉ｮ螳溯｣・ guideline-execution 縺ｮ蛻・｡槭ｒ菴ｿ逕ｨ
+  // 現在の仮実装: guideline-execution の分類を使用
   const routes = resolveGuidelineThemeRoutes([guidelineId]);
 
   const automaticCount = routes.filter((r) => r.mode === 'automatic').length;
   const needsInputCount = routes.filter((r) => r.mode === 'needs-input').length;
 
-  // 繧ｫ繧ｿ繝ｭ繧ｰ縺九ｉ鬆・岼繧貞叙蠕暦ｼ井ｻｮ螳溯｣・ 螳滄圀縺ｮ繧ｫ繧ｿ繝ｭ繧ｰ隱ｭ霎ｼ縺ｯGO-22縺ｧ螳溯｣・ｼ・  const items = buildCoverageItems(guidelineId, routes);
+  // カタログから項目を取得（仮実装: 実際のカタログ読込はGO-22で実装）
+  const items = buildCoverageItems(guidelineId, routes);
 
   const summary: GuidelineCoverageSummaryView = {
     guidelineId,
     guidelineDisplayName: guidelineId,
     totalItems: routes.length,
     automaticCount,
-    conditionalAutomaticCount: 0, // GO-22縺ｧ螳溯｣・    needsInputCount,
-    unavailableCount: 0, // GO-22縺ｧ螳溯｣・    notApplicableCount: 0, // GO-22縺ｧ螳溯｣・    catalog: {
+    conditionalAutomaticCount: 0, // GO-22で実装
+    needsInputCount,
+    unavailableCount: 0, // GO-22で実装
+    notApplicableCount: 0, // GO-22で実装
+    catalog: {
       catalogId: 'scopepilot-working-workbook',
       version: catalogVersion,
-      sha256: '33d32b195f84a36a77dd0eadeecfb490d0034a6dc6b2b41803af5ac8c99b882c', // 迴ｾ蝨ｨ縺ｮ蝗ｺ螳壼､
+      sha256: '33d32b195f84a36a77dd0eadeecfb490d0034a6dc6b2b41803af5ac8c99b882c', // 現在の固定値
     },
   };
 
@@ -204,7 +207,8 @@ export function buildGuidelineCoverageSummary(
 }
 
 /**
- * 繧ｫ繝舌Ξ繝・ず鬆・岼隧ｳ邏ｰ繧呈ｧ狗ｯ会ｼ井ｻｮ螳溯｣・ｼ・ */
+ * カバレッジ項目詳細を構築（仮実装）
+ */
 function buildCoverageItems(
   guidelineId: string,
   routes: readonly { themeNo: string; mode: 'automatic' | 'needs-input'; guidelineIds: readonly SupportedHttpGuideline[] }[],
@@ -215,14 +219,16 @@ function buildCoverageItems(
 
     const item: GuidelineCoverageItemView = {
       itemId: `theme-${route.themeNo}`,
-      itemDisplayName: `繝・・繝・{route.themeNo}`,
-      checkItem: `繝・・繝・{route.themeNo}縺ｮ讀懆ｨｼ鬆・岼`, // GO-22縺ｧ繧ｫ繧ｿ繝ｭ繧ｰ縺九ｉ蜿門ｾ・      requirement: `繝・・繝・{route.themeNo}縺ｮ隕∽ｻｶ`, // GO-22縺ｧ繧ｫ繧ｿ繝ｭ繧ｰ縺九ｉ蜿門ｾ・      routes: [
+      itemDisplayName: `テーマ${route.themeNo}`,
+      checkItem: `テーマ${route.themeNo}の検証項目`, // GO-22でカタログから取得
+      requirement: `テーマ${route.themeNo}の要件`, // GO-22でカタログから取得
+      routes: [
         {
           routeId: `theme-${route.themeNo}-route-1`,
           routeKind: 'theme',
           guarantee,
           automationClass,
-          estimatedRequests: route.mode === 'automatic' ? 10 : 0, // 莉ｮ蛟､
+          estimatedRequests: route.mode === 'automatic' ? 10 : 0, // 仮値
           hasStateChange: route.mode !== 'automatic',
           requiresRestoration: route.mode !== 'automatic',
           missingInputs:
@@ -230,36 +236,43 @@ function buildCoverageItems(
               ? [
                   {
                     code: 'REQUIRES_OPERATOR_INPUT',
-                    description: '謫堺ｽ懆・↓繧医ｋ蜈･蜉帙・遒ｺ隱阪・蠕ｩ蜈・′蠢・ｦ・,
+                    description: '操作者による入力・確認・復元が必要',
                   },
                 ]
               : [],
           limitations: [],
         },
       ],
-      // execution 縺ｯ螳溯｡悟ｾ後・縺ｿ・・ptional property 縺ｯ逵∫払・・    };
+      // execution は実行後のみ（optional property は省略）
+    };
     return item;
   });
 }
 
 /**
- * 螳溯｡梧ｸ医∩run縺ｮ繧ｬ繧､繝峨Λ繧､繝ｳ繧ｫ繝舌Ξ繝・ず繧貞叙蠕暦ｼ亥ｮ溯｡檎ｵ先棡・・ *
+ * 実行済みrunのガイドラインカバレッジを取得（実行結果）
+ *
  * @param runId - run ID
- * @returns run蛻･繧ｬ繧､繝峨Λ繧､繝ｳ繧ｫ繝舌Ξ繝・ず蠢懃ｭ・ */
+ * @returns run別ガイドラインカバレッジ応答
+ */
 export function buildRunGuidelineCoverage(runId: string): RunGuidelineCoverageResponse | null {
-  // GO-22螳溯｣・ｾ・■: 螳滄圀縺ｮrun邨先棡縺九ｉ繧ｫ繝舌Ξ繝・ず繧呈ｧ狗ｯ・  // 迴ｾ蝨ｨ縺ｯ莉ｮ螳溯｣・→縺励※ null 繧定ｿ斐☆・医瑚ｩｲ蠖途un縺ｪ縺励搾ｼ・  return null;
+  // GO-22実装待ち: 実際のrun結果からカバレッジを構築
+  // 現在は仮実装として null を返す（「該当runなし」）
+  return null;
 }
 
 /**
- * 隍・焚繧ｬ繧､繝峨Λ繧､繝ｳ縺ｮ繧ｫ繝舌Ξ繝・ず繧堤ｵｱ蜷・ *
- * @param guidelineIds - 繧ｬ繧､繝峨Λ繧､繝ｳID驟榊・
- * @returns 邨ｱ蜷医＆繧後◆繧ｫ繝舌Ξ繝・ず蠢懃ｭ・ */
+ * 複数ガイドラインのカバレッジを統合
+ *
+ * @param guidelineIds - ガイドラインID配列
+ * @returns 統合されたカバレッジ応答
+ */
 export function buildCombinedGuidelineCoverage(guidelineIds: readonly string[]): GuidelineCoverageResponse {
   if (guidelineIds.length === 0) {
     return {
       summary: {
         guidelineId: '',
-        guidelineDisplayName: '・域悴驕ｸ謚橸ｼ・,
+        guidelineDisplayName: '（未選択）',
         totalItems: 0,
         automaticCount: 0,
         conditionalAutomaticCount: 0,
@@ -276,7 +289,8 @@ export function buildCombinedGuidelineCoverage(guidelineIds: readonly string[]):
     };
   }
 
-  // 隍・焚繧ｬ繧､繝峨Λ繧､繝ｳ縺ｮ蝣ｴ蜷医・縲・㍾隍・賜髯､縺励※髮・ｴ・  const allRoutes = resolveGuidelineThemeRoutes(guidelineIds);
+  // 複数ガイドラインの場合は、重複排除して集約
+  const allRoutes = resolveGuidelineThemeRoutes(guidelineIds);
   const uniqueThemes = new Set(allRoutes.map((r) => r.themeNo));
 
   const automaticCount = allRoutes.filter((r) => r.mode === 'automatic').length;
@@ -287,7 +301,7 @@ export function buildCombinedGuidelineCoverage(guidelineIds: readonly string[]):
   return {
     summary: {
       guidelineId: guidelineIds.join(', '),
-      guidelineDisplayName: `${guidelineIds.length}莉ｶ縺ｮ繧ｬ繧､繝峨Λ繧､繝ｳ`,
+      guidelineDisplayName: `${guidelineIds.length}件のガイドライン`,
       totalItems: uniqueThemes.size,
       automaticCount,
       conditionalAutomaticCount: 0,

@@ -5,7 +5,7 @@
  * 現在は既存の /api/events と /api/runs/interrupted を使う暫定実装。
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { ActivityEvent, ActivityFilter, ActivityJobSummary } from './activity-panel-types';
+import type { ActivityEvent, ActivityFilter, ActivityJobSummary } from './activity-panel-types.ts';
 import type { BaselineFlowEvent } from '@scopepilot2/contracts';
 
 interface UseActivityPanelOptions {
@@ -128,9 +128,9 @@ const convertToActivityEvent = (event: BaselineFlowEvent & { eventId: number }, 
     category,
     source: 'scopepilot',
     message,
-    url,
-    runId,
-    findingId,
+    ...(url === undefined ? {} : { url }),
+    ...(runId === undefined ? {} : { runId }),
+    ...(findingId === undefined ? {} : { findingId }),
   };
 };
 
@@ -144,8 +144,8 @@ export const useActivityPanel = (options: UseActivityPanelOptions): UseActivityP
   const [filter, setFilter] = useState<ActivityFilter>({
     scope: currentJobId ? 'this-job' : 'all-jobs',
     level: 'info',
-    jobId: currentJobId,
-    runId: currentRunId,
+    ...(currentJobId === undefined ? {} : { jobId: currentJobId }),
+    ...(currentRunId === undefined ? {} : { runId: currentRunId }),
   });
   const [collapsed, setCollapsed] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -228,7 +228,7 @@ export const useActivityPanel = (options: UseActivityPanelOptions): UseActivityP
           label: `Run ${runId.substring(0, 8)}`,
           state: endEvent ? 'completed' : 'running',
           startedAt: startEvent?.at || new Date().toISOString(),
-          endedAt: endEvent?.at,
+          ...(endEvent?.at === undefined ? {} : { endedAt: endEvent.at }),
           counters: {
             requestsSent: 0,  // TODO: P0 後に実装
             deniedByScope: events.filter((e) => e.runId === runId && e.category === 'egress-denied').length,
@@ -264,12 +264,15 @@ export const useActivityPanel = (options: UseActivityPanelOptions): UseActivityP
 
   // currentJobId が変わったらフィルタを更新
   useEffect(() => {
-    setFilter((prev) => ({
-      ...prev,
-      scope: currentJobId ? 'this-job' : 'all-jobs',
-      jobId: currentJobId,
-      runId: currentRunId,
-    }));
+    setFilter((prev: ActivityFilter) => {
+      const { jobId: _j, runId: _r, ...rest } = prev;
+      return {
+        ...rest,
+        scope: currentJobId ? 'this-job' : 'all-jobs',
+        ...(currentJobId === undefined ? {} : { jobId: currentJobId }),
+        ...(currentRunId === undefined ? {} : { runId: currentRunId }),
+      };
+    });
   }, [currentJobId, currentRunId]);
 
   return {
