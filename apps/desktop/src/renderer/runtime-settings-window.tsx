@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Field, Input, MessageBar, Select, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
 import {
+  EMPTY_RUNTIME_ENVIRONMENT, RuntimeEnvironmentKeys, type RuntimeEnvironment, type RuntimeConnectionStatus,
   DEFAULT_AI_CLI_LAUNCH_MODES,
   EMPTY_RUNTIME_TOOL_PATHS,
   type AiCliAuthStatus,
@@ -124,6 +125,7 @@ const useStyles = makeStyles({
 
 function sourceLabel(source: RuntimeSettingsSnapshot['tools'][number]['source']): string {
   switch (source) {
+    case 'environment': return '環境変数';
     case 'saved': return '保存済み';
     case 'path': return 'PATHで検出';
     case 'known-location': return '標準位置で検出';
@@ -131,12 +133,15 @@ function sourceLabel(source: RuntimeSettingsSnapshot['tools'][number]['source'])
   }
 }
 
-export function RuntimeSettingsWindow(): React.ReactElement {
+export function RuntimeSettingsWindow({ embedded = false }: { embedded?: boolean } = {}): React.ReactElement {
   const styles = useStyles();
   const bridge = window.scopepilotDesktop;
   const [snapshot, setSnapshot] = useState<RuntimeSettingsSnapshot | null>(null);
   const [paths, setPaths] = useState<RuntimeToolPaths>(EMPTY_RUNTIME_TOOL_PATHS);
   const [aiLaunchModes, setAiLaunchModes] = useState<AiCliLaunchModes>(DEFAULT_AI_CLI_LAUNCH_MODES);
+  const [environment, setEnvironment] = useState<RuntimeEnvironment>(EMPTY_RUNTIME_ENVIRONMENT);
+  const [connections, setConnections] = useState<readonly RuntimeConnectionStatus[]>([]);
+  const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -165,7 +170,7 @@ export function RuntimeSettingsWindow(): React.ReactElement {
       return;
     }
     bridge.getRuntimeSettings()
-      .then((loaded) => { setSnapshot(loaded); setPaths(loaded.paths); setAiLaunchModes(loaded.aiLaunchModes); })
+      .then((loaded) => { setSnapshot(loaded); setPaths(loaded.paths); setAiLaunchModes(loaded.aiLaunchModes); setEnvironment(loaded.environment); })
       .catch((cause: unknown) => setError(String(cause)));
     void refreshAuth();
   }, [bridge, refreshAuth]);
@@ -183,23 +188,30 @@ export function RuntimeSettingsWindow(): React.ReactElement {
     return () => window.clearInterval(timer);
   }, [loginPending, refreshAuth]);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (closeAfter = !embedded) => {
     if (bridge === undefined) return;
     setBusy(true);
     setError('');
     try {
-      await bridge.saveRuntimeSettings({ paths, aiLaunchModes });
-      await bridge.closeSettings();
+      const loaded = await bridge.saveRuntimeSettings({ paths, aiLaunchModes, environment });
+      setSnapshot(loaded); setPaths(loaded.paths); setEnvironment(loaded.environment); setConnections([]);
+      setNotice('設定を保存しました。エンジン・接続先・ポートの変更は次回起動時に反映されます。');
+      if (closeAfter) await bridge.closeSettings();
+      setBusy(false);
     } catch (cause) {
       setError(String(cause));
       setBusy(false);
     }
-  }, [aiLaunchModes, bridge, paths]);
+  }, [aiLaunchModes, bridge, paths, environment, embedded]);
 
-  const cancel = useCallback(() => { void bridge?.closeSettings(); }, [bridge]);
+  const cancel = useCallback(() => {
+    if (embedded && snapshot !== null) { setPaths(snapshot.paths); setAiLaunchModes(snapshot.aiLaunchModes); setEnvironment(snapshot.environment); setConnections([]); }
+    else if (!embedded) void bridge?.closeSettings();
+  }, [bridge, embedded, snapshot]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (busy || checking) return;
       if (event.key === 'Escape') cancel();
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
@@ -208,7 +220,9 @@ export function RuntimeSettingsWindow(): React.ReactElement {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [cancel, save]);
+  }, [cancel, save, busy, checking]);
+
+  useEffect(() => { setConnections([]); }, [paths, environment]);
 
   const statuses = useMemo(() => new Map(snapshot?.tools.map((tool) => [tool.id, tool]) ?? []), [snapshot]);
   const aiStatuses = useMemo(() => new Map(authStatuses.map((status) => [status.provider, status])), [authStatuses]);
@@ -264,7 +278,7 @@ export function RuntimeSettingsWindow(): React.ReactElement {
     const provider = AI_PROVIDER_BY_TOOL[id];
     const unchanged = status !== undefined && current === status.path
       && (provider === undefined || aiLaunchModes[provider] === snapshot?.aiLaunchModes[provider]);
-    const badgeText = current === '' ? '未設定' : unchanged ? sourceLabel(status.source) : '変更あり';
+    const badgeText = current === '' ? '未設定' : unchanged ? status.exists ? sourceLabel(status.source) : 'ファイル利用不可' : '変更あり';
     const badgeColor: 'danger' | 'success' | 'warning' = current === '' ? 'danger' : unchanged && status?.exists === true ? 'success' : 'warning';
     return (
       <div className={styles.toolRow} key={id}>
@@ -283,7 +297,7 @@ export function RuntimeSettingsWindow(): React.ReactElement {
             <Select
               aria-label={`${TOOL_META[id].label} の起動方式`}
               value={aiLaunchModes[provider]}
-              disabled={busy}
+              disabled={busy || checking}
               onChange={(_event, data) => setAiLaunchModes((previous) => ({ ...previous, [provider]: data.value as 'node' | 'file' }))}
             >
               <option value="node">Node.js経由（npm CLI）</option>
@@ -295,14 +309,14 @@ export function RuntimeSettingsWindow(): React.ReactElement {
           <Input
             className={styles.input}
             value={current}
-            disabled={busy}
+            disabled={busy || checking}
             placeholder="実行ファイルの絶対パス"
             onChange={(_event, data) => setPaths((previous) => ({ ...previous, [id]: data.value }))}
           />
         </Field>
         <Button
           className={styles.browse}
-          disabled={busy}
+          disabled={busy || checking}
           onClick={() => {
             void bridge?.selectRuntimeToolFile(id, current).then((selected) => {
               if (selected !== null) setPaths((previous) => ({ ...previous, [id]: selected }));
@@ -317,7 +331,7 @@ export function RuntimeSettingsWindow(): React.ReactElement {
   };
 
   return (
-    <div className={styles.root}>
+    <div className={styles.root} style={embedded ? { minHeight: 0 } : undefined}>
       <header className={styles.header}>
         <div className={styles.mark} aria-hidden="true">SP</div>
         <div className={styles.heading}>
@@ -337,6 +351,19 @@ export function RuntimeSettingsWindow(): React.ReactElement {
             <Text className={styles.sectionIntro}>PATH上で見つかったコマンドは初期値として入力されています。案件で選択したAIに対応するCLIが使用されます。</Text>
             {AI_TOOLS.map(renderTool)}
           </section>
+          <section className={styles.section} aria-labelledby="runtime-environment-heading">
+            <Text id="runtime-environment-heading" as="h2" size={400} weight="semibold">接続先・ポート</Text>
+            <Text>runtime-tools.json に保存します。空欄は起動時の環境変数を継承します。APIは127.0.0.1のみ、既定ポート0は自動割当です。秘密値は入力せず、Interactsh設定ファイルを参照してください。</Text>
+            {RuntimeEnvironmentKeys.map((key) => <Field key={key} label={{ SCOPEPILOT_API_PORT: 'ローカルAPIポート', SCOPEPILOT_ZAP_BASE_URL: 'ZAP API接続先', SCOPEPILOT_OAST_SERVER_URL: 'OASTサーバー（HTTPS）', SCOPEPILOT_INTERACTSH_CONFIG: 'Interactsh設定ファイルの絶対パス' }[key]} hint={key}>
+              <Input value={environment[key]} disabled={busy || checking} onChange={(_, data) => { setEnvironment((previous) => ({ ...previous, [key]: data.value })); setConnections([]); }} />
+            </Field>)}
+            <Button disabled={busy || checking || snapshot === null || JSON.stringify(paths) !== JSON.stringify(snapshot.paths) || JSON.stringify(environment) !== JSON.stringify(snapshot.environment)} onClick={() => {
+              setChecking(true); setError('');
+              void bridge?.testRuntimeConnections().then(setConnections).catch((cause: unknown) => setError(String(cause))).finally(() => setChecking(false));
+            }}>{checking ? '接続確認中…' : '保存済み設定の接続テスト'}</Button>
+            <Text>変更後は保存してください。テストは保存済みの接続先を確認します。診断は実行しません。OASTはHTTPS到達確認のみです。</Text>
+            <div role="status">{connections.map((result) => <div key={result.id}><Badge color={result.state === 'available' ? 'success' : 'warning'}>{result.id}: {result.state === 'available' ? '確認済み' : result.state === 'unconfigured' ? '未設定' : '利用不可'}</Badge> <Text>{result.detail} / {result.checkedAt}</Text></div>)}</div>
+          </section>
           <section className={styles.section} aria-labelledby="engine-heading">
             <Text id="engine-heading" as="h2" size={400} weight="semibold">診断・ブラウザーエンジン</Text>
             <Text className={styles.sectionIntro}>保存したZAPパスは次回のScopePilot2起動時から使用されます。現在実行中の診断には影響しません。</Text>
@@ -345,10 +372,11 @@ export function RuntimeSettingsWindow(): React.ReactElement {
         </main>
       )}
 
-      <footer className={styles.footer}>
-        <Button appearance="secondary" disabled={busy} onClick={cancel}>キャンセル</Button>
-        <Button appearance="primary" disabled={busy || snapshot === null} onClick={() => void save()}>
-          {busy ? '保存中…' : '保存して閉じる'}
+      <footer className={styles.footer} style={embedded ? { position: 'static' } : undefined}>
+        <Button appearance="secondary" disabled={busy || checking} onClick={cancel}>キャンセル</Button>
+        {!embedded && <Button disabled={busy || checking || snapshot === null} onClick={() => void save(false)}>保存</Button>}
+        <Button appearance="primary" disabled={busy || checking || snapshot === null} onClick={() => void save()}>
+          {busy ? '保存中…' : embedded ? '保存' : '保存して閉じる'}
         </Button>
       </footer>
     </div>

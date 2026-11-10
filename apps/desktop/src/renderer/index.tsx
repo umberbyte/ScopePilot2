@@ -13,6 +13,7 @@ import type {
   AiCliAuthStatus,
   AiCatalogSnapshot,
   AiCliProvider,
+  RuntimeConnectionStatus,
   RuntimeSettingsInput,
   AppAiSelection,
   RuntimeSettingsSnapshot,
@@ -206,6 +207,7 @@ interface DesktopBridge {
   }>;
   openSelectedPath(path: string): Promise<void>;
   openSettings(): Promise<void>;
+  testRuntimeConnections(): Promise<readonly RuntimeConnectionStatus[]>;
   getRuntimeSettings(): Promise<RuntimeSettingsSnapshot>;
   saveRuntimeSettings(settings: RuntimeSettingsInput): Promise<RuntimeSettingsSnapshot>;
   selectRuntimeToolFile(toolId: RuntimeToolId, currentPath: string): Promise<string | null>;

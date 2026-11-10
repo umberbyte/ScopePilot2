@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Field, Input, MessageBar, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, tokens } from '@fluentui/react-components';
 import type { EngineCapabilitySnapshot, RuntimeAdapterCapability, RuntimeProfile } from '@scopepilot2/contracts';
+import { RuntimeSettingsWindow } from './runtime-settings-window.tsx';
 import { t } from './resources.ts';
 
 const CONTROL_ASPECTS = ['preSendScopeEnforcement', 'stopControl', 'budgetLease', 'rateLimit'] as const;
@@ -112,6 +113,7 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
 
   return (
     <div className={styles.section}>
+      <RuntimeSettingsWindow embedded />
       <Text weight="semibold">{t('a13.title')}</Text>
       <Text>Runtime: {runtimeProfile}</Text>
       <Table aria-label="Runtime adapters">
@@ -121,6 +123,7 @@ export function SettingsScreen({ apiBase }: { apiBase: string }): React.ReactEle
           <TableCell>{adapter.version}</TableCell><TableCell>{adapter.constraints.join('; ') || '—'}</TableCell>
         </TableRow>)}</TableBody>
       </Table>
+      <Text className={styles.muted}>起動中のエンジン能力です。保存済み設定の接続テストとは反映時点が異なります。source が fixture の結果は実通信の測定ではありません。</Text>
       {error !== '' && (
         <MessageBar intent="error">
           {`Error: ${error}`}
