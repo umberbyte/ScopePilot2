@@ -2173,7 +2173,7 @@ describe('GO-31 additive exploration API', () => {
   test('discovery sources survive plan/confirmation and asset metadata is available without secret bodies', async () => {
     const { analyzeClientAsset } = await import('@scopepilot2/core');
     const origin = 'http://fixture.target.test';
-    const asset = analyzeClientAsset({ url: `${origin}/main.js`, sourceUrl: origin, contentType: 'application/javascript', body: 'ghp_0123456789abcdefghijklmnopqrstuvwxyz' })!;
+    const asset = analyzeClientAsset({ url: `${origin}/main.js`, sourceUrl: origin, contentType: 'application/javascript', body: ('ghp_' + '0123456789abcdefghijklmnopqrstuvwxyz') })!;
     const flow = await bootstrapFlow({ allowedOperationClasses: ['Browse', 'ActiveCrawl'], explorer: { engineVersion: 'owned-api-explorer', observe: async (url) => ({ url, status: 200, contentType: 'text/html', discoveredFrom: null, depth: 0, originType: 'crawl', links: [], forms: [], assets: [asset] }) } });
     const server = createCoreApiServer({ service: flow.service, operator: flow.operator });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));

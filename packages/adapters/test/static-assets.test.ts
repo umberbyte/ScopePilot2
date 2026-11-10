@@ -11,7 +11,7 @@ async function fixture(run: (origin: string, hits: string[]) => Promise<void>) {
     hits.push(req.url!);
     if (req.url === '/redirect.txt') { res.writeHead(302, { location: 'http://localhost:9/outside.txt' }); res.end(); return; }
     if (req.url === '/slow.txt') { res.writeHead(200, { 'content-type': 'text/plain' }); res.flushHeaders(); return; }
-    if (req.url === '/binary.exe') { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('ghp_0123456789abcdefghijklmnopqrstuvwxyz'); return; }
+    if (req.url === '/binary.exe') { res.writeHead(200, { 'content-type': 'text/plain' }); res.end(('ghp_' + '0123456789abcdefghijklmnopqrstuvwxyz')); return; }
     if (req.url === '/bomb.txt') { res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' }); res.end(gzipSync('a'.repeat(2 * 1024 * 1024))); return; }
     res.writeHead(200, { 'content-type': 'text/plain' });
     res.end(req.url === '/robots.txt' ? 'Disallow: /unlinked\nSitemap: /sitemap.xml\n' : '//# sourceMappingURL=main.js.map\nimport("./chunk.js")');

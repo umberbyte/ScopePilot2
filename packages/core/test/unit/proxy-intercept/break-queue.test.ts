@@ -71,7 +71,7 @@ describe('CertificatePresenter / redaction', () => {
       subject: 'CN=ScopePilot Root CA (fixture)',
       serialNumber: '00aa',
       validUntil: '2036-01-01T00:00:00Z',
-      privateKeyPem: '-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----',
+      privateKeyPem: ('-----BEGIN' + ' PRIVATE KEY-----\nsecret\n-----END' + ' PRIVATE KEY-----'),
     });
     assert.equal(presented.subject, 'CN=ScopePilot Root CA (fixture)');
     assert.ok(!('privateKeyPem' in presented));

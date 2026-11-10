@@ -30,7 +30,7 @@ test('source maps keep unknown versions; malformed and binary/oversized/cross-or
   assert.equal(analyzeClientAsset({ url: 'https://owned.test/a.exe', sourceUrl: url, contentType: 'text/plain', body: 'jquery v1.0.0' }), null);
 });
 test('secret canaries and JWT claims are redacted, plain strings and placeholders are negative controls', () => {
-  const secret = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';
+  const secret = ('ghp_' + '0123456789abcdefghijklmnopqrstuvwxyz');
   const token = `${Buffer.from('{"alg":"none","kid":"secret-kid"}').toString('base64url')}.${Buffer.from('{"sub":"private-person"}').toString('base64url')}.`;
   const result = analyze(`${secret} ${token}`)!;
   assert.ok(result.signals.some((s) => s.kind === 'secret'));

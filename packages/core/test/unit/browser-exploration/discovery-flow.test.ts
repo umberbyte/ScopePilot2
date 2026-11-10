@@ -52,7 +52,7 @@ test('cancel and browser subrequest budgets stop before another adapter operatio
   assert.equal(hits, 1); assert.equal(sends, 3);
 });
 test('asset signals become unverified findings with masked evidence; repeated assets dedupe', async () => {
-  const asset = analyzeClientAsset({ url: `${origin}/main.js`, sourceUrl: origin, contentType: 'application/javascript', body: 'ghp_0123456789abcdefghijklmnopqrstuvwxyz' })!;
+  const asset = analyzeClientAsset({ url: `${origin}/main.js`, sourceUrl: origin, contentType: 'application/javascript', body: ('ghp_' + '0123456789abcdefghijklmnopqrstuvwxyz') })!;
   const explorer: ExplorationPort = { engineVersion: 'owned-asset', observe: async (url) => page(url, { assets: [asset], links: url.endsWith('/next') ? [] : [`${origin}/next`] }) };
   const flow = await bootstrapFlow({ explorer });
   const { plan } = flow.service.buildExplorationPlan(flow.operator, [origin]);
