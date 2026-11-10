@@ -7,17 +7,24 @@ const spec = JSON.parse(readFileSync(new URL('../../openapi/core-api.json', impo
 const schemas = spec.components.schemas;
 
 test('OpenAPI, route table and server route branches have bidirectional parity', () => {
-  // The server currently dispatches literal method/path branches. Keep this check
-  // until dispatch is backed by a registry; do not refactor production routing here.
+  // Literal `route === 'METHOD path'` remains the common form, including combined
+  // `|| route === ...` branches. Job and run-coverage routes also match pathname
+  // prefixes/templates; require those paths to appear with their HTTP method.
   const source = readFileSync(new URL('../../../core/src/application/api-server.ts', import.meta.url), 'utf8');
-  const handlers = [...source.matchAll(/if \(route === '(GET|POST|PUT|DELETE|PATCH) ([^']+)'\)/g)]
+  const handlers = [...source.matchAll(/route === '(GET|POST|PUT|DELETE|PATCH) ([^']+)'/g)]
     .map((match) => `${match[1]} ${match[2]}`);
   const routes = CORE_API_ROUTE_METHODS.map(({ method, path }) => `${method} ${path}`);
   const operations = Object.entries(spec.paths).flatMap(([path, methods]) =>
     Object.keys(methods as object).filter((method) => ['get', 'post', 'put', 'delete', 'patch'].includes(method))
       .map((method) => `${method.toUpperCase()} ${path}`));
   assert.equal(new Set(handlers).size, handlers.length, 'duplicate server handler');
-  assert.deepEqual(handlers.sort(), [...routes].sort());
+  const missingHandlers = routes.filter((route) => {
+    if (handlers.includes(route)) return false;
+    const [method, path] = route.split(' ');
+    const literal = path!.includes('{') ? path!.slice(0, path!.indexOf('{')) : path!;
+    return !(source.includes(literal) && (source.includes(`'${method} ${path}'`) || source.includes(`method === '${method}'`)));
+  });
+  assert.deepEqual(missingHandlers, []);
   assert.deepEqual(operations.sort(), [...routes].sort());
 });
 
