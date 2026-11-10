@@ -41,6 +41,8 @@ describe('LoginFlow', () => {
     assert.equal(detectAuthState({ expectedUrlPrefix: 'http://x.test/home', finalUrl: 'http://x.test/home', assertResult: true }), 'authenticated');
     assert.equal(detectAuthState({ expectedUrlPrefix: 'http://x.test/home', finalUrl: 'http://x.test/home', assertResult: false }), 'unauthenticated');
     assert.equal(detectAuthState({ expectedUrlPrefix: 'http://x.test/home', finalUrl: 'http://x.test/login', assertResult: true }), 'unauthenticated');
+    assert.equal(detectAuthState({ expectedUrlPrefix: 'http://x.test', finalUrl: 'http://x.test.evil/', assertResult: true }), 'unauthenticated');
+    assert.throws(() => validateLoginFlow([{ kind: 'assert', target: '' }]), /non-empty login marker/);
   });
 });
 

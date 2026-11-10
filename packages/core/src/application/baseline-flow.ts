@@ -51,6 +51,10 @@ import {
   type SaveScanPolicyRequest,
   type ScanPolicy,
   type ScanPolicyRouteOverrides,
+  AuthenticationMethods,
+  type AuthenticationUser,
+  type AuthenticationCapabilities,
+  type SessionVerification,
 } from '@scopepilot2/contracts';
 import { ScopePolicy } from '../domain/scope-policy.ts';
 import { mergeDocumentHintSeeds } from '../domain/exploration.ts';
@@ -484,6 +488,10 @@ export class BaselineFlowService {
 
   /** 認証・session 管理 (design/f09)。secret 値は参照のみ保持し、値は受け付けない。 */
   private readonly loginFlows = new Map<string, { flowVersion: string; steps: readonly LoginFlowStep[]; secretReferences: readonly string[] }>();
+  private readonly authenticationUsers = new Map<string, AuthenticationUser>();
+  private readonly sessionGenerations = new Map<string, number>();
+  private readonly sessionVerifications = new Map<string, SessionVerification>();
+  private readonly verificationFlights = new Map<string, Promise<SessionVerification>>();
   private readonly roleRegistry = new RoleSessionRegistry();
   private readonly sessionRevisions = new Map<string, number>();
   private readonly sessionCoordinator = new SessionCoordinator({
@@ -2607,13 +2615,109 @@ export class BaselineFlowService {
     return { results };
   }
 
+  authenticationCapabilities(): AuthenticationCapabilities {
+    return {
+      login: this.deps.loginExecutor === undefined ? 'unavailable' : 'adapter',
+      loginEngineVersion: this.deps.loginExecutor?.engineVersion ?? null,
+      verification: this.deps.interactiveBrowser === undefined ? 'unavailable' : 'adapter',
+      verificationEngineVersion: this.deps.interactiveBrowser?.engineVersion ?? null,
+      refresh: 'fixture',
+      executableMethods: this.deps.loginExecutor === undefined ? [] : ['Form'],
+      configurationStorage: 'memory',
+    };
+  }
+
+  listAuthenticationUsers(): readonly AuthenticationUser[] {
+    return [...this.authenticationUsers.values()].map((user) => ({ ...user }));
+  }
+
+  authenticationConfiguration(): { capabilities: AuthenticationCapabilities; users: readonly AuthenticationUser[]; verifications: readonly SessionVerification[]; flows: readonly { role: string; flowVersion: string; steps: readonly LoginFlowStep[] }[] } {
+    return { capabilities: this.authenticationCapabilities(), users: this.listAuthenticationUsers(), verifications: [...this.sessionVerifications.values()].map((entry) => ({ ...entry })),
+      flows: [...this.loginFlows].map(([role, flow]) => ({ role, flowVersion: flow.flowVersion, steps: flow.steps.map((step) => ({ ...step })) })) };
+  }
+
+  saveAuthenticationUser(operator: OperatorProfile, user: AuthenticationUser): AuthenticationUser {
+    this.requirePermission(operator, 'case.manage');
+    this.currentCase();
+    if ([user.role, user.displayName, user.authorizationRole].some((value) => typeof value !== 'string' || value.trim() === '')
+      || !AuthenticationMethods.includes(user.method) || typeof user.enabled !== 'boolean') {
+      throw domainError('ValidationFailed', 'user needs a session identity, display name, authorization role, authentication method and enabled flag');
+    }
+    // Explicit projection prevents arbitrary request fields (including secrets) from being stored.
+    const saved: AuthenticationUser = { role: user.role.trim(), displayName: user.displayName.trim(), authorizationRole: user.authorizationRole.trim(), method: user.method, enabled: user.enabled };
+    this.authenticationUsers.set(saved.role, saved);
+    this.invalidateRoleSession(saved.role);
+    return { ...saved };
+  }
+
+  private invalidateRoleSession(role: string): void {
+    this.sessionGenerations.set(role, (this.sessionGenerations.get(role) ?? 0) + 1);
+    this.roleSessionCookies.delete(role);
+    this.roleRegistry.removeJar(role);
+    this.loginObservations.delete(role);
+    this.sessionVerifications.delete(role);
+  }
+
+  private clearAuthentication(): void {
+    for (const role of this.loginFlows.keys()) this.invalidateRoleSession(role);
+    this.authenticationUsers.clear();
+    this.loginFlows.clear();
+    this.sessionRevisions.clear();
+  }
+
+  /** Reuses the role's browser state; never returns response bodies, cookies or tokens. */
+  async verifySession(operator: OperatorProfile, role: string): Promise<SessionVerification> {
+    this.requirePermission(operator, 'run.manage');
+    if (this.authenticationUsers.get(role)?.enabled === false) throw domainError('NeedsInput', 'user is disabled');
+    const flight = this.verificationFlights.get(role);
+    if (flight !== undefined) return flight;
+    const verify = this.performSessionVerification(role);
+    this.verificationFlights.set(role, verify);
+    try { return await verify; } finally { this.verificationFlights.delete(role); }
+  }
+
+  private async performSessionVerification(role: string): Promise<SessionVerification> {
+    const session = this.roleSessionCookies.get(role);
+    if (session === undefined) throw domainError('NeedsInput', 'run login before verifying the session');
+    const browser = this.deps.interactiveBrowser;
+    const markers = (session.verificationMarkers ?? []).filter((marker) => marker.trim() !== '');
+    let state: SessionVerification['state'] = 'unverified';
+    let reason = 'verification requires a browser adapter, an expected URL and a non-empty login assertion';
+    let source: SessionVerification['source'] = 'unavailable';
+    if (browser !== undefined && session.verificationUrl !== undefined && session.expectedUrlPrefix !== undefined && markers.length > 0) {
+      const scope = this.currentCase().scope;
+      if (!ScopePolicy.decide(scope, session.verificationUrl).allowed) throw domainError('OutOfScope', 'session verification URL is outside the case context');
+      if (isSessionControlUrl(session.verificationUrl)) throw domainError('ValidationFailed', 'session verification cannot navigate to a session control URL');
+      source = 'adapter';
+      try {
+        const result = await browser.execute({ targetUrl: session.verificationUrl, scope, browserSession: session.browserState,
+          steps: [{ kind: 'navigate', target: session.verificationUrl }, ...markers.map((target) => ({ kind: 'assert' as const, target }))] });
+        const valid = ScopePolicy.decide(scope, result.finalUrl).allowed
+          && detectAuthState({ finalUrl: result.finalUrl, expectedUrlPrefix: session.expectedUrlPrefix, assertResult: true }) === 'authenticated'
+          && result.status !== null && result.status >= 200 && result.status < 400
+          && markers.every((marker) => result.assertions.some((assertion) => assertion.target === marker && assertion.passed));
+        state = valid ? 'valid' : 'expired';
+        reason = valid ? 'expected URL and all login assertions matched' : 'authentication URL, status or login assertion did not match; log in again';
+      } catch {
+        // Adapter errors can contain request material. Keep only a fixed diagnostic.
+        reason = 'browser verification failed; authentication was not established';
+      }
+    }
+    if (this.roleSessionCookies.get(role) !== session) throw domainError('Conflict', 'session changed during verification; verify again');
+    const verification: SessionVerification = { role, state, checkedAt: this.deps.clock.now().toISOString(), source, reason };
+    this.sessionVerifications.set(role, verification);
+    if (state !== 'valid') { this.roleSessionCookies.delete(role); this.roleRegistry.removeJar(role); }
+    await this.deps.evidence.saveText(`session-verification:${role}`, canonicalJson({ ...verification, flowVersion: this.loginFlows.get(role)?.flowVersion ?? null, engineVersion: browser?.engineVersion ?? null }));
+    return verification;
+  }
+
   /** login flow の登録 (design/f09)。step 構成は domain 検証 (上限 10・allowlist・fill は secret 参照必須)。 */
   registerLoginFlow(
     operator: OperatorProfile,
     input: { readonly role: string; readonly flowVersion: string; readonly steps: readonly LoginFlowStep[] },
   ): { role: string; stepCount: number; secretReferences: readonly { flowVersion: string; secretReference: string }[] } {
     this.requirePermission(operator, 'run.manage');
-    if (input.role.trim() === '') {
+    if (input.role.trim() === '' || input.flowVersion.trim() === '') {
       throw domainError('ValidationFailed', 'role must not be empty');
     }
     if (input.steps.some((step) => (step as { secretValue?: unknown }).secretValue !== undefined)) {
@@ -2621,10 +2725,15 @@ export class BaselineFlowService {
       throw domainError('ValidationFailed', 'inline secret values are not accepted; use secretReference');
     }
     const { stepCount } = validateLoginFlow(input.steps);
+    const previous = this.loginFlows.get(input.role);
+    if (previous?.flowVersion === input.flowVersion && canonicalJson(previous.steps) !== canonicalJson(input.steps)) {
+      throw domainError('Conflict', 'flow steps changed; save with a new flow version');
+    }
     const secretReferences = input.steps
       .filter((step) => step.secretReference !== undefined)
       .map((step) => vaultEvidenceProjection({ flowVersion: input.flowVersion, secretReference: step.secretReference ?? '' }));
-    this.loginFlows.set(input.role, { flowVersion: input.flowVersion, steps: input.steps, secretReferences: secretReferences.map((entry) => entry.secretReference) });
+    this.loginFlows.set(input.role, { flowVersion: input.flowVersion, steps: input.steps.map((step) => ({ ...step })), secretReferences: [...new Set(secretReferences.map((entry) => entry.secretReference))] });
+    this.invalidateRoleSession(input.role);
     return { role: input.role, stepCount, secretReferences };
   }
 
@@ -2644,6 +2753,9 @@ export class BaselineFlowService {
     },
   ): Promise<{ role: string; authenticated: boolean; finalUrl: string; cookieNames: readonly string[]; sharedCookieNames: boolean }> {
     this.requirePermission(operator, 'run.manage');
+    const user = this.authenticationUsers.get(input.role);
+    if (user?.enabled === false) throw domainError('NeedsInput', 'user is disabled');
+    if (user !== undefined && user.method !== 'Form') throw domainError('CapabilityUnavailable', `${user.method} login is configuration-only; use a Form login flow`);
     const flow = this.loginFlows.get(input.role);
     if (flow === undefined) {
       throw domainError('ValidationFailed', `login flow for ${input.role} is not registered`);
@@ -2653,12 +2765,28 @@ export class BaselineFlowService {
       throw domainError('ValidationFailed', 'login executor is not configured for this service');
     }
     for (const reference of flow.secretReferences) {
-      if (input.secretValues[reference] === undefined) {
+      if (input.secretValues[reference] === undefined || input.secretValues[reference] === '') {
         throw domainError('NeedsInput', `secret value for reference '${reference}' was not provided`);
       }
     }
+    const scope = this.currentCase().scope;
+    let targets: readonly string[];
+    try {
+      targets = [input.baseUrl, input.expectedUrlPrefix, ...flow.steps.filter((step) => step.kind === 'navigate').map((step) => new URL(step.target ?? '', `${input.baseUrl.replace(/\/$/, '')}/`).href)];
+      for (const target of targets) {
+        const url = new URL(target);
+        if (!['http:', 'https:'].includes(url.protocol) || url.username !== '' || url.password !== '') throw new Error('invalid login URL');
+      }
+    } catch { throw domainError('ValidationFailed', 'login URLs must be absolute HTTP(S) URLs without embedded credentials'); }
+    for (const target of targets) {
+      if (!ScopePolicy.decide(scope, target).allowed) throw domainError('OutOfScope', 'login URL is outside the case context');
+    }
+    // A failed re-login must never leave a stale authenticated session available.
+    this.invalidateRoleSession(input.role);
+    const generation = this.sessionGenerations.get(input.role);
     const startedAtMs = this.deps.clock.now().getTime();
     const result = await executor.execute({
+      scope,
       baseUrl: input.baseUrl,
       steps: flow.steps,
       secretValues: input.secretValues,
@@ -2666,9 +2794,15 @@ export class BaselineFlowService {
       ...((input.proxyServer ?? this.deps.loginProxyServer) === undefined
         ? {}
         : { proxyServer: input.proxyServer ?? this.deps.loginProxyServer }),
-    });
+    }).catch(() => { throw domainError('EngineFailure', 'login browser execution failed; check the flow and retry manually'); });
     checkFlowDeadline(this.deps.clock.now().getTime() - startedAtMs);
+    if (this.sessionGenerations.get(input.role) !== generation) throw domainError('Conflict', 'session changed during login; run login again');
+    if (this.loginFlows.get(input.role) !== flow || this.authenticationUsers.get(input.role) !== user || this.currentCase().scope !== scope) {
+      throw domainError('Conflict', 'authentication configuration changed during login; run login again');
+    }
+    if (!ScopePolicy.decide(scope, result.finalUrl).allowed) throw domainError('OutOfScope', 'login final URL is outside the case context');
     if (result.authenticated) {
+      this.sessionRevisions.set(input.role, (this.sessionRevisions.get(input.role) ?? 0) + 1);
       this.roleSessionCookies.set(input.role, {
         cookies: result.cookies,
         browserState: result.browserState ?? { cookies: result.cookies, origins: [] },
@@ -2728,6 +2862,7 @@ export class BaselineFlowService {
   /** session の refresh (single-flight・lockout 回避は domain)。 */
   async refreshSession(operator: OperatorProfile, role: string): Promise<{ outcome: 'refreshed' | 'stopped-lockout-guard'; sessionRevision: number }> {
     this.requirePermission(operator, 'run.manage');
+    if (this.deps.loginExecutor !== undefined) throw domainError('CapabilityUnavailable', 'automatic refresh is fixture-only; run login again with transient credentials');
     if (!this.loginFlows.has(role)) {
       throw domainError('ValidationFailed', `login flow for ${role} is not registered`);
     }
@@ -3887,6 +4022,7 @@ export class BaselineFlowService {
     if (allowed.length === 0) {
       throw domainError('ValidationFailed', 'case must have at least one allowed origin');
     }
+    this.clearAuthentication();
     this.aggregate = CaseAggregate.open({
       caseId: this.deps.ids.next('case'),
       name: input.name,
@@ -3927,6 +4063,7 @@ export class BaselineFlowService {
       expectedRevision: input.expectedRevision,
       scope: { allowedOrigins: [...new Set(allowed)], deniedOrigins: [...new Set(denied)], limits: input.limits },
     });
+    for (const role of this.loginFlows.keys()) this.invalidateRoleSession(role);
     const at = this.deps.clock.now().toISOString();
     this.record({ type: 'CaseScopeUpdated', at, caseId: outcome.record.caseId, revision: outcome.revision, narrowed: outcome.narrowed });
     if (outcome.invalidatedConfirmationIds.length > 0) {

@@ -30,6 +30,9 @@ export function validateLoginFlow(steps: readonly LoginFlowStep[]): { stepCount:
     if (step.kind === 'fill' && step.secretReference === undefined) {
       throw domainError('NeedsInput', 'fill step requires a secret reference (no inline secret values)');
     }
+    if (step.kind === 'assert' && (step.target === undefined || step.target.trim() === '')) {
+      throw domainError('ValidationFailed', 'assert step requires a non-empty login marker');
+    }
     if (step.kind === 'select' || step.kind === 'assertValue') {
       if (step.target?.trim() === '' || step.target === undefined) {
         throw domainError('ValidationFailed', `${step.kind} step requires a CSS selector target`);
@@ -52,7 +55,11 @@ export interface AuthDetectorInput {
 
 /** URL 一致だけでは認証済みとせず、assert 不一致は未認証 (F09-UT-002)。 */
 export function detectAuthState(input: AuthDetectorInput): 'authenticated' | 'unauthenticated' {
-  const urlMatches = input.finalUrl.startsWith(input.expectedUrlPrefix);
+  let urlMatches = false;
+  try {
+    urlMatches = new URL(input.finalUrl).origin === new URL(input.expectedUrlPrefix).origin
+      && input.finalUrl.startsWith(input.expectedUrlPrefix);
+  } catch { /* malformed or relative URLs never establish authentication */ }
   return urlMatches && input.assertResult ? 'authenticated' : 'unauthenticated';
 }
 
@@ -60,9 +67,7 @@ export function detectAuthState(input: AuthDetectorInput): 'authenticated' | 'un
  *  retry 2 回目は lockout 回避のため停止する (F09-UT-004)。 */
 export class SessionCoordinator {
   private readonly adapter: { refresh(role: string): Promise<string> };
-  private inFlight: Promise<string> | null = null;
-  private retries = 0;
-  private revision = 0;
+  private readonly states = new Map<string, { inFlight: Promise<string> | null; retries: number; revision: number }>();
   private adapterCallCount = 0;
 
   constructor(adapter: { refresh(role: string): Promise<string> }) {
@@ -74,24 +79,29 @@ export class SessionCoordinator {
   }
 
   async refresh(role: string): Promise<{ outcome: 'refreshed' | 'stopped-lockout-guard'; sessionRevision: number }> {
-    if (this.inFlight !== null) {
-      await this.inFlight;
-      return { outcome: 'refreshed', sessionRevision: this.revision };
+    let state = this.states.get(role);
+    if (state === undefined) {
+      state = { inFlight: null, retries: 0, revision: 0 };
+      this.states.set(role, state);
     }
-    if (this.retries >= LOGIN_FLOW_MAX_RETRIES) {
-      return { outcome: 'stopped-lockout-guard', sessionRevision: this.revision };
+    if (state.inFlight !== null) {
+      await state.inFlight;
+      return { outcome: 'refreshed', sessionRevision: state.revision };
+    }
+    if (state.retries >= LOGIN_FLOW_MAX_RETRIES) {
+      return { outcome: 'stopped-lockout-guard', sessionRevision: state.revision };
     }
     this.adapterCallCount += 1;
-    this.inFlight = this.adapter.refresh(role);
+    state.inFlight = this.adapter.refresh(role);
     try {
-      await this.inFlight;
-      this.revision += 1;
-      return { outcome: 'refreshed', sessionRevision: this.revision };
+      await state.inFlight;
+      state.revision += 1;
+      return { outcome: 'refreshed', sessionRevision: state.revision };
     } catch (cause) {
-      this.retries += 1;
+      state.retries += 1;
       throw cause;
     } finally {
-      this.inFlight = null;
+      state.inFlight = null;
     }
   }
 }
@@ -107,6 +117,10 @@ export class RoleSessionRegistry {
     }
     this.jars.set(role, { cookieNames });
     return { role, shared: false };
+  }
+
+  removeJar(role: string): void {
+    this.jars.delete(role);
   }
 
   jarOf(role: string): { cookieNames: readonly string[] } | undefined {

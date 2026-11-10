@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./scan-policy": "./src/scan/scan-policy-browser.ts"
+    "./scan-policy": "./src/scan/scan-policy-browser.ts",
+    "./authentication": "./src/case/authentication.ts"
   },
   "scripts": {
     "test": "node --test \"test/contract/**/*.test.ts\""

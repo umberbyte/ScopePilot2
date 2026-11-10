@@ -125,6 +125,8 @@ export interface NucleiScanPort {
 }
 
 export interface LoginExecutionInput {
+  /** Case context enforced by live browser request routing, including redirects/subrequests. */
+  readonly scope?: { readonly allowedOrigins: readonly string[]; readonly deniedOrigins: readonly string[] };
   /** 対象の base (login URL・期待 URL prefix の解決に使う)。 */
   readonly baseUrl: string;
   /** f09 の step DSL。fill の secretReference は secretValues の key として解決する。 */

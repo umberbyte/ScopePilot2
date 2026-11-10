@@ -1524,7 +1524,7 @@
     "/api/sessions/refresh": {
       "post": {
         "operationId": "refreshSession",
-        "summary": "session の refresh (single-flight・retry 2 回目は lockout 回避で停止)",
+        "summary": "Fixture-only refresh. With a login adapter configured, re-login is required instead.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6186,6 +6186,98 @@
                 "schema": {
                   "$ref": "#/components/schemas/FuzzRunView"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/authentication": {
+      "get": {
+        "operationId": "getAuthenticationConfiguration",
+        "summary": "Memory-only auth metadata and adapter capabilities. No credentials.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationConfiguration"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/authentication/users": {
+      "post": {
+        "operationId": "saveAuthenticationUser",
+        "summary": "Save user metadata; invalidates existing session. Non-Form methods are configuration-only.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "user"
+                  ],
+                  "properties": {
+                    "user": {
+                      "$ref": "#/components/schemas/AuthenticationUser"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthenticationUser"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/verify": {
+      "post": {
+        "operationId": "verifySession",
+        "summary": "Recheck stored browser state against expected URL, status and login markers. Discard invalid sessions.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionVerification"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -11234,6 +11326,193 @@
           "sent",
           "rows"
         ],
+        "additionalProperties": false
+      },
+      "AuthenticationUser": {
+        "type": "object",
+        "required": [
+          "role",
+          "displayName",
+          "authorizationRole",
+          "method",
+          "enabled"
+        ],
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "authorizationRole": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "Form",
+              "Bearer",
+              "Basic",
+              "ApiKey",
+              "Cookie",
+              "Manual"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SessionVerification": {
+        "type": "object",
+        "required": [
+          "role",
+          "state",
+          "checkedAt",
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "valid",
+              "expired",
+              "unverified"
+            ]
+          },
+          "checkedAt": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "adapter",
+              "unavailable"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AuthenticationCapabilities": {
+        "type": "object",
+        "required": [
+          "login",
+          "loginEngineVersion",
+          "verification",
+          "verificationEngineVersion",
+          "refresh",
+          "executableMethods",
+          "configurationStorage"
+        ],
+        "properties": {
+          "login": {
+            "type": "string",
+            "enum": [
+              "adapter",
+              "unavailable"
+            ]
+          },
+          "loginEngineVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verification": {
+            "type": "string",
+            "enum": [
+              "adapter",
+              "unavailable"
+            ]
+          },
+          "verificationEngineVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "refresh": {
+            "const": "fixture"
+          },
+          "executableMethods": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "Form",
+                "Bearer",
+                "Basic",
+                "ApiKey",
+                "Cookie",
+                "Manual"
+              ]
+            }
+          },
+          "configurationStorage": {
+            "const": "memory"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AuthenticationConfiguration": {
+        "type": "object",
+        "required": [
+          "capabilities",
+          "users",
+          "verifications",
+          "flows"
+        ],
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/AuthenticationCapabilities"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuthenticationUser"
+            }
+          },
+          "verifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionVerification"
+            }
+          },
+          "flows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "role",
+                "flowVersion",
+                "steps"
+              ],
+              "properties": {
+                "role": {
+                  "type": "string"
+                },
+                "flowVersion": {
+                  "type": "string"
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LoginFlowStep"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
         "additionalProperties": false
       }
     },
