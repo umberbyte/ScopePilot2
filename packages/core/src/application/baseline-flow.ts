@@ -3309,7 +3309,7 @@ export class BaselineFlowService {
               { url: response.requestUrl, method: replayRequest.method, status: response.status, contentType: response.contentType },
               this.deps.clock.now().toISOString(),
               'sequencer',
-              sent > 0 && collectionJob !== undefined,
+              this.deps.sequencerTransport?.adapterKind === 'fixture' || this.deps.sequencerTransport === undefined || (sent > 0 && collectionJob !== undefined),
             );
           },
         });

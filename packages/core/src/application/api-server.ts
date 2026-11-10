@@ -342,7 +342,7 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         service.validateJobScan(operator, plan, confirmation);
         const registry = service.jobs;
         const jobId = registry.create({ kind: 'active-scan', label: 'Active scan', planHash: confirmation.planHash,
-          ...(role === undefined ? {} : { role }), guarantee: 'Mixed', transport: service.scanTransport(), budgetLimit: plan.limits.maxRequests });
+          ...(role === undefined ? {} : { role }), guarantee: 'Mixed', transport: service.scanTransport(), budgetLimit: plan.limits?.maxRequests });
         void registry.execute(jobId, signal => service.runActiveScan(operator, plan, confirmation, adopted, role, {
           signal,
           onEvent: event => registry.recordScanEvent(jobId, event),

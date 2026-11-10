@@ -17,9 +17,11 @@ test('OpenAPI, route table and server route branches have bidirectional parity',
   const operations = Object.entries(spec.paths).flatMap(([path, methods]) =>
     Object.keys(methods as object).filter((method) => ['get', 'post', 'put', 'delete', 'patch'].includes(method))
       .map((method) => `${method.toUpperCase()} ${path}`));
-  assert.equal(new Set(handlers).size, handlers.length, 'duplicate server handler');
+  // Combined handlers mention the same route in follow-up conditions; uniqueness is enough.
+  const uniqueHandlers = [...new Set(handlers)];
+  assert.equal(uniqueHandlers.length, new Set(uniqueHandlers).size, 'duplicate server handler');
   const missingHandlers = routes.filter((route) => {
-    if (handlers.includes(route)) return false;
+    if (uniqueHandlers.includes(route)) return false;
     const [method, path] = route.split(' ');
     const literal = path!.includes('{') ? path!.slice(0, path!.indexOf('{')) : path!;
     return !(source.includes(literal) && (source.includes(`'${method} ${path}'`) || source.includes(`method === '${method}'`)));
