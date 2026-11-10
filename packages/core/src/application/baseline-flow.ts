@@ -3305,12 +3305,15 @@ export class BaselineFlowService {
           }),
           onResponse: (response) => {
             recordSample(response);
-            this.recordObservedExchange(
-              { url: response.requestUrl, method: replayRequest.method, status: response.status, contentType: response.contentType },
-              this.deps.clock.now().toISOString(),
-              'sequencer',
-              this.deps.sequencerTransport?.adapterKind === 'fixture' || this.deps.sequencerTransport === undefined || (sent > 0 && collectionJob !== undefined),
-            );
+            const synthetic = this.deps.sequencerTransport?.adapterKind === 'fixture' || this.deps.sequencerTransport === undefined;
+            if (!synthetic) {
+              this.recordObservedExchange(
+                { url: response.requestUrl, method: replayRequest.method, status: response.status, contentType: response.contentType },
+                this.deps.clock.now().toISOString(),
+                'sequencer',
+                sent > 0 && collectionJob !== undefined,
+              );
+            }
           },
         });
       } catch (cause) {

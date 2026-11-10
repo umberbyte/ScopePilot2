@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ActiveScanExecutionEvent } from './baseline-flow.ts';
-import { DomainError, type JobSummary, type JobState, type JobEvent, type JobCounters, type BaselineFlowEvent } from '@scopepilot2/contracts';
+import { DomainError, type JobSummary, type JobState, type JobEvent, type JobCounters, type BaselineFlowEvent, type StopReason } from '@scopepilot2/contracts';
 
 export interface StoredJob { readonly summary: JobSummary; readonly result?: unknown; readonly error?: string }
 export interface JobStore {
@@ -71,13 +71,15 @@ export class JobRegistry {
     this.emit(id, { category: 'lifecycle', messageKey: 'job.state.changed', message: 'Queued', params: { state: 'Queued' } });
     return id;
   }
-  transition(id: string, state: JobState): void {
+  transition(id: string, state: JobState, stopReason?: StopReason): void {
     const job = this.require(id);
     if (!transitions[job.summary.state].includes(state)) throw new DomainError('Conflict', `invalid job transition ${job.summary.state} -> ${state}`);
     const terminal = !this.active(state);
     if (terminal) this.flushBatch(id);
+    const reason = stopReason ?? (state === 'Completed' ? 'completed' : state === 'Interrupted' ? 'interrupted' : state === 'Failed' ? 'engine-failure' : state === 'Stopping' || state === 'Stopped' ? 'user-request' : undefined);
     job.summary = { ...job.summary, state, ...(state === 'Running' ? { startedAt: new Date().toISOString() } : {}),
-      ...(terminal ? { endedAt: new Date().toISOString(), stopReason: state === 'Completed' ? 'completed' : state === 'Interrupted' ? 'interrupted' : state === 'Failed' ? 'engine-failure' : 'user-request' } : {}) };
+      ...(terminal ? { endedAt: new Date().toISOString() } : {}),
+      ...(reason !== undefined && (terminal || state === 'Stopping') ? { stopReason: reason } : {}) };
     this.emit(id, { category: 'lifecycle', messageKey: 'job.state.changed', message: state, params: { state } });
     if (terminal) this.controllers.delete(id);
   }
@@ -107,7 +109,9 @@ export class JobRegistry {
       try {
         const result = await operation(controller.signal);
         this.require(id).result = result;
-        this.transition(id, controller.signal.aborted ? 'Stopped' : 'Completed');
+        const recorded = (result as { runRecord?: { state?: JobState; stopReason?: StopReason } } | undefined)?.runRecord;
+        const completed = recorded?.state === 'Failed' || recorded?.state === 'Stopped' || recorded?.state === 'Completed' ? recorded.state : 'Completed';
+        this.transition(id, controller.signal.aborted && completed === 'Completed' ? 'Stopped' : completed, recorded?.stopReason);
       } catch (cause) {
         this.require(id).error = redactJobText(cause instanceof Error ? cause.message : String(cause));
         if (!controller.signal.aborted && !(cause instanceof DomainError && cause.code === 'Cancelled')) this.emit(id, { category: 'error', level: 'error', messageKey: 'job.error', message: this.require(id).error!, params: {} });
