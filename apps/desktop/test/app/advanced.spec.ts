@@ -4,7 +4,8 @@ import { hashStable } from '@scopepilot2/contracts';
 
 /**
  * Advanced モードの実 DOM 検証。`docs/detailed-design/02-ui-information-architecture.md` §3。
- * A01〜A13 ナビ・A01 Dashboard (案件・能力表・Interrupted 検出)・A12 監査 event を確認する。
+ * 目的別 9 グループのナビ (design/40 §3)・A01 概要 (案件・能力表・Interrupted 検出)・A70 監査 event を確認する。
+ * 各 test 名の画面番号 (A01〜A13) は再編前の ID。ナビは新 ID (design/40 §3.2) で辿る。
  */
 let app: ElectronApplication;
 let page: Page;
@@ -20,11 +21,13 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test('A01〜A13 のナビが表示され、A01 が既定の着地画面', async () => {
+test('目的別 9 グループのナビが表示され、A01 概要が既定の着地画面', async () => {
   const nav = page.getByRole('navigation', { name: 'Advanced 画面ナビ' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('button')).toHaveCount(16);
-  await expect(page.getByText('A13 Settings / Certificates / Engines / AI')).toBeVisible();
+  await expect(nav.getByRole('button')).toHaveCount(33);
+  await expect(nav.getByRole('group')).toHaveCount(9);
+  await expect(nav.getByRole('group', { name: '設定' }).getByRole('button', { name: /^A94 AI 支援/ })).toBeVisible();
+  await expect(nav.getByRole('button', { name: /^A01 概要/ })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByText('外部 engine 能力 (保証等級)')).toBeVisible();
 });
 
@@ -40,13 +43,13 @@ test('A01: 案件を作成すると案件情報と能力表 (保証等級) が�
 });
 
 test('A12: 監査 event に案件作成が記録されている', async () => {
-  await page.getByRole('button', { name: /A12 Jobs \/ Evidence \/ Audit/ }).click();
+  await page.getByRole('button', { name: /^A70 ジョブ/ }).click();
   await expect(page.getByText(/監査 event \(\d+ 件\)/)).toBeVisible();
   await expect(page.getByText(/CaseCreated/)).toBeVisible();
 });
 
 test('A02: scope を編集して保存し、競合時は再読込を案内する', async () => {
-  await page.getByRole('button', { name: /A02 Scope & Authorization/ }).click();
+  await page.getByRole('button', { name: /^A02 スコープ・認可/ }).click();
   // 認可は A01 の案件作成で付与済み。有効期間と許可操作を表示する。
   await expect(page.getByText(/認可: 付与済み/)).toBeVisible();
   await expect(page.getByText(/Browse, ActiveScan/)).toBeVisible();
@@ -110,7 +113,7 @@ test('A11: 所見一覧から確定/棄却でき、報告書を生成できる',
     const scanConfirmation = await post<{ confirmationId: string }>('/api/plan/confirm', { plan: scan.plan });
     await post('/api/run/scan', { plan: scan.plan, confirmation: scanConfirmation, adopted: exploreRun.candidates });
   });
-  await page.getByRole('button', { name: /A11 Findings \/ Organizer \/ Report/ }).click();
+  await page.getByRole('button', { name: /^A60 所見/ }).click();
   await expect(page.getByText(/所見 \(\d+ 件\)/)).toBeVisible();
   // engine 由来の所見は実影響未確認ラベルと候補状態で出る。
   await expect(page.getByText(/\[実影響未確認\]/).first()).toBeVisible();
@@ -127,7 +130,7 @@ test('A11: 所見一覧から確定/棄却でき、報告書を生成できる',
 });
 
 test('A08: 上限を狭めた探索計画を構築・確認・実行し、診断まで実行できる', async () => {
-  await page.getByRole('button', { name: /A08 Scan plans/ }).click();
+  await page.getByRole('button', { name: /^A40 能動診断/ }).click();
 
   // 入力文書の hint を登録すると、以後の探索計画へ許可内 URL が統合される。
   await page.getByLabel('文書 label').fill('操作手順書 (app test)');
@@ -234,7 +237,7 @@ test('A04: site map に観測一覧と scope 拒否が表示される', async ()
       });
     }
   });
-  await page.getByRole('button', { name: /A04 Browser \/ Site map/ }).click();
+  await page.getByRole('button', { name: /^A20 サイトマップ/ }).click();
   // A08 の探索で観測済み (fixture home とその配下)。
   await expect(page.getByText(/観測済み page \(\d+ 件\)/)).toBeVisible();
   await expect(page.getByRole('cell', { name: 'http://fixture.target.test/' }).first()).toBeVisible();
@@ -262,7 +265,7 @@ test('A04: site map に観測一覧と scope 拒否が表示される', async ()
 });
 
 test('A03: catalog の診断項目をガイドライン切替・絞り込み・詳細表示できる', async () => {
-  await page.getByRole('button', { name: /A03 Guidelines & Check Catalog/ }).click();
+  await page.getByRole('button', { name: /^A03 ガイドライン・カバレッジ/ }).click();
   // 成果物の計数と由来 (catalog hash・元資料) が見える。
   await expect(page.getByText(/診断項目 769・ZAP rule 102・ZAP 非対応 theme 92/)).toBeVisible();
   await expect(page.getByText(/catalog hash: /)).toBeVisible();
@@ -282,7 +285,7 @@ test('A03: catalog の診断項目をガイドライン切替・絞り込み・�
 });
 
 test('A13: engine 能力の詳細 (overshoot・測定時刻・fixture hash) と現状開示を表示する', async () => {
-  await page.getByRole('button', { name: /A13 Settings \/ Certificates/ }).click();
+  await page.getByRole('button', { name: /^A90 エンジン・ランタイム/ }).click();
   await expect(page.getByText(/保証等級 — Enforced: /)).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'overshoot 上限比' })).toBeVisible();
   await expect(page.getByRole('cell', { name: '5%' }).first()).toBeVisible();
@@ -310,7 +313,7 @@ test('A13: engine 能力の詳細 (overshoot・測定時刻・fixture hash) と�
 });
 
 test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができる', async () => {
-  await page.getByRole('button', { name: /A10 Decoder \/ Comparer/ }).click();
+  await page.getByRole('button', { name: /^A50 Decoder/ }).click();
 
   // base64 → url の chain 復号。
   await page.getByLabel('入力 (text)').fill('SGVsbG8lMjAlMjZQaWxvdCE=');
@@ -479,7 +482,7 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
 });
 
 test('A05: break queue の受付・転送・破棄と対象外 URL の拒否を扱う', async () => {
-  await page.getByRole('button', { name: /A05 Proxy \/ Intercept/ }).click();
+  await page.getByRole('button', { name: /^A30 Proxy・Intercept/ }).click();
   await expect(page.getByText(/break queue \(0 件・保持中 0 件\)/)).toBeVisible();
 
   // 対象内 URL へ転送すると Forwarded になる。
@@ -505,7 +508,7 @@ test('A05: break queue の受付・転送・破棄と対象外 URL の拒否を�
 });
 
 test('A06: Repeater draft を編集し表示 hash で確認送信する', async () => {
-  await page.getByRole('button', { name: /A06 Repeater/ }).click();
+  await page.getByRole('button', { name: /^A31 Repeater/ }).click();
   await page.getByRole('button', { name: '新規 draft を作る' }).click();
   // A04 test が seed 用 draft を残しているため、作成した最新 tab を明示的に選ぶ。
   await expect(page.getByRole('button', { name: /draft-\d+ \(r1\)/ })).toHaveCount(2, { timeout: 30_000 });
@@ -560,7 +563,7 @@ test('A06: Repeater draft を編集し表示 hash で確認送信する', async 
 });
 
 test('A07: payload 集合を登録し fuzz を実行して cluster 集約を見る', async () => {
-  await page.getByRole('button', { name: /A07 Fuzzer/ }).click();
+  await page.getByRole('button', { name: /^A32 Fuzzer/ }).click();
 
   // 供給元・版・license を添えて payload 集合を登録する。
   await page.getByLabel('名前').fill('xss-basic');
@@ -589,7 +592,7 @@ test('A07: payload 集合を登録し fuzz を実行して cluster 集約を見�
 });
 
 test('A09: login flow を登録し session refresh と cookie jar 割当を行う', async () => {
-  await page.getByRole('button', { name: /A09 Sessions/ }).click();
+  await page.getByRole('button', { name: /^A10 ロール・ログイン/ }).click();
 
   // A08 で登録した認証情報 hint が「文書の記載 (未確認)」として参照できる。
   await expect(page.getByText('文書の記載 (未確認・値は持たない): 操作手順書 (app test): admin は Form (p.13 管理者ログイン)')).toBeVisible({ timeout: 30_000 });
@@ -608,7 +611,7 @@ test('A09: login flow を登録し session refresh と cookie jar 割当を行�
   // 認証付き探索 (design/f09): A08 で role を指定すると認証後のみ見える頁が観測できる。
   // menu.php は link を持たないが、A08 test で登録した hint (setup.php) が home へ
   // link するため観測は 6 件 (menu・setup・home・login・xss・sqli)・候補 9 (form 3 含む)。
-  await page.getByRole('button', { name: /A08 Scan plans/ }).click();
+  await page.getByRole('button', { name: /^A40 能動診断/ }).click();
   await page.getByLabel('開始 URL (1行1件)').fill('http://fixture.target.test/authenticated/menu.php');
   await page.getByLabel('探索 session の role (任意・A09 で login 済みの role。空なら非認証)').fill('admin');
   await page.getByRole('button', { name: '探索計画を構築する' }).click();
@@ -617,7 +620,7 @@ test('A09: login flow を登録し session refresh と cookie jar 割当を行�
   await expect(page.getByText('探索完了: 観測 6 件・候補 9 件・scope 外拒否 1 件')).toBeVisible({ timeout: 30_000 });
 
   // A09 に戻して session 系の操作を続ける。
-  await page.getByRole('button', { name: /A09 Sessions/ }).click();
+  await page.getByRole('button', { name: /^A10 ロール・ログイン/ }).click();
 
   // cookie jar を割り当て、session を refresh すると revision が進む。
   await page.getByRole('button', { name: 'cookie jar を割り当てる' }).click();
@@ -681,7 +684,7 @@ test('キーボードだけでモードと画面ナビを操作できる (design
   await expect(page.getByRole('navigation', { name: 'Advanced 画面ナビ' })).toBeVisible();
 
   // ナビも keyboard で画面切替できる。
-  const a02 = page.getByRole('button', { name: /A02 Scope & Authorization/ });
+  const a02 = page.getByRole('button', { name: /^A02 スコープ・認可/ });
   await a02.focus();
   await page.keyboard.press('Enter');
   await expect(page.getByText(/Scope \(現在 revision \d+\)/)).toBeVisible();
@@ -765,9 +768,12 @@ test('明示テーマを選択でき、dark で純黒文字や未着色 viewport
   }
 
   await page.getByRole('button', { name: 'アドバンスド' }).click();
-  for (let index = 1; index <= 13; index += 1) {
-    const screenId = `A${String(index).padStart(2, '0')}`;
-    await page.getByRole('button', { name: new RegExp(`^${screenId} `) }).click();
+  const navButtons = page.getByRole('navigation', { name: 'Advanced 画面ナビ' }).getByRole('button');
+  const navCount = await navButtons.count();
+  for (let index = 0; index < navCount; index += 1) {
+    const button = navButtons.nth(index);
+    const screenId = ((await button.textContent()) ?? '').trim().slice(0, 3);
+    await button.click();
     const screenBlackText = await visibleBlackText();
     if (screenBlackText.length > 0) {
       violations.push({ screen: screenId, text: screenBlackText });
