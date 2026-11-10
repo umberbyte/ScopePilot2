@@ -19,6 +19,7 @@ import { ProxyInterceptScreen } from './proxy-intercept-screen.tsx';
 import { RepeaterScreen } from './repeater-screen.tsx';
 import { FuzzerScreen } from './fuzzer-screen.tsx';
 import { PassiveScreen } from './passive-screen.tsx';
+import { EvidenceScreen, FindingsScreen, ReportScreen } from './results-screen.tsx';
 import { SessionsScreen } from './sessions-screen.tsx';
 import { ActiveScanScreen } from './active-scan-screen.tsx';
 import { ScanPolicyScreen } from './scan-policy-screen.tsx';
@@ -49,6 +50,8 @@ type ScreenHost =
   | 'comparerOnly'
   | 'sequencerOnly'
   | 'findings'
+  | 'evidence'
+  | 'report'
   | 'audit'
   | 'settings';
 
@@ -78,7 +81,8 @@ const SCREEN_HOSTS: Partial<Record<AdvancedRoute, ScreenHost>> = {
   'adv.tools.comparer': 'comparerOnly',
   'adv.tools.sequencer': 'sequencerOnly',
   'adv.results.findings': 'findings',
-  'adv.results.report': 'findings',
+  'adv.results.evidence': 'evidence',
+  'adv.results.report': 'report',
   'adv.ops.jobs': 'audit',
   'adv.ops.audit': 'audit',
   'adv.settings.engines': 'settings',
@@ -380,157 +384,6 @@ function ScopeAuthorizationScreen({ apiBase }: { apiBase: string }): React.React
       ) : (
         <Text>{t('common.loading')}</Text>
       )}
-    </div>
-  );
-}
-
-/** A11 が表示する所見の全体形 (contracts.Finding の表示に必要な部分)。 */
-interface FindingView {
-  readonly findingId: string;
-  readonly title: string;
-  readonly severity: string;
-  readonly url: string;
-  readonly method?: string;
-  readonly occurrences: number;
-  readonly status: string;
-  readonly source: { readonly unverified: boolean; readonly engineVersion?: string };
-}
-
-/** A11 Findings / Organizer / Report。所見一覧・確認状態 (確定/棄却)・報告書生成。 */
-function FindingsOrganizerScreen({ apiBase }: { apiBase: string }): React.ReactElement {
-  const styles = useStyles();
-  const [findings, setFindings] = useState<readonly FindingView[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [reportContent, setReportContent] = useState('');
-  const [reviewNotes, setReviewNotes] = useState('');
-  const [severityRationale, setSeverityRationale] = useState('');
-  const [cvssVector, setCvssVector] = useState('');
-  const [cvssScore, setCvssScore] = useState('');
-
-  const load = useCallback(async () => {
-    try {
-      const body = await callJson<{ findings: readonly FindingView[] }>(apiBase, 'GET', '/api/findings');
-      setFindings(body.findings);
-      setLoaded(true);
-    } catch (cause) {
-      setError(String(cause));
-    }
-  }, [apiBase]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const changeStatus = useCallback(async (findingId: string, next: 'confirmed' | 'rejected') => {
-    setBusy(true);
-    setError('');
-    try {
-      await callJson(apiBase, 'POST', '/api/findings/status', {
-        findingId,
-        status: next,
-        reproduction: next === 'confirmed' ? 'reproduced' : 'not-reproduced',
-        notes: reviewNotes,
-        severityRationale,
-        ...(cvssVector.trim() === '' && cvssScore.trim() === '' ? {} : {
-          cvssVersion: '3.1', cvssVector: cvssVector.trim(), cvssScore: Number(cvssScore),
-        }),
-      });
-      await load();
-    } catch (cause) {
-      setError(String(cause));
-    } finally {
-      setBusy(false);
-    }
-  }, [apiBase, cvssScore, cvssVector, load, reviewNotes, severityRationale]);
-
-  const generateReport = useCallback(async () => {
-    setBusy(true);
-    setError('');
-    try {
-      const report = await callJson<{ content: string }>(apiBase, 'POST', '/api/report', { guidelines: ['OWASP WSTG 4.2'] });
-      setReportContent(report.content);
-    } catch (cause) {
-      setError(String(cause));
-    } finally {
-      setBusy(false);
-    }
-  }, [apiBase]);
-
-  const statusLabel = (status: string): string =>
-    ({ candidate: t('a11.status.candidate'), confirmed: t('a11.status.confirmed'), rejected: t('a11.status.rejected'), merged: t('a11.status.merged') })[status] ?? status;
-
-  return (
-    <div className={styles.section}>
-      <Text weight="semibold">{t('a11.findingsTitle', { count: findings.length })}</Text>
-      {error !== '' && (
-        <MessageBar intent="error">
-          {`Error: ${error}`}
-        </MessageBar>
-      )}
-      {findings.length === 0 ? (
-        loaded && <Text className={styles.muted}>{t('a11.empty')}</Text>
-      ) : (
-        <>
-        <div className={styles.section}>
-          <Text weight="semibold">人による検証記録（確定・誤検知判定の前に入力）</Text>
-          <Field label="再現確認・誤検知判定のメモ" required><Textarea value={reviewNotes} onChange={(_, data) => setReviewNotes(data.value)} /></Field>
-          <Field label="深刻度の根拠" required><Textarea value={severityRationale} onChange={(_, data) => setSeverityRationale(data.value)} /></Field>
-          <Field label="CVSS v3.1 ベクタ（任意）"><Input value={cvssVector} onChange={(_, data) => setCvssVector(data.value)} /></Field>
-          <Field label="CVSS スコア（任意）"><Input type="number" min={0} max={10} step={0.1} value={cvssScore} onChange={(_, data) => setCvssScore(data.value)} /></Field>
-        </div>
-        <Table size="small" aria-label={t('a11.table.aria')}>
-          <TableHeader>
-            <TableRow>
-              <TableHeaderCell>severity</TableHeaderCell>
-              <TableHeaderCell>title</TableHeaderCell>
-              <TableHeaderCell>URL</TableHeaderCell>
-              <TableHeaderCell>{t('a11.col.observations')}</TableHeaderCell>
-              <TableHeaderCell>{t('common.col.state')}</TableHeaderCell>
-              <TableHeaderCell>{t('common.col.actions')}</TableHeaderCell>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {findings.map((finding) => (
-              <TableRow key={finding.findingId}>
-                <TableCell>{finding.severity}</TableCell>
-                <TableCell>{finding.title}</TableCell>
-                <TableCell>
-                  {finding.url}
-                  {finding.method === undefined ? '' : ` (${finding.method})`}
-                  {finding.source.unverified ? t('a11.unverified') : ''}
-                </TableCell>
-                <TableCell>{t('a11.occurrences', { count: finding.occurrences })}</TableCell>
-                <TableCell>{statusLabel(finding.status)}</TableCell>
-                <TableCell>
-                  <Button
-                    size="small"
-                    disabled={busy || finding.status === 'confirmed' || finding.status === 'merged'}
-                    onClick={() => void changeStatus(finding.findingId, 'confirmed')}
-                  >
-                    {t('a11.confirm')}
-                  </Button>
-                  <Button
-                    size="small"
-                    disabled={busy || finding.status === 'rejected' || finding.status === 'merged'}
-                    onClick={() => void changeStatus(finding.findingId, 'rejected')}
-                  >
-                    {t('a11.reject')}
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-        </>
-      )}
-      <div className={styles.section}>
-        <Button appearance="primary" disabled={busy} onClick={() => void generateReport()}>
-          {t('a11.generateReport')}
-        </Button>
-        {reportContent !== '' && <Text block>{reportContent}</Text>}
-      </div>
     </div>
   );
 }
@@ -1243,6 +1096,8 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
     // TODO: ジョブ詳細画面 (A70) へ遷移
     console.log('Job clicked:', jobId);
   }, []);
+  const [resultFindingId, setResultFindingId] = useState('');
+  const [resultEvidenceId, setResultEvidenceId] = useState('');
 
   const activeItem = items.find((item) => item.route === activeRoute);
   const host = SCREEN_HOSTS[activeRoute];
@@ -1381,7 +1236,7 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
           </div>
         )}
         {host === 'scope' && <ScopeAuthorizationScreen apiBase={apiBase} />}
-        {host === 'findings' && <FindingsOrganizerScreen apiBase={apiBase} />}
+        {host === 'findings' && <FindingsScreen apiBase={apiBase} findingId={resultFindingId || undefined} onEvidence={(id) => { setResultEvidenceId(id); setActiveRoute('adv.results.evidence'); }} />}
         {host === 'scanPlans' && <ScanPlansScreen apiBase={apiBase} />}
         {host === 'activeScan' && <ActiveScanScreen apiBase={apiBase} />}
         {host === 'scanPolicy' && <ScanPolicyScreen apiBase={apiBase} />}
@@ -1398,6 +1253,8 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {host === 'decoderOnly' && <DecoderScreen apiBase={apiBase} />}
         {host === 'comparerOnly' && <ComparerScreen apiBase={apiBase} />}
         {host === 'sequencerOnly' && <DecoderComparerScreen apiBase={apiBase} sequencerOnly />}
+        {host === 'evidence' && <EvidenceScreen apiBase={apiBase} evidenceId={resultEvidenceId || undefined} onFinding={(id) => { setResultFindingId(id); setActiveRoute('adv.results.findings'); }} />}
+        {host === 'report' && <ReportScreen apiBase={apiBase} />}
         {host === 'settings' && <SettingsScreen apiBase={apiBase} />}
         {host === undefined && <Text className={styles.muted}>{t('nav.pendingScreen')}</Text>}
       </div>

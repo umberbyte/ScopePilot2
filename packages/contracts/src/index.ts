@@ -11,6 +11,7 @@ export * from './scan/scan.ts';
 export * from './scan/scan-policy.ts';
 export * from './scan/scan-policy-hash.ts';
 export * from './findings/findings.ts';
+export * from './findings/evidence.ts';
 export * from './report/report.ts';
 export * from './documents/documents.ts';
 export * from './events/events.ts';

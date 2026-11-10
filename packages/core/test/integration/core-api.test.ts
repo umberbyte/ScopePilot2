@@ -2059,7 +2059,12 @@ describe('Core API server (node:http)', () => {
       }),
     });
     assert.equal(scanResponse.status, 200);
-    const scanBody = (await scanResponse.json()) as { findings: readonly { findingId: string; status: string; source: { unverified: boolean } }[] };
+    // Seed this test explicitly: FakeScanEngine deliberately returns no alerts.
+    await service.importNucleiResults(TEST_OPERATOR, {
+      engineVersion: 'fixture-review-1',
+      lines: ['{"template-id":"review-fixture","matched-at":"http://fixture.target.test/review","info":{"severity":"high","name":"Review fixture"}}'],
+    });
+    const scanBody = { findings: service.listFindings() } as { findings: readonly { findingId: string; status: string; source: { unverified: boolean } }[] };
     assert.ok(scanBody.findings.length > 0, '診断で所見が 1 件以上作られる');
 
     const listResponse = await fetch(`${baseUrl}/api/findings`);
@@ -2072,7 +2077,7 @@ describe('Core API server (node:http)', () => {
     const updateResponse = await fetch(`${baseUrl}/api/findings/status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ findingId: target?.findingId, status: 'confirmed' }),
+      body: JSON.stringify({ findingId: target?.findingId, status: 'confirmed', reproduction: 'reproduced', notes: 'Human reproduced the finding', severityRationale: 'Verified impact', cvssVersion: '', cvssVector: '' }),
     });
     assert.equal(updateResponse.status, 200);
     const updated = (await updateResponse.json()) as { finding: { status: string } };
@@ -2094,7 +2099,7 @@ describe('Core API server (node:http)', () => {
     const same = await fetch(`${baseUrl}/api/findings/status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ findingId: target?.findingId, status: 'confirmed' }),
+      body: JSON.stringify({ findingId: target?.findingId, status: 'confirmed', reproduction: 'reproduced', notes: 'Human reproduced the finding', severityRationale: 'Verified impact', cvssVersion: '', cvssVector: '' }),
     });
     assert.equal(same.status, 400);
 

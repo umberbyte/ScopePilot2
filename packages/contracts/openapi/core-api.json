@@ -2790,15 +2790,31 @@
                   "properties": {
                     "transport": {
                       "type": "string",
-                      "enum": ["real", "fixture", "unavailable"]
+                      "enum": [
+                        "real",
+                        "fixture",
+                        "unavailable"
+                      ]
                     },
                     "provider": {
                       "type": "string",
-                      "enum": ["interactsh", "fixture", "unavailable"]
+                      "enum": [
+                        "interactsh",
+                        "fixture",
+                        "unavailable"
+                      ]
                     },
                     "supportedProtocols": {
                       "type": "array",
-                      "items": { "type": "string", "enum": ["http", "dns", "smtp", "icmp"] }
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "http",
+                          "dns",
+                          "smtp",
+                          "icmp"
+                        ]
+                      }
                     },
                     "attempts": {
                       "type": "array",
@@ -2848,7 +2864,11 @@
                           },
                           "transport": {
                             "type": "string",
-                            "enum": ["real", "fixture", "unavailable"]
+                            "enum": [
+                              "real",
+                              "fixture",
+                              "unavailable"
+                            ]
                           }
                         },
                         "additionalProperties": false
@@ -2858,16 +2878,58 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["eventId", "attemptId", "protocol", "recordedAt", "rawHash", "correlation", "transport"],
+                        "required": [
+                          "eventId",
+                          "attemptId",
+                          "protocol",
+                          "recordedAt",
+                          "rawHash",
+                          "correlation",
+                          "transport"
+                        ],
                         "properties": {
-                          "eventId": { "type": "string" },
-                          "attemptId": { "type": ["string", "null"] },
-                          "protocol": { "type": "string", "enum": ["http", "dns", "smtp", "icmp"] },
-                          "remoteAddress": { "type": "string" },
-                          "recordedAt": { "type": "string" },
-                          "rawHash": { "type": "string" },
-                          "correlation": { "type": "string", "enum": ["correlated", "uncorrelated"] },
-                          "transport": { "type": "string", "enum": ["real", "fixture", "unavailable"] }
+                          "eventId": {
+                            "type": "string"
+                          },
+                          "attemptId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "protocol": {
+                            "type": "string",
+                            "enum": [
+                              "http",
+                              "dns",
+                              "smtp",
+                              "icmp"
+                            ]
+                          },
+                          "remoteAddress": {
+                            "type": "string"
+                          },
+                          "recordedAt": {
+                            "type": "string"
+                          },
+                          "rawHash": {
+                            "type": "string"
+                          },
+                          "correlation": {
+                            "type": "string",
+                            "enum": [
+                              "correlated",
+                              "uncorrelated"
+                            ]
+                          },
+                          "transport": {
+                            "type": "string",
+                            "enum": [
+                              "real",
+                              "fixture",
+                              "unavailable"
+                            ]
+                          }
                         },
                         "additionalProperties": false
                       }
@@ -2955,7 +3017,11 @@
                     },
                     "transport": {
                       "type": "string",
-                      "enum": ["real", "fixture", "unavailable"]
+                      "enum": [
+                        "real",
+                        "fixture",
+                        "unavailable"
+                      ]
                     }
                   },
                   "additionalProperties": false
@@ -3084,27 +3150,74 @@
                   "properties": {
                     "transport": {
                       "type": "string",
-                      "enum": ["real", "fixture", "unavailable"]
+                      "enum": [
+                        "real",
+                        "fixture",
+                        "unavailable"
+                      ]
                     },
                     "implementation": {
                       "type": "string",
-                      "enum": ["node-websocket", "fixture", "unavailable"]
+                      "enum": [
+                        "node-websocket",
+                        "fixture",
+                        "unavailable"
+                      ]
                     },
                     "connections": {
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["connectionId", "logicalSessionId", "targetUrl", "transport", "state", "openedAt", "sentFrames", "receivedFrames"],
+                        "required": [
+                          "connectionId",
+                          "logicalSessionId",
+                          "targetUrl",
+                          "transport",
+                          "state",
+                          "openedAt",
+                          "sentFrames",
+                          "receivedFrames"
+                        ],
                         "properties": {
-                          "connectionId": { "type": "string" },
-                          "logicalSessionId": { "type": "string" },
-                          "targetUrl": { "type": "string" },
-                          "transport": { "type": "string", "enum": ["real", "fixture", "unavailable"] },
-                          "state": { "type": "string", "enum": ["closed", "failed", "imported"] },
-                          "openedAt": { "type": "string" },
-                          "sentFrames": { "type": "integer", "minimum": 0 },
-                          "receivedFrames": { "type": "integer", "minimum": 0 },
-                          "negotiatedSubprotocol": { "type": "string" }
+                          "connectionId": {
+                            "type": "string"
+                          },
+                          "logicalSessionId": {
+                            "type": "string"
+                          },
+                          "targetUrl": {
+                            "type": "string"
+                          },
+                          "transport": {
+                            "type": "string",
+                            "enum": [
+                              "real",
+                              "fixture",
+                              "unavailable"
+                            ]
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "closed",
+                              "failed",
+                              "imported"
+                            ]
+                          },
+                          "openedAt": {
+                            "type": "string"
+                          },
+                          "sentFrames": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "receivedFrames": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "negotiatedSubprotocol": {
+                            "type": "string"
+                          }
                         },
                         "additionalProperties": false
                       }
@@ -3153,7 +3266,11 @@
                           },
                           "transport": {
                             "type": "string",
-                            "enum": ["real", "fixture", "unavailable"]
+                            "enum": [
+                              "real",
+                              "fixture",
+                              "unavailable"
+                            ]
                           }
                         },
                         "additionalProperties": false
@@ -3330,7 +3447,11 @@
                     },
                     "transport": {
                       "type": "string",
-                      "enum": ["real", "fixture", "unavailable"]
+                      "enum": [
+                        "real",
+                        "fixture",
+                        "unavailable"
+                      ]
                     },
                     "connectionId": {
                       "type": "string"
@@ -6385,6 +6506,112 @@
           }
         }
       }
+    },
+    "/api/evidence": {
+      "get": {
+        "operationId": "listEvidence",
+        "summary": "Original evidence metadata and conservative display derivatives; never original content or storage paths",
+        "parameters": [
+          {
+            "name": "evidenceId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Evidence projections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "evidence"
+                  ],
+                  "properties": {
+                    "evidence": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EvidenceView"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "case.read required"
+          }
+        }
+      }
+    },
+    "/api/findings/merge": {
+      "post": {
+        "operationId": "mergeFindings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "findingId",
+                  "intoFindingId",
+                  "reason"
+                ],
+                "properties": {
+                  "findingId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "intoFindingId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Merged source and destination; no automatic verification transfer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "findings"
+                  ],
+                  "properties": {
+                    "findings": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Finding"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid merge"
+          },
+          "403": {
+            "description": "finding.confirm required"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7955,6 +8182,93 @@
           },
           "passive": {
             "$ref": "#/components/schemas/PassiveObservation"
+          },
+          "humanReview": {
+            "type": "object",
+            "required": [
+              "result",
+              "reproduction",
+              "reviewedBy",
+              "reviewedAt",
+              "notes",
+              "severityRationale"
+            ],
+            "properties": {
+              "result": {
+                "enum": [
+                  "confirmed",
+                  "false-positive"
+                ]
+              },
+              "reproduction": {
+                "enum": [
+                  "reproduced",
+                  "not-reproduced"
+                ]
+              },
+              "reviewedBy": {
+                "type": "string"
+              },
+              "reviewedAt": {
+                "type": "string"
+              },
+              "notes": {
+                "type": "string"
+              },
+              "severityRationale": {
+                "type": "string"
+              },
+              "cvss": {
+                "type": "object",
+                "required": [
+                  "version",
+                  "vector",
+                  "score"
+                ],
+                "properties": {
+                  "version": {
+                    "enum": [
+                      "3.1",
+                      "4.0"
+                    ]
+                  },
+                  "vector": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 10
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "merge": {
+            "type": "object",
+            "required": [
+              "intoFindingId",
+              "reason",
+              "mergedBy",
+              "mergedAt"
+            ],
+            "properties": {
+              "intoFindingId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "mergedBy": {
+                "type": "string"
+              },
+              "mergedAt": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
           }
         }
       },
@@ -11613,6 +11927,91 @@
               },
               "additionalProperties": false
             }
+          }
+        },
+        "additionalProperties": false
+      },
+      "EvidenceView": {
+        "type": "object",
+        "required": [
+          "evidenceId",
+          "sha256",
+          "savedAt",
+          "kind",
+          "findingIds",
+          "source",
+          "sourceRunId",
+          "sourceJobId",
+          "display",
+          "sharing"
+        ],
+        "properties": {
+          "evidenceId": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "savedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "const": "original"
+          },
+          "findingIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source": {
+            "type": "string"
+          },
+          "sourceRunId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceJobId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display": {
+            "type": "object",
+            "required": [
+              "kind",
+              "request",
+              "response",
+              "bodies"
+            ],
+            "properties": {
+              "kind": {
+                "const": "display"
+              },
+              "request": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "response": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bodies": {
+                "const": "omitted"
+              }
+            },
+            "additionalProperties": false
+          },
+          "sharing": {
+            "const": "not-generated"
           }
         },
         "additionalProperties": false

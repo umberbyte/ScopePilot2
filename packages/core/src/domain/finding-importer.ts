@@ -73,6 +73,24 @@ export class FindingImporter {
     return [...this.findingsByDedupeKey.values()];
   }
 
+  /** Explicit duplicate resolution preserves both original records and their human reviews. */
+  merge(findingId: string, intoFindingId: string, reason: string, mergedBy: string, mergedAt: string): readonly Finding[] {
+    const entries = [...this.findingsByDedupeKey.entries()];
+    const from = entries.find(([, f]) => f.findingId === findingId);
+    const into = entries.find(([, f]) => f.findingId === intoFindingId);
+    if (!from || !into || findingId === intoFindingId || reason.trim() === '' || from[1].status === 'merged' || into[1].status === 'merged') {
+      throw domainError('ValidationFailed', 'merge requires two distinct unmerged findings and a reason');
+    }
+    // A record already referenced by merged children must remain a stable destination.
+    if (entries.some(([, f]) => f.merge?.intoFindingId === findingId)) throw domainError('ValidationFailed', 'merge destination cannot itself be merged');
+    const source: Finding = { ...from[1], status: 'merged', merge: { intoFindingId, reason: reason.trim(), mergedBy, mergedAt } };
+    // Never promote the destination or transfer a human verification to another finding.
+    const target: Finding = { ...into[1], evidenceRefs: [...new Set([...into[1].evidenceRefs, ...source.evidenceRefs])] };
+    this.findingsByDedupeKey.set(from[0], source);
+    this.findingsByDedupeKey.set(into[0], target);
+    return [source, target];
+  }
+
   /**
    * 確認状態の変更 (6.3・F19)。candidate からの確定/棄却と、確定↔棄却のやり直しのみ許す。
    * 確定は証拠参照が 1 つ以上あること (F19-UT-001 と同じ規則)。人間が未着手の candidate
