@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { MessageBar, Button, Checkbox, Field, Input, makeStyles, ProgressBar, Select, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 import { t } from './resources.ts';
+import { useRuntimeCapabilities } from './use-runtime-capabilities.ts';
 
 const CODECS = ['base64', 'url', 'hex', 'html-entity', 'gzip', 'deflate-raw'] as const;
 type SequencerTokenSource = 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom';
@@ -122,6 +123,7 @@ function lengthBucketRange(minimums: readonly number[], index: number): string {
 }
 
 export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.ReactElement {
+  const runtime = useRuntimeCapabilities(apiBase);
   const styles = useStyles();
   const [inputText, setInputText] = useState('');
   const [chain, setChain] = useState<readonly string[]>([]);
@@ -535,7 +537,8 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         <Input value={sequencerRole} onChange={(_, data) => setSequencerRole(data.value)} />
       </Field>
       <div className={styles.chips}>
-        <Button appearance="primary" disabled={busy} onClick={() => void runSequencer()}>
+        {runtime.notice('sequencerTransport') && <Text role="status">{runtime.notice('sequencerTransport')}</Text>}
+        <Button appearance="primary" disabled={busy || !runtime.available('sequencerTransport')} onClick={() => void runSequencer()}>
           {t('a10.sequencerRun')}
         </Button>
         {sequencerRunning && (
@@ -736,7 +739,8 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       <Field label={t('a10.oastProtocolLabel')}>
         <Input value={oastProtocol} onChange={(_, data) => setOastProtocol(data.value)} />
       </Field>
-      <Button appearance="primary" disabled={busy} onClick={() => void startOastAttempt()}>
+      {runtime.notice('oastProvider') && <Text role="status">{runtime.notice('oastProvider')}</Text>}
+      <Button appearance="primary" disabled={busy || !runtime.available('oastProvider')} onClick={() => void startOastAttempt()}>
         {t('a10.oastStart')}
       </Button>
       {oastToken !== '' && (
@@ -772,7 +776,8 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
       <Field label={t('a10.wsSendLabel')}>
         <Textarea value={wsSendText} onChange={(_, data) => setWsSendText(data.value)} rows={2} />
       </Field>
-      <Button appearance="primary" disabled={busy} onClick={() => void sendWsMessages()}>
+      {runtime.notice('webSocketTransport') && <Text role="status">{runtime.notice('webSocketTransport')}</Text>}
+      <Button appearance="primary" disabled={busy || !runtime.available('webSocketTransport')} onClick={() => void sendWsMessages()}>
         {t('a10.wsSend')}
       </Button>
       {wsNotice !== '' && <Text role="status">{wsNotice}</Text>}
@@ -799,7 +804,8 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         disabled={transportRequested === 'http/1.1'}
         onChange={(_, data) => setTransportAllowFallback(data.checked === true)}
       />
-      <Button appearance="primary" disabled={busy} onClick={() => void negotiate()}>
+      {runtime.notice('advancedTransport') && <Text role="status">{runtime.notice('advancedTransport')}</Text>}
+      <Button appearance="primary" disabled={busy || !runtime.available('advancedTransport')} onClick={() => void negotiate()}>
         {t('a10.transportNegotiate')}
       </Button>
       {transportResult !== null && (

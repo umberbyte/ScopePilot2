@@ -18,6 +18,7 @@ describe('advanced transport (service)', () => {
       allowFallback: false,
     });
     assert.deepEqual(explicitH1, {
+      adapterKind: 'fixture',
       protocol: 'http/1.1',
       downgraded: false,
       alpn: 'http/1.1 (explicit)',
@@ -74,6 +75,7 @@ describe('advanced transport (service)', () => {
     });
     assert.deepEqual(calls, [{ targetUrl: 'http://fixture.target.test/real-h2?x=1', requested: 'h2', allowFallback: false }]);
     assert.deepEqual(result, {
+      adapterKind: 'real',
       protocol: 'h2',
       downgraded: false,
       alpn: 'h2',

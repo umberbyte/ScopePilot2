@@ -20,3 +20,15 @@ export interface EngineCapabilitySnapshot {
   readonly measuredAt: string;
   readonly fixtureHash?: string;
 }
+
+export type RuntimeProfile = 'production' | 'simulation' | 'test';
+export type AdapterKind = 'real' | 'fixture' | 'unavailable';
+export interface RuntimeAdapterCapability {
+  readonly capability: string;
+  readonly adapterKind: AdapterKind;
+  readonly available: boolean;
+  readonly version: string;
+  readonly configuredAt: string;
+  readonly fixtureHash?: string;
+  readonly constraints: readonly string[];
+}

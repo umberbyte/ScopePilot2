@@ -67,6 +67,7 @@ describe('run persistence end-to-end (SQLite + Core API)', () => {
     migrate(db);
     runRepository = new RunRepository(db);
     const service = new BaselineFlowService({
+      runtimeProfile: 'test',
       clock: new FixedClock(['2026-10-18T09:00:00.000Z']),
       ids: new SequentialIdGenerator(),
       evidence: new InMemoryEvidenceStore(),

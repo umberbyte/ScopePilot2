@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
 import { t } from './resources.ts';
+import { useRuntimeCapabilities } from './use-runtime-capabilities.ts';
 
 interface PayloadSetView {
   readonly name: string;
@@ -44,6 +45,7 @@ const useStyles = makeStyles({
 });
 
 export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactElement {
+  const runtime = useRuntimeCapabilities(apiBase);
   const styles = useStyles();
   const [sets, setSets] = useState<readonly PayloadSetView[]>([]);
   const [payloadName, setSetName] = useState('');
@@ -179,7 +181,8 @@ export function FuzzerScreen({ apiBase }: { apiBase: string }): React.ReactEleme
       <Field label={t('a07.positionsLabel')}>
         <Textarea value={positionsText} onChange={(_, data) => setPositionsText(data.value)} rows={3} />
       </Field>
-      <Button appearance="primary" disabled={busy || positionsText.trim() === ''} onClick={() => void runFuzz()}>
+      {runtime.notice('fuzzTransport') && <Text role="status">{runtime.notice('fuzzTransport')}</Text>}
+      <Button appearance="primary" disabled={busy || !runtime.available('fuzzTransport') || positionsText.trim() === ''} onClick={() => void runFuzz()}>
         {t('a07.run')}
       </Button>
       {result !== null && (

@@ -20,6 +20,8 @@ export interface NodeFuzzTransportOptions {
 }
 
 export class NodeFuzzTransport implements FuzzTransportPort {
+  readonly adapterKind = 'real' as const;
+  readonly version = `node:${process.versions.node}`;
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
 

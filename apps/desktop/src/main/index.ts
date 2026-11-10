@@ -508,6 +508,7 @@ async function bootstrap(): Promise<void> {
   } = {}): BaselineFlowService => {
     const service = new BaselineFlowService({
       ...engineOptions,
+      runtimeProfile: 'production',
       clock: new SystemClock(),
       ids: new SequentialIdGenerator(options.idSeeds),
       evidence: options.evidenceStore ?? new InMemoryEvidenceStore(),

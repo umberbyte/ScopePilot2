@@ -1,3 +1,4 @@
+import { UnavailableCapability } from '@scopepilot2/core';
 /**
  * Production engine composition. Runtime code never falls back to simulation
  * fixtures: exploration uses Playwright and scans use a real ZAP daemon.
@@ -275,7 +276,7 @@ export interface ComposedEngines {
   readonly repeaterTransport: import('@scopepilot2/core').RepeaterTransportPort;
   readonly fuzzTransport: import('@scopepilot2/core').FuzzTransportPort;
   readonly sequencerTransport: import('@scopepilot2/core').SequencerTransportPort;
-  readonly oastProvider: import('@scopepilot2/core').OastProviderPort;
+  readonly oastProvider: import('@scopepilot2/core').OastProviderPort | UnavailableCapability;
   readonly webSocketTransport: import('@scopepilot2/core').WebSocketTransportPort;
   readonly advancedTransport: import('@scopepilot2/core').AdvancedTransportPort;
   readonly domObserver: import('@scopepilot2/core').DomObservationPort;
@@ -316,9 +317,7 @@ export async function composeEngines(
   const interactshProvider = selection.oastServerUrl && selection.interactshConfigPath
     ? new InteractshCliProvider({ serverUrl: selection.oastServerUrl, configPath: selection.interactshConfigPath })
     : undefined;
-  const oastProvider: import('@scopepilot2/core').OastProviderPort = interactshProvider ?? {
-    supportedProtocols: [], async startSession(): Promise<never> { throw new Error('OAST provider is not configured'); },
-  };
+  const oastProvider = interactshProvider ?? new UnavailableCapability('OAST provider is not configured');
   return {
     mode: 'real', explorer, scanEngine: zap.engine, ...(nucleiRunner === undefined ? {} : { nucleiRunner }), loginExecutor,
     workflowScanTransportFactory: (options) => new NodeWorkflowScanTransport(options),

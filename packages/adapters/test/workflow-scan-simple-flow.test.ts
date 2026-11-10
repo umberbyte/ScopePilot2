@@ -100,6 +100,7 @@ describe('Simple mode generic HTTP diagnostics integration', () => {
     };
     const factoryCalls: { baseUrl: string; redactionValues: readonly string[]; sessionCookies?: readonly { name: string; value: string }[] }[] = [];
     const service = new BaselineFlowService({
+      runtimeProfile: 'test',
       clock: new FixedClock([NOW]), ids: new SequentialIdGenerator(), evidence, explorer, scanEngine, loginExecutor,
       capabilities, runtimeBundleHash: 'generic-http-fixture',
       workflowScanTransportFactory: (options) => {

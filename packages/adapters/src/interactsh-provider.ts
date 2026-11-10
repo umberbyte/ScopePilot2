@@ -71,6 +71,8 @@ function eventFromLine(line: string, token: string): OastProviderEvent | null {
 }
 
 export class InteractshCliProvider implements OastProviderPort {
+  readonly adapterKind = 'real' as const;
+  readonly version = 'interactsh-cli-adapter-v1';
   readonly supportedProtocols = ['http', 'dns', 'smtp'] as const;
   private readonly serverUrl: string;
   private readonly configPath: string;

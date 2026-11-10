@@ -1,3 +1,4 @@
+import { createFixtureToolAdapters } from '../../../../../tools/simulation/src/adapters/fixture-tools.ts';
 /**
  * core 単体テスト用の最小 fake 群と flow の組み立て helper。
  * `docs/detailed-design/03-unit-test-strategy.md` 4章: 呼出し記録と明示した結果だけを提供する。
@@ -197,6 +198,8 @@ export function createTestService(
   const explorer = options.explorer ?? new FakeExplorer();
   const scanEngine = options.scanEngine ?? new FakeScanEngine();
   const service = new BaselineFlowService({
+    runtimeProfile: 'test',
+    ...createFixtureToolAdapters(),
     clock: new FixedClock([TEST_NOW]),
     ids: new SequentialIdGenerator(),
     evidence: options.evidenceFailure === true ? new FailingAlertEvidenceStore() : new InMemoryEvidenceStore(),

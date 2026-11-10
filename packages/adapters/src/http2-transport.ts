@@ -32,6 +32,8 @@ function isProtocolUnavailable(cause: unknown): boolean {
 }
 
 export class NodeHttp2Transport implements AdvancedTransportPort {
+  readonly adapterKind = 'real' as const;
+  readonly version = `node:${process.versions.node}`;
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
   private readonly trustedCa: SecureContextOptions['ca'];
