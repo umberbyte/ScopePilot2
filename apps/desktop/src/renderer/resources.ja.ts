@@ -318,6 +318,7 @@ export const jaStrings = {
   'a06.intro':
     'draft は tab として最大 20 件。編集のたびに revision と計画 hash が進み、画面に表示した hash と一致するときだけ送信します (編集後の古い hash では送信されません)。応答は summary のみ (binary は text 化しません)。',
   'a06.create': '新規 draft を作る',
+  'a06.closeTab': 'タブを閉じる',
   'a06.headersLabel': 'headers (1行1件・Name: Value)',
   'a06.bodyLabel': 'body',
   'a06.apply': '編集を適用する',
@@ -328,6 +329,20 @@ export const jaStrings = {
   'a06.sessionApplied': '(session cookie 適用: {cookies})',
   'a06.sent': '送信しました ({outcome})。応答: {status} {contentType} ({bodyBytes} bytes)',
   'a06.notSent': '送信しませんでした: {reason}',
+  'a06.transportConnected': 'Transport 接続済み',
+  'a06.transportFixture': 'Fixture モード',
+  'a06.fixtureMode': '決定的な模擬応答を返します。実送信は行いません。',
+  'a06.liveMode': '実際の HTTP 送信を行います。',
+  'a06.importFromHistory': '履歴からインポート',
+  'a06.showComparison': 'レスポンス比較を表示',
+  'a06.hideComparison': 'レスポンス比較を隠す',
+  'a06.previousResponse': '前回のレスポンス',
+  'a06.currentResponse': '今回のレスポンス',
+  'a06.importDialog.title': '履歴から要求をインポート',
+  'a06.importDialog.description': '観測済みの通信から要求を選び、新しい draft として開きます。',
+  'a06.importDialog.noExchanges': '表示できる履歴がありません。',
+  'a06.importDialog.select': '選択',
+  'a06.importDialog.import': 'インポート',
 
   'a07.intro':
     '組合せ総数が上限 (案件上限と 200 の小さい方) を超えると送信前に拒否されます。応答は (status・長さ・hash) ごとに cluster 集約し、全体の一覧は表示しません。rate は 2 req/s 既定 (仮想時計で進めます)。',
@@ -693,6 +708,7 @@ export const jaStrings = {
   'a03.theme.f.27.requireWss': 'ws:// (平文) を疑い扱いにする',
 
   'common.loading': '取得中…',
+  'common.cancel': 'キャンセル',
   'common.col.state': '状態',
   'common.col.actions': '操作',
   'common.col.version': '版',
