@@ -40,7 +40,7 @@ gated('ZAP adapter (実 ZAP 結合)', () => {
         const scanId = await adapter.start({
           runId: 'run-it-zap-0001',
           targets: [target.indexUrl, target.echoUrl],
-          attackStrength: 'Medium',
+      attackStrength: 'Medium', alertThreshold: 'Medium',
           leasedLimits: { maxRequests: 200, maxPages: 10, maxDurationMinutes: 5, maxConcurrency: 1, requestsPerSecond: 2 },
           authorizationRef: 'authz-it-0001',
         });

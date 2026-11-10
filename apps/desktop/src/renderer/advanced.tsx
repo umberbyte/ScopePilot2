@@ -19,6 +19,10 @@ import { ProxyInterceptScreen } from './proxy-intercept-screen.tsx';
 import { RepeaterScreen } from './repeater-screen.tsx';
 import { FuzzerScreen } from './fuzzer-screen.tsx';
 import { SessionsScreen } from './sessions-screen.tsx';
+import { ActiveScanScreen } from './active-scan-screen.tsx';
+import { ScanPolicyScreen } from './scan-policy-screen.tsx';
+import { ActiveScanScreen } from './active-scan-screen.tsx';
+import { ScanPolicyScreen } from './scan-policy-screen.tsx';
 
 /** ローカル desktop operator。operator 照会 API は後続増分で追加する。 */
 const OPERATOR_PERMISSIONS: readonly OperatorPermission[] = ['case.manage', 'case.read', 'run.manage', 'finding.confirm', 'report.export'];
@@ -31,6 +35,8 @@ type ScreenHost =
   | 'sessions'
   | 'siteMap'
   | 'scanPlans'
+  | 'activeScan'
+  | 'scanPolicy'
   | 'proxy'
   | 'repeater'
   | 'fuzzer'
@@ -60,8 +66,9 @@ const SCREEN_HOSTS: Partial<Record<AdvancedRoute, ScreenHost>> = {
   'adv.manual.websocket': 'decoder',
   'adv.manual.oast': 'decoder',
   'adv.manual.dom': 'decoder',
-  'adv.scan.active': 'scanPlans',
+  'adv.scan.active': 'activeScan',
   'adv.scan.templates': 'guidelines',
+  'adv.scan.policies': 'scanPolicy',
   'adv.tools.decoder': 'decoderOnly',
   'adv.tools.comparer': 'comparerOnly',
   'adv.tools.sequencer': 'sequencerOnly',
@@ -1371,6 +1378,8 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {host === 'scope' && <ScopeAuthorizationScreen apiBase={apiBase} />}
         {host === 'findings' && <FindingsOrganizerScreen apiBase={apiBase} />}
         {host === 'scanPlans' && <ScanPlansScreen apiBase={apiBase} />}
+        {host === 'activeScan' && <ActiveScanScreen apiBase={apiBase} />}
+        {host === 'scanPolicy' && <ScanPolicyScreen apiBase={apiBase} />}
         {host === 'siteMap' && <SiteMapScreen apiBase={apiBase} />}
         {host === 'guidelines' && <GuidelinesCatalogScreen apiBase={apiBase} />}
         {host === 'proxy' && <ProxyInterceptScreen apiBase={apiBase} />}

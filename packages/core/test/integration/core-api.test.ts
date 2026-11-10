@@ -155,6 +155,87 @@ describe('Core API server (node:http)', () => {
     assert.equal(conflict.code, 'Conflict');
   });
 
+  test('A43 policy API は revision/hash を返し、ZAP rule ID 設定を拒否する', async () => {
+    const post = (path: string, body: unknown): Promise<Response> => fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    assert.equal((await post('/api/case', {
+      name: 'scan-policy-it',
+      allowedOrigins: ['http://fixture.target.test'],
+      deniedOrigins: [],
+      limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+    })).status, 201);
+    assert.equal((await post('/api/authorization', {
+      allowedOperationClasses: ['Browse', 'ActiveScan'],
+      targetRoles: ['unauthenticated'],
+      validFrom: '2026-10-18T00:00:00.000Z',
+      validUntil: '2026-10-19T00:00:00.000Z',
+      evidenceLabel: '認可(A43 IT)',
+      evidenceContent: 'scan policy integration authorization',
+    })).status, 201);
+
+    const listed = await fetch(`${baseUrl}/api/scan-policies`);
+    assert.equal(listed.status, 200);
+    const listedBody = await listed.json() as { policies: readonly { policyId: string; revision: number; policyHash: string; routes: Record<string, unknown> }[] };
+    const standard = listedBody.policies[0]!;
+    assert.equal(standard.policyId, 'standard');
+    assert.match(standard.policyHash, /^[0-9a-f]{64}$/u);
+
+    const rejected = await fetch(`${baseUrl}/api/scan-policies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expectedRevision: standard.revision,
+        policyId: standard.policyId,
+        name: 'invalid per-rule policy',
+        isDefault: true,
+        routes: {
+          zap: { enabled: true, attackStrength: 'High', alertThreshold: 'High', ruleIds: ['40012'] },
+          genericHttp: { enabled: true, checkIds: ['security-headers'] },
+          nuclei: { enabled: false, templateIds: [] },
+        },
+      }),
+    });
+    assert.equal(rejected.status, 400);
+    assert.match((await rejected.json() as { message: string }).message, /per-rule-ID/u);
+
+    const saved = await fetch(`${baseUrl}/api/scan-policies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expectedRevision: standard.revision,
+        policyId: standard.policyId,
+        name: 'API policy',
+        isDefault: true,
+        routes: {
+          zap: { enabled: true, attackStrength: 'High', alertThreshold: 'High' },
+          genericHttp: { enabled: true, checkIds: ['security-headers', 'cookie-security'] },
+          nuclei: { enabled: false, templateIds: [] },
+        },
+      }),
+    });
+    assert.equal(saved.status, 200);
+    const savedBody = await saved.json() as { policy: { revision: number; policyHash: string }; changed: boolean };
+    assert.equal(savedBody.changed, true);
+    assert.equal(savedBody.policy.revision, standard.revision + 1);
+    assert.notEqual(savedBody.policy.policyHash, standard.policyHash);
+
+    const stalePlan = await fetch(`${baseUrl}/api/plan/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targets: ['http://fixture.target.test/'],
+        scanPolicyId: standard.policyId,
+        scanPolicyHash: standard.policyHash,
+        routeOverrides: { genericHttp: false, nuclei: false },
+      }),
+    });
+    assert.equal(stalePlan.status, 409);
+    assert.equal((await stalePlan.json() as { code: string }).code, 'Conflict');
+  });
+
   test('未知 route は 404、body なしは 400、巨大 body は上限で拒否', async () => {
     assert.equal((await fetch(`${baseUrl}/api/unknown`)).status, 404);
     const noBody = await fetch(`${baseUrl}/api/case`, { method: 'POST' });

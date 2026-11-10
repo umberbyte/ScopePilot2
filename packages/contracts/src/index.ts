@@ -7,6 +7,8 @@ export * from './plan/plan.ts';
 export * from './engines/capability.ts';
 export * from './explore/explore.ts';
 export * from './scan/scan.ts';
+export * from './scan/scan-policy.ts';
+export * from './scan/scan-policy-hash.ts';
 export * from './findings/findings.ts';
 export * from './report/report.ts';
 export * from './documents/documents.ts';

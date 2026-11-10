@@ -67,6 +67,8 @@ export class FakeScanEngine implements ActiveScanEnginePort {
   async start(request: Parameters<ActiveScanEnginePort['start']>[0], context?: Parameters<ActiveScanEnginePort['start']>[1]): Promise<string> {
     this.startCalls.push({
       targets: [...request.targets],
+      attackStrength: request.attackStrength,
+      alertThreshold: request.alertThreshold,
       leasedMaxRequests: request.leasedLimits.maxRequests,
       sessionCookies: context?.sessionCookies ?? [],
       sessionHeaders: context?.sessionHeaders ?? [],
@@ -106,6 +108,8 @@ export class FailingAlertEvidenceStore extends InMemoryEvidenceStore {
 
 export interface ActiveScanEngineStartCall {
   readonly targets: readonly string[];
+  readonly attackStrength: import('@scopepilot2/contracts').ScanAttackStrength;
+  readonly alertThreshold: import('@scopepilot2/contracts').ScanAlertThreshold;
   readonly leasedMaxRequests: number;
   readonly sessionCookies: readonly import('../../../src/ports/engines.ts').LoginSessionCookie[];
   readonly sessionHeaders: readonly import('../../../src/ports/engines.ts').BrowserSessionHeader[];

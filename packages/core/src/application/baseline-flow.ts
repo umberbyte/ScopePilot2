@@ -46,6 +46,9 @@ import {
   type RequestInputPoint,
   DocumentAuthMethods,
   DocumentPriorityCategories,
+  type SaveScanPolicyRequest,
+  type ScanPolicy,
+  type ScanPolicyRouteOverrides,
 } from '@scopepilot2/contracts';
 import { ScopePolicy } from '../domain/scope-policy.ts';
 import { mergeDocumentHintSeeds } from '../domain/exploration.ts';
@@ -184,7 +187,9 @@ import {
   type WorkflowScanHttpResponse,
   type WorkflowScanRequestSpec,
   type WorkflowScanTransport,
+  type WorkflowScanCheckId,
 } from '../domain/workflow-scan.ts';
+import { ScanPolicyRegistry } from '../domain/scan-policy.ts';
 import { resolveGuidelineThemeRoutes } from '../domain/guideline-execution.ts';
 import { checkCompatibility, respondToSecretRead, verifyExtensionManifest, type ExtensionManifest } from '../domain/product-api.ts';
 import { buildReportModel, renderMarkdown } from '../domain/report-builder.ts';
@@ -454,6 +459,7 @@ export class BaselineFlowService {
   private authorization: AuthorizationRecord | null = null;
   private readonly eventsLog: BaselineFlowEvent[] = [];
   private readonly importer: FindingImporter;
+  private readonly scanPolicies = new ScanPolicyRegistry();
   /** proxy の break queue (design/f02)。deadline 経過は既定で drop (暗黙 forward しない)。 */
   private readonly breakQueue = new BreakQueue(100);
 
@@ -639,6 +645,48 @@ export class BaselineFlowService {
   /** site map (観測済み page の一覧・初回観測順)。 */
   listObservations(): readonly PageObservation[] {
     return [...this.observationsByUrl.values()];
+  }
+
+  /** A40 の候補表。文書 hint だけでは候補を作らず、探索/API観測で得た候補だけを返す。 */
+  listScanCandidates(operator: OperatorProfile): readonly ScanCandidate[] {
+    this.requirePermission(operator, 'run.manage');
+    this.currentCase();
+    return [...this.latestCandidates];
+  }
+
+  /** A43: 案件単位の名前付き診断ポリシー。 */
+  listScanPolicies(operator: OperatorProfile): readonly ScanPolicy[] {
+    this.requirePermission(operator, 'case.read');
+    const caseRecord = this.currentCase();
+    return this.scanPolicies.list(caseRecord.caseId, this.deps.clock.now().toISOString());
+  }
+
+  /**
+   * A43: revision guard 付き保存。内容 hash が変わったときだけ plan confirmation を失効する。
+   * ZAP 個別 rule ID は契約に存在せず、Core でも受け付けない。
+   */
+  saveScanPolicy(operator: OperatorProfile, input: SaveScanPolicyRequest): {
+    readonly policy: ScanPolicy;
+    readonly changed: boolean;
+    readonly invalidatedConfirmationIds: readonly string[];
+  } {
+    this.requirePermission(operator, 'case.manage');
+    const caseRecord = this.currentCase();
+    const policyId = input.policyId?.trim() || this.deps.ids.next('scan-policy');
+    const saved = this.scanPolicies.save(caseRecord.caseId, input, policyId, this.deps.clock.now().toISOString());
+    const invalidatedConfirmationIds = saved.changed
+      ? this.currentAggregate().invalidateActiveConfirmations('scan policy changed')
+      : [];
+    if (invalidatedConfirmationIds.length > 0) {
+      this.record({
+        type: 'ConfirmationsInvalidated',
+        at: this.deps.clock.now().toISOString(),
+        caseId: caseRecord.caseId,
+        confirmationIds: invalidatedConfirmationIds,
+        reason: 'scan policy changed',
+      });
+    }
+    return { ...saved, invalidatedConfirmationIds };
   }
 
   /** 探索で scope 拒否された URL (開示用)。 */
@@ -3884,7 +3932,15 @@ export class BaselineFlowService {
     operator: OperatorProfile,
     targets: readonly string[],
     limitsRequest?: { readonly maxRequests: number; readonly maxPages: number; readonly maxDurationMinutes: number },
-    options: { readonly includeNuclei?: boolean; readonly includeWorkflowScan?: boolean; readonly guidelines?: readonly string[] } = {},
+    options: {
+      readonly includeNuclei?: boolean;
+      readonly includeWorkflowScan?: boolean;
+      readonly guidelines?: readonly string[];
+      readonly scanPolicyId?: string;
+      readonly scanPolicyHash?: string;
+      readonly routeOverrides?: ScanPolicyRouteOverrides;
+      readonly targetRole?: string;
+    } = {},
   ): { plan: ExecutionPlan; planHash: string } {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
@@ -3896,36 +3952,63 @@ export class BaselineFlowService {
       this.requirePositiveLimits(limitsRequest, 'plan.scan');
     }
     const limits = this.planLimits({ ...DEFAULT_ACTIVE_SCAN_LIMITS, ...limitsRequest }, caseRecord.scope.limits);
-    const inputEvidenceHash = hashStable('scopepilot2.plan.input', targets.map((url) => ScopePolicy.canonicalUrl(url)).sort());
-    const includeNuclei = options.includeNuclei === true;
-    const includeWorkflowScan = options.includeWorkflowScan === true;
-    if (includeNuclei && this.deps.nucleiRunner === undefined) {
+    const selectedPolicy = options.scanPolicyId === undefined
+      ? undefined
+      : this.scanPolicies.get(caseRecord.caseId, options.scanPolicyId, this.deps.clock.now().toISOString());
+    if (selectedPolicy !== undefined && options.scanPolicyHash !== undefined && selectedPolicy.policyHash !== options.scanPolicyHash) {
+      throw domainError('Conflict', 'scan policy changed after it was displayed; reload the policy before building the plan', {
+        details: { policyId: selectedPolicy.policyId, currentPolicyHash: selectedPolicy.policyHash, displayedPolicyHash: options.scanPolicyHash },
+      });
+    }
+    const routeEnabled = (route: keyof ScanPolicyRouteOverrides): boolean => {
+      const configured = route === 'zap'
+        ? selectedPolicy?.routes.zap.enabled
+        : route === 'genericHttp'
+          ? selectedPolicy?.routes.genericHttp.enabled
+          : selectedPolicy?.routes.nuclei.enabled;
+      return configured === true && options.routeOverrides?.[route] !== false;
+    };
+    // scanPolicyId がない呼出しは既存 CLI/API 互換。A40 は必ず policyId を渡す。
+    const includeZap = selectedPolicy === undefined ? true : routeEnabled('zap');
+    const includeNuclei = selectedPolicy === undefined ? options.includeNuclei === true : routeEnabled('nuclei');
+    const includeWorkflowScan = selectedPolicy === undefined ? options.includeWorkflowScan === true : routeEnabled('genericHttp');
+    if (includeNuclei && this.deps.nucleiRunner === undefined && options.routeOverrides?.nuclei === true) {
       throw domainError('CapabilityUnavailable', 'Nuclei requires both a configured binary and a reviewed HTTP template manifest');
     }
-    if (includeWorkflowScan && this.deps.workflowScanTransportFactory === undefined) {
+    const effectiveNuclei = includeNuclei && this.deps.nucleiRunner !== undefined;
+    if (includeWorkflowScan && this.deps.workflowScanTransportFactory === undefined && options.routeOverrides?.genericHttp === true) {
       throw domainError('CapabilityUnavailable', 'workflow scan transport is not configured');
     }
-    const enabledStepCount = 1 + (includeNuclei ? 1 : 0) + (includeWorkflowScan ? 1 : 0);
+    const effectiveWorkflowScan = includeWorkflowScan && this.deps.workflowScanTransportFactory !== undefined;
+    const enabledStepCount = (includeZap ? 1 : 0) + (effectiveNuclei ? 1 : 0) + (effectiveWorkflowScan ? 1 : 0);
+    if (enabledStepCount === 0) {
+      throw domainError('ValidationFailed', 'active scan plan needs at least one available diagnostic route');
+    }
     if (limits.maxRequests < enabledStepCount) {
       throw domainError('ValidationFailed', `plan needs at least ${String(enabledStepCount)} requests for the selected diagnostic steps`);
     }
-    const workflowMaxRequests = includeWorkflowScan
+    const workflowMaxRequests = effectiveWorkflowScan
       ? Math.min(WORKFLOW_SCAN_DEFAULT_MAX_REQUESTS, Math.floor(limits.maxRequests / enabledStepCount))
       : 0;
     const remainingRequests = limits.maxRequests - workflowMaxRequests;
-    const nucleiMaxRequests = includeNuclei ? Math.floor(remainingRequests / 2) : 0;
-    const zapMaxRequests = remainingRequests - nucleiMaxRequests;
+    const delegatedStepCount = (includeZap ? 1 : 0) + (effectiveNuclei ? 1 : 0);
+    const nucleiMaxRequests = effectiveNuclei ? Math.floor(remainingRequests / delegatedStepCount) : 0;
+    const zapMaxRequests = includeZap ? remainingRequests - nucleiMaxRequests : 0;
     const withRequestLimit = (maxRequests: number): PlanLimits => ({ ...limits, maxRequests });
     const workflowTargets = [...new Set(targets.map((url) => ScopePolicy.canonicalUrl(url)))];
+    const inputEvidenceHash = hashStable('scopepilot2.plan.input', {
+      targets: workflowTargets.sort(),
+      scanPolicyHash: selectedPolicy?.policyHash ?? null,
+    });
     const plan = buildPlan({
       planId: this.deps.ids.next('plan'),
       caseId: caseRecord.caseId,
       authorizationId: authorization.authorizationId,
       operatorId: operator.operatorId,
-      targetRole: authorization.targetRoles[0] ?? 'unauthenticated',
+      targetRole: options.targetRole?.trim() || authorization.targetRoles[0] || 'unauthenticated',
       guidelineIds: options.guidelines ?? [],
       steps: [
-        {
+        ...(!includeZap ? [] : [{
           kind: 'active-scan',
           operationClass: 'ActiveScan',
           targets,
@@ -3933,8 +4016,8 @@ export class BaselineFlowService {
           guarantee: 'Delegated',
           engineVersion: this.deps.scanEngine.engineVersion,
           limits: withRequestLimit(zapMaxRequests),
-        },
-        ...(!includeWorkflowScan ? [] : [{
+        }] as const),
+        ...(!effectiveWorkflowScan ? [] : [{
           kind: 'workflow-scan' as const,
           operationClass: 'ActiveScan' as const,
           targets: workflowTargets,
@@ -3943,7 +4026,7 @@ export class BaselineFlowService {
           engineVersion: WORKFLOW_SCAN_PAYLOAD_SET,
           limits: withRequestLimit(workflowMaxRequests),
         }]),
-        ...(!includeNuclei || this.deps.nucleiRunner === undefined ? [] : [{
+        ...(!effectiveNuclei || this.deps.nucleiRunner === undefined ? [] : [{
           kind: 'nuclei-scan' as const,
           operationClass: 'NucleiScan' as const,
           targets,
@@ -3956,6 +4039,7 @@ export class BaselineFlowService {
       limits,
       runtimeBundleHash: this.deps.runtimeBundleHash,
       inputEvidenceHash,
+      ...(selectedPolicy === undefined ? {} : { scanPolicyHash: selectedPolicy.policyHash }),
       createdAt: this.deps.clock.now().toISOString(),
     });
     return { plan, planHash: planHashOf(plan) };
@@ -3964,6 +4048,7 @@ export class BaselineFlowService {
   /** 計画の検証と認可結び付け。問題があれば最初の問題を domain error へ変換する。 */
   authorizePlan(plan: ExecutionPlan): { planHash: string } {
     this.requireProductionPlan(plan);
+    this.requireCurrentScanPolicy(plan);
     const caseRecord = this.currentCase();
     const authorization = this.currentAuthorization();
     const issues = validatePlan(plan, {
@@ -3990,6 +4075,7 @@ export class BaselineFlowService {
   /** 計画確認。確認内容の写しと hash の両方を残し、案件 aggregate へ登録する。 */
   confirmPlan(plan: ExecutionPlan, operator: OperatorProfile): PlanConfirmation {
     this.requirePermission(operator, 'run.manage');
+    this.requireCurrentScanPolicy(plan);
     const aggregate = this.currentAggregate();
     this.requireProductionPlan(plan);
     const confirmation: PlanConfirmation = {
@@ -4324,22 +4410,26 @@ export class BaselineFlowService {
     this.requirePermission(operator, 'run.manage');
     this.requireProductionPlan(plan);
     this.requireMatchingConfirmation(plan, confirmation);
+    const selectedPolicy = this.requireCurrentScanPolicy(plan);
     const caseRecord = this.currentCase();
-    const step = plan.steps[0];
-    if (step === undefined || step.kind !== 'active-scan') {
-      throw domainError('ValidationFailed', 'plan does not contain an active-scan step');
+    const zapStep = plan.steps.find((candidate) => candidate.kind === 'active-scan');
+    const workflowStep = plan.steps.find((candidate) => candidate.kind === 'workflow-scan');
+    const nucleiStep = plan.steps.find((candidate) => candidate.kind === 'nuclei-scan');
+    const primaryStep = zapStep ?? workflowStep ?? nucleiStep;
+    if (primaryStep === undefined) {
+      throw domainError('ValidationFailed', 'plan does not contain an active scan diagnostic route');
     }
 
-    const snapshot = this.deps.capabilities.find((capability) => capability.engineKind === 'zap');
-    if (snapshot === undefined || snapshot.engineVersion !== this.deps.scanEngine.engineVersion) {
+    const snapshot = zapStep === undefined ? undefined : this.deps.capabilities.find((capability) => capability.engineKind === 'zap');
+    if (zapStep !== undefined && (snapshot === undefined || snapshot.engineVersion !== this.deps.scanEngine.engineVersion)) {
       throw domainError('CapabilityUnavailable', 'no capability snapshot for the scan engine version');
     }
-    if (snapshot.guaranteeLevels.preSendScopeEnforcement === 'Unsupported') {
+    if (zapStep !== undefined && snapshot?.guaranteeLevels.preSendScopeEnforcement === 'Unsupported') {
       throw domainError('CapabilityUnavailable', 'scan engine cannot enforce or delegate scope');
     }
 
     // 実行対象は計画の target snapshot を正本とする。scope 外候補は snapshot から除外する (F11-UT-003)。
-    const targets = step.targetSnapshot.filter((url) => ScopePolicy.decide(caseRecord.scope, url).allowed && !isSessionControlUrl(url));
+    const targets = primaryStep.targetSnapshot.filter((url) => ScopePolicy.decide(caseRecord.scope, url).allowed && !isSessionControlUrl(url));
     this.assessmentStartedAt ??= this.deps.clock.now().toISOString();
     this.authenticationRole = role ?? null;
     const adoptedUrls = new Set(adopted.map((candidate) => ScopePolicy.canonicalUrl(candidate.url)));
@@ -4409,7 +4499,6 @@ export class BaselineFlowService {
         authenticationProbe = { url: session.verificationUrl, markers: [] };
       }
     }
-    const workflowStep = plan.steps.find((candidate) => candidate.kind === 'workflow-scan');
     if (workflowStep !== undefined && this.deps.workflowScanTransportFactory === undefined) {
       throw domainError('CapabilityUnavailable', 'workflow scan transport is not configured');
     }
@@ -4427,7 +4516,7 @@ export class BaselineFlowService {
     // Delegated 経路は最大 overshoot 分を共有上限の内側に予約する。ガイドラインから
     // 自動接続するScopePilot HTTP検査も同じ案件上限の内側へ先に予約し、ZAP leaseと
     // 二重計上しない。
-    const reservedRequests = Math.ceil(step.limits.maxRequests * snapshot.maxOvershootRatio);
+    const reservedRequests = zapStep === undefined || snapshot === undefined ? 0 : Math.ceil(zapStep.limits.maxRequests * snapshot.maxOvershootRatio);
     const guidelineThemePlans = resolveGuidelineThemeRoutes(plan.guidelineIds);
     const guidelineTargetUrls = [...new Set(targets.map((target) => ScopePolicy.canonicalUrl(target)))].slice(0, 5);
     const desiredAutomaticThemeNos = guidelineThemePlans.filter((route) => route.mode === 'automatic').map((route) => route.themeNo);
@@ -4436,17 +4525,18 @@ export class BaselineFlowService {
       0,
     );
     const automaticGuidelineChecksEnabled = desiredGuidelineRequestCount > 0
-      && step.limits.maxRequests - reservedRequests - desiredGuidelineRequestCount >= 1;
+      && primaryStep.limits.maxRequests - reservedRequests - desiredGuidelineRequestCount >= (zapStep === undefined ? 0 : 1);
     const guidelineRequestReservation = automaticGuidelineChecksEnabled ? desiredGuidelineRequestCount : 0;
-    const engineLease = step.limits.maxRequests - reservedRequests - guidelineRequestReservation;
+    const engineLease = zapStep === undefined ? 0 : zapStep.limits.maxRequests - reservedRequests - guidelineRequestReservation;
     const context = jobContext.getStore();
     if (context) context.registry.emit(context.jobId, { category: 'budget', messageKey: 'job.phase', message: 'Scan request budget leased', params: { engineLease, reservedRequests, guidelineRequestReservation }, counters: { budget: { leased: step.limits.maxRequests, used: 0, limit: plan.limits.maxRequests } } });
     const zapCandidates = adopted.filter(candidateAllowsAutomatedZap);
     const scanRequest: ActiveScanRequest = {
       runId,
       targets,
-      attackStrength: 'Medium',
-      leasedLimits: { ...step.limits, maxRequests: engineLease },
+      attackStrength: selectedPolicy?.routes.zap.attackStrength ?? 'Medium',
+      alertThreshold: selectedPolicy?.routes.zap.alertThreshold ?? 'Medium',
+      leasedLimits: { ...(zapStep?.limits ?? primaryStep.limits), maxRequests: engineLease },
       authorizationRef: `authorization:${this.currentAuthorization().authorizationId}`,
       ...(sessionCookieNames === undefined ? {} : { sessionCookieNames }),
       requestSeedCount: zapCandidates.length,
@@ -4529,14 +4619,18 @@ export class BaselineFlowService {
         progress: 0,
       });
     }
-    emit({
+    const payloadVerifications: ActiveScanPayloadVerification[] = [];
+    let zapImportedCount = 0;
+    let zapDuplicateCount = 0;
+    if (zapStep !== undefined) {
+      emit({
       phase: 'starting',
       engine: 'zap',
       message: `ZAP認証コンテキストを構成し、${zapCandidates.length}件のHTTPリクエスト候補を診断します`,
       command: `ZAP API: context + active HTTP session -> core/sendRequest x ${zapCandidates.length} -> spider/scan + ajaxSpider/scan -> ascan/scan(recurse=false, inScopeOnly=true) -> per-run alert delta`,
       progress: 0,
     });
-    const engineRunId = await this.deps.scanEngine.start(scanRequest, {
+      const engineRunId = await this.deps.scanEngine.start(scanRequest, {
       ...(scanSessionCookies === undefined ? {} : { sessionCookies: scanSessionCookies }),
       ...(scanSessionHeaders === undefined ? {} : { sessionHeaders: scanSessionHeaders }),
       requestSeeds: zapCandidates.map((candidate) => ({
@@ -4548,8 +4642,8 @@ export class BaselineFlowService {
       ...(expectedAuthenticatedUrlPrefix === undefined ? {} : { expectedAuthenticatedUrlPrefix }),
       ...(authenticationProbe === undefined ? {} : { authenticationProbe }),
     });
-    emit({ phase: 'running', engine: 'zap', message: `ZAP scan id ${engineRunId} を監視しています`, progress: 0 });
-    const monitor = new ScanMonitor(
+      emit({ phase: 'running', engine: 'zap', message: `ZAP scan id ${engineRunId} を監視しています`, progress: 0 });
+      const monitor = new ScanMonitor(
       this.deps.scanEngine,
       engineRunId,
       MAX_POLL_ITERATIONS,
@@ -4563,10 +4657,10 @@ export class BaselineFlowService {
         progress: progress.progress,
       }),
     );
-    const monitored = await monitor.collectUntilDone();
-    const collectedAlerts = monitored.alerts;
+      const monitored = await monitor.collectUntilDone();
+      const collectedAlerts = monitored.alerts;
 
-    if (monitored.status === 'stopped') {
+      if (monitored.status === 'stopped') {
       machine.requestStop();
       this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Stopping', attempt: 1, stopReason: 'user-request' });
       const stoppedRecord: RunRecord = {
@@ -4585,7 +4679,7 @@ export class BaselineFlowService {
     }
 
     // engine 異常は「URL Does not Exist」等の観測理由とともに失敗として扱い、無制限に再試行しない。
-    if (monitored.status === 'failed') {
+      if (monitored.status === 'failed') {
       this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'engine-failure' });
       machine.transition('Failed');
       this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Failed', attempt: 1, stopReason: 'engine-failure' });
@@ -4594,18 +4688,18 @@ export class BaselineFlowService {
       });
     }
 
-    diagnosticRoutes = diagnosticRoutes.map((route) => route.track === 'zap-active'
+      diagnosticRoutes = diagnosticRoutes.map((route) => route.track === 'zap-active'
       ? { ...route, status: 'executed' as const, detail: 'ZAP active scanを完了し、run開始前後のalert差分を収集しました' }
       : route);
 
     // 観測した出力を原本として保存してから取込む (保存成功後だけ event を出す = SYS-UT-005)。
-    let rawEvidence;
-    try {
+      let rawEvidence;
+      try {
       rawEvidence = await this.deps.evidence.saveText(
         `zap-alerts-raw:${engineRunId}`,
         canonicalJson({ engineRunId, alerts: collectedAlerts }),
       );
-    } catch (cause) {
+      } catch (cause) {
       this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'engine-failure' });
       machine.transition('Failed');
       this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Failed', attempt: 1, stopReason: 'engine-failure' });
@@ -4614,20 +4708,21 @@ export class BaselineFlowService {
         details: { engineRunId },
       });
     }
-    const now = this.deps.clock.now().toISOString();
-    const importResult = this.importer.importAlerts(collectedAlerts, {
+      const now = this.deps.clock.now().toISOString();
+      const importResult = this.importer.importAlerts(collectedAlerts, {
       now,
       engineVersion: this.deps.scanEngine.engineVersion,
       makeFindingId: () => this.deps.ids.next('finding'),
       evidenceRef: rawEvidence.evidenceId,
     });
-    this.persistFindings([...importResult.created, ...importResult.reobserved]);
+      zapImportedCount = importResult.created.length;
+      zapDuplicateCount = importResult.duplicateCount;
+      this.persistFindings([...importResult.created, ...importResult.reobserved]);
 
     // payload 実行検証 (design/30 30.1): 反射系 XSS 所見のうち URL に payload が乗っている
     // ものは、browser で実際に開いて dialog 発火を確認する。検証失敗は診断全体を失敗させず
     // 結果に記録する (上限 5 件・browser 検証に非対応の構成では実行しない)。
-    const payloadVerifications: ActiveScanPayloadVerification[] = [];
-    if (typeof this.deps.explorer.verifyPayloadExecution === 'function') {
+      if (typeof this.deps.explorer.verifyPayloadExecution === 'function') {
       const verifiableFindings = [...importResult.created, ...importResult.reobserved]
         .filter((finding) => PAYLOAD_EXECUTION_FINDING_PATTERN.test(finding.title) && PAYLOAD_URL_MARKER_PATTERN.test(finding.url))
         .slice(0, PAYLOAD_VERIFICATION_MAX);
@@ -4667,6 +4762,10 @@ export class BaselineFlowService {
           });
         }
       }
+      }
+    } else {
+      diagnosticRoutes = diagnosticRoutes.filter((route) => route.track !== 'zap-active');
+      emit({ phase: 'completed', engine: 'scopepilot', message: 'ZAP 経路は診断ポリシーで無効です', progress: 100 });
     }
 
     for (const themeNo of automaticGuidelineChecksEnabled ? desiredAutomaticThemeNos : []) {
@@ -4788,7 +4887,9 @@ export class BaselineFlowService {
     if (workflowStep !== undefined && this.deps.workflowScanTransportFactory !== undefined) {
       const baseUrls = [...new Set(workflowStep.targetSnapshot.map((target) => new URL(target).origin))];
       const plannedTargets = new Set(workflowStep.targetSnapshot.map((target) => ScopePolicy.canonicalUrl(target)));
-      const selectedWorkflowCheckIds = resolveWorkflowScanCheckIds(plan.guidelineIds);
+      const selectedWorkflowCheckIds: readonly WorkflowScanCheckId[] = selectedPolicy === undefined
+        ? resolveWorkflowScanCheckIds(plan.guidelineIds)
+        : selectedPolicy.routes.genericHttp.checkIds;
       const budget = { limit: workflowStep.limits.maxRequests, used: 0 };
       const evidenceRefs: string[] = [];
       const allChecks: import('../domain/workflow-scan.ts').WorkflowScanCheckResult[] = [];
@@ -4953,7 +5054,6 @@ export class BaselineFlowService {
     this.latestGuidelineRoutes = guidelineRoutes;
     this.latestUnsupportedAssessments = unsupportedAssessments;
 
-    const nucleiStep = plan.steps.find((candidate) => candidate.kind === 'nuclei-scan');
     let nucleiSummary: ActiveScanRunResult['nuclei'];
     if (nucleiStep !== undefined) {
       try {
@@ -4978,6 +5078,9 @@ export class BaselineFlowService {
         const nucleiOutput = await nucleiRunner.run({
           targets: nucleiTargets,
           limits: nucleiStep.limits,
+          ...(selectedPolicy === undefined || selectedPolicy.routes.nuclei.templateIds.length === 0
+            ? {}
+            : { templateIds: selectedPolicy.routes.nuclei.templateIds }),
           ...(control.signal === undefined ? {} : { signal: control.signal }),
           onLog: (line) => emit({ phase: 'running', engine: 'nuclei', message: line }),
         });
@@ -5043,7 +5146,7 @@ export class BaselineFlowService {
     this.scannedUrls = new Set(targets.map((url) => ScopePolicy.canonicalUrl(url)));
     this.assessmentEndedAt = this.deps.clock.now().toISOString();
     this.delegatedSteps = [
-      { stepId: step.stepId, engineKind: 'zap', engineVersion: this.deps.scanEngine.engineVersion },
+      ...(zapStep === undefined ? [] : [{ stepId: zapStep.stepId, engineKind: 'zap' as const, engineVersion: this.deps.scanEngine.engineVersion }]),
       ...(workflowStep === undefined ? [] : [{
         stepId: workflowStep.stepId,
         engineKind: 'node-http' as const,
@@ -5077,21 +5180,23 @@ export class BaselineFlowService {
     machine.transition(runRecord.state);
     this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: runRecord.stopReason! });
     emit({ phase: 'completed', engine: 'scopepilot', message: `診断完了: 所見 ${this.importer.list().length} 件`, progress: 100 });
-    this.record({
-      type: 'FindingsImported',
-      at: this.deps.clock.now().toISOString(),
-      source: 'zap-alert',
-      engineVersion: this.deps.scanEngine.engineVersion,
-      importedCount: importResult.created.length,
-      duplicateCount: importResult.duplicateCount,
-    });
+    if (zapStep !== undefined) {
+      this.record({
+        type: 'FindingsImported',
+        at: this.deps.clock.now().toISOString(),
+        source: 'zap-alert',
+        engineVersion: this.deps.scanEngine.engineVersion,
+        importedCount: zapImportedCount,
+        duplicateCount: zapDuplicateCount,
+      });
+    }
     return {
       runRecord,
       planHash,
       scanRequest,
       findings: this.importer.list(),
       overshootReservation: reservedRequests,
-      engineVersion: this.deps.scanEngine.engineVersion,
+      engineVersion: zapStep === undefined ? 'not-selected' : this.deps.scanEngine.engineVersion,
       requestCorpusEvidenceRef: requestCorpusEvidence.evidenceId,
       diagnosticRoutes,
       guidelineRoutes,
@@ -5272,6 +5377,16 @@ export class BaselineFlowService {
     if (!confirmationMatches(plan, confirmation)) {
       throw domainError('ConfirmationRequired', 'plan confirmation does not match the current plan');
     }
+  }
+
+  private requireCurrentScanPolicy(plan: ExecutionPlan): ScanPolicy | undefined {
+    if (plan.scanPolicyHash === undefined) return undefined;
+    const caseRecord = this.currentCase();
+    const policy = this.scanPolicies.findCurrentByHash(caseRecord.caseId, plan.scanPolicyHash, this.deps.clock.now().toISOString());
+    if (policy === undefined) {
+      throw domainError('ConfirmationRequired', 'scan policy changed after the plan was built; rebuild and confirm the plan');
+    }
+    return policy;
   }
 
   private currentAggregate(): CaseAggregate {

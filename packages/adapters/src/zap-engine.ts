@@ -698,6 +698,12 @@ export class ZapEngineAdapter implements ActiveScanEnginePort {
       const seededRequests = await this.seedAndVerify(seeds, cookies, sessionHeaders);
       await this.verifyAuthenticationProbe(execution.authenticationProbe, cookies, sessionHeaders);
       await this.activateHttpSessions(context.contextName, request.targets, cookies);
+      // A43: policy 全体の設定だけを更新する。scanner/plugin rule ID 単位の API は呼ばない。
+      await this.api('ascan/action/updateScanPolicy', {
+        ...(this.scanPolicy === '' ? {} : { scanPolicyName: this.scanPolicy }),
+        attackStrength: request.attackStrength.toUpperCase(),
+        alertThreshold: request.alertThreshold.toUpperCase(),
+      });
       const crawlRoot = request.targets[0];
       if (crawlRoot !== undefined) {
         const crawlBudgetMs = Math.min(request.leasedLimits.maxDurationMinutes * 60_000, 60_000);

@@ -25,6 +25,7 @@ export * from './domain/zap-unsupported.ts';
 export * from './domain/known-vulnerabilities.ts';
 export * from './domain/exploration.ts';
 export * from './domain/scan-planning.ts';
+export * from './domain/scan-policy.ts';
 export * from './domain/api-scanning.ts';
 export * from './domain/reporting.ts';
 export * from './domain/product-api.ts';
