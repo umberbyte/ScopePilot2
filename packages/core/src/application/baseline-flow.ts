@@ -1,3 +1,5 @@
+import type { GuidelineAutomationDisclosure } from '@scopepilot2/contracts';
+import { automaticGuidelineRequestCount, guidelineAutomationPolicy, GUIDELINE_AUTOMATION_POLICY_VERSION } from '../domain/guideline-automation.ts';
 /**
  * 基準シナリオ「案件作成→認可→探索→候補採用→能動診断→取込→所見→報告」の
  * application service。`docs/design/19-cli-automation.md` 5章、`docs/design/22-execution-control.md`。
@@ -397,7 +399,7 @@ export interface DiagnosticRouteResult {
   readonly findingCount?: number;
 }
 
-export interface GuidelineRouteResult {
+export interface GuidelineRouteResult extends GuidelineAutomationDisclosure {
   readonly routeId: string;
   readonly themeNo: string;
   readonly guidelineIds: readonly string[];
@@ -4447,20 +4449,36 @@ export class BaselineFlowService {
     };
     let diagnosticRoutes = planDiagnosticRoutes(adopted, this.deps.domObserver !== undefined);
     let guidelineRoutes: readonly GuidelineRouteResult[] = guidelineThemePlans.map((route) => ({
-      routeId: `zap-unsupported:${route.themeNo}`,
+      routeId: guidelineAutomationPolicy(route.themeNo).routeId,
       themeNo: route.themeNo,
       guidelineIds: route.guidelineIds,
+      automationPolicyVersion: route.automationPolicyVersion,
+      automationClass: route.automationClass,
+      missingInputCodes: route.missingInputCodes,
+      limitationCodes: route.limitationCodes,
       status: route.mode === 'needs-input'
         ? 'needs-input'
         : automaticGuidelineChecksEnabled
           ? 'delegated'
           : 'unavailable',
       detail: route.mode === 'needs-input'
-        ? '対象固有のURL・資格情報・比較条件またはレビュー済みpayloadをA03で指定して実行します'
+        ? guidelineAutomationPolicy(route.themeNo).deferredReason
         : automaticGuidelineChecksEnabled
           ? `確認済みHTTP対象 ${String(guidelineTargetUrls.length)} 件へ自動実行します`
           : '案件の最大リクエスト数にZAP用の最低1件と自動検査分を確保できないため実行しません',
     }));
+
+    // Theme 17 is an explicit non-sending route; it must never enter the probe loop.
+    if (guidelineThemePlans.length > 0) {
+      const policy = guidelineAutomationPolicy('17');
+      guidelineRoutes = [...guidelineRoutes, {
+        routeId: policy.routeId, themeNo: '17',
+        guidelineIds: [...new Set(guidelineThemePlans.flatMap((route) => route.guidelineIds))],
+        status: 'unavailable', detail: policy.deferredReason,
+        automationPolicyVersion: GUIDELINE_AUTOMATION_POLICY_VERSION,
+        automationClass: policy.automationClass, missingInputCodes: [], limitationCodes: policy.limitationCodes,
+      }];
+    }
 
     let requestCorpusEvidence;
     try {
@@ -5485,24 +5503,6 @@ function requiresInteractiveStateChange(inputPoints: readonly RequestInputPoint[
 function candidateAllowsAutomatedZap(candidate: ScanCandidate): boolean {
   const tracks = candidate.diagnosticTracks ?? ['zap-active'];
   return tracks.includes('zap-active') && !requiresInteractiveStateChange(candidate.inputPoints ?? []);
-}
-
-/** Upper bound used to reserve the shared request lease before automatic guideline probes. */
-function automaticGuidelineRequestCount(themeNo: ZapUnsupportedThemeNo, targetCount: number): number {
-  switch (themeNo) {
-    case '13':
-      // Same-origin control, one external Origin, and `null`; GET + OPTIONS for each.
-      return targetCount === 0 ? 0 : 6;
-    case '24':
-      return targetCount * 2;
-    case '25':
-      // OPTIONS plus the non-state-changing TRACE and TRACK defaults.
-      return targetCount === 0 ? 0 : 3;
-    case '30':
-      return targetCount;
-    default:
-      return 0;
-  }
 }
 
 function diagnosticRouteDetail(track: DiagnosticTrack, domAvailable: boolean): Pick<DiagnosticRouteResult, 'status' | 'detail'> {

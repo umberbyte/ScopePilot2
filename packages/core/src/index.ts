@@ -39,3 +39,4 @@ export * from './application/api-server.ts';
 
 export * from './ports/runtime-capability.ts';
 export * from './application/job-registry.ts';
+export * from './domain/guideline-automation.ts';

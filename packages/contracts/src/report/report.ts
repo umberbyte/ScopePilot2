@@ -1,3 +1,4 @@
+import type { GuidelineAutomationDisclosure } from '../plan/guideline-automation.ts';
 /** 報告の正規 model と成果物。`docs/detailed-design/f19-organizer-reporting.md`。 */
 import type { EngineKind } from '../plan/plan.ts';
 import type { OperationClass, ScopeLimits } from '../case/case.ts';
@@ -46,7 +47,7 @@ export interface ReportCoverage {
     readonly status: 'delegated' | 'executed' | 'needs-input' | 'unavailable';
     readonly detail: string;
   }[];
-  readonly guidelineRoutes?: readonly {
+  readonly guidelineRoutes?: readonly (GuidelineAutomationDisclosure & {
     readonly routeId: string;
     readonly themeNo: string;
     readonly guidelineIds: readonly string[];
@@ -54,7 +55,7 @@ export interface ReportCoverage {
     readonly detail: string;
     readonly checkId?: string;
     readonly checkStatus?: 'pass' | 'fail' | 'inconclusive';
-  }[];
+  })[];
   readonly delegatedSteps: readonly {
     readonly stepId: string;
     readonly engineKind: EngineKind;
