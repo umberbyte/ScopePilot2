@@ -32,7 +32,7 @@ test('SSE replays global Last-Event-ID without gaps, then delivers new events; p
     const list = await (await fetch(`${base}/api/jobs?state=active`)).json() as { jobs: unknown[] }; assert.equal(list.jobs.length, 2);
     const stop = await fetch(`${base}/api/jobs/${b}/stop`, { method: 'POST' }); assert.equal(stop.status, 202);
     const compatStop = await fetch(`${base}/api/run/scan/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ executionId: a }) });
-    assert.equal(compatStop.status, 202); assert.equal((await compatStop.json() as { state: string }).state, 'stopping');
+    assert.equal(compatStop.status, 202); assert.equal((await compatStop.json() as { state: string }).state, 'Stopping');
     const history = await (await fetch(`${base}/api/jobs/${a}/events?before=9999&limit=2`, { headers: { Accept: 'application/x-ndjson' } })).text();
     assert.equal(history.trim().split('\n').length, 2);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
@@ -52,7 +52,7 @@ test('jobs start and scan compatibility share registry, results, audit attributi
       const body = await response.json() as { jobId?: string; executionId?: string }; const id = body.jobId ?? body.executionId!;
       for (let n = 0; service.jobs.active(service.jobs.get(id)!.summary.state) && n < 100; n++) await new Promise(r => setTimeout(r, 5));
       const status = await (await fetch(`${base}/api/run/scan/status?executionId=${id}`)).json() as { state: string; logs: string[]; result: unknown };
-      assert.equal(status.state, 'completed'); assert.ok(status.logs.length > 1); assert.ok(status.result);
+      assert.equal(status.state, 'Completed'); assert.ok(status.logs.length > 1); assert.ok(status.result);
       assert.ok(service.events().some(e => e.type === 'RunStarted' && e.jobId === id && e.runId));
     }
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }

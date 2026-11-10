@@ -3035,7 +3035,7 @@ export class BaselineFlowService {
     operator: OperatorProfile,
     input: FuzzInput,
     control?: { isCancelled: () => boolean; progress: (total: number, rows: readonly FuzzRow[], sources: readonly FuzzPayloadSource[]) => void },
-  ): Promise<{ payloadSources: readonly FuzzPayloadSource[]; transport: 'fixture' | 'http'; rows: readonly FuzzRow[]; runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; sessionCookieNames?: readonly string[] }> {
+  ): Promise<{ adapterKind: AdapterKind; payloadSources: readonly FuzzPayloadSource[]; transport: 'fixture' | 'http'; rows: readonly FuzzRow[]; runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; sessionCookieNames?: readonly string[] }> {
     this.requirePermission(operator, 'run.manage');
     const adapter = this.requireToolAdapter('fuzzTransport');
     const adapterKind = adapter.adapterKind ?? 'real';
@@ -3170,7 +3170,7 @@ export class BaselineFlowService {
     (this.fuzzRuns as { adapterKind: AdapterKind; runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[]).push(record);
     this.record({ type: 'FuzzRunCompleted', at: record.executedAt, runId, targetUrl: canonical, total, sent: result.sent });
     return {
-      payloadSources, transport: adapterKind === 'fixture' ? 'fixture' : 'http', rows,
+      adapterKind, payloadSources, transport: adapterKind === 'fixture' ? 'fixture' : 'http', rows,
       runId,
       targetUrl: canonical,
       total,
@@ -3208,7 +3208,7 @@ export class BaselineFlowService {
     // Credentials remain only in this closure, never in persisted job metadata.
     const params = structuredClone(input);
     const id = this.jobs.create({ kind: 'sequencer', label: 'Sequencer', guarantee: 'Enforced',
-      transport: this.deps.sequencerTransport === undefined ? 'fixture' : 'live', budgetLimit: input.samples });
+      transport: this.deps.sequencerTransport?.adapterKind === 'fixture' || this.deps.sequencerTransport === undefined ? 'fixture' : 'live', budgetLimit: input.samples });
     void this.jobs.execute(id, async signal => {
       this.validateSequencerJob(operator, params);
       this.jobs.emit(id, { category: 'phase', messageKey: 'job.phase', message: 'Collecting samples', params: { phase: 'collect' },
@@ -3324,10 +3324,12 @@ export class BaselineFlowService {
     const assessment = assess(collection.tokens);
     const sessionId = this.deps.ids.next('seq');
     const verdict = assessment.verdict;
+    const adapterKind = adapter.adapterKind ?? 'real';
     const record = {
       sessionId,
       targetUrl: canonical,
       tokenSource: extractor.source,
+      adapterKind,
       ...(extractor.source === 'cookie' ? { tokenCookieName: extractor.cookieName } : {}),
       ...(extractor.source === 'hidden' ? { tokenFieldName: extractor.fieldName } : {}),
       ...(extractor.source === 'custom' ? { tokenStartDelimiter: extractor.startDelimiter, tokenEndDelimiter: extractor.endDelimiter } : {}),
@@ -3432,7 +3434,7 @@ export class BaselineFlowService {
   async startOastAttempt(
     operator: OperatorProfile,
     input: { readonly targetUrl: string; readonly protocol: OastProtocol },
-  ): Promise<{ attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; waitMs: number; transport: ToolTransport }> {
+  ): Promise<{ attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; waitMs: number; transport: ToolTransport; adapterKind: AdapterKind }> {
     this.requirePermission(operator, 'run.manage');
     const adapter = this.requireToolAdapter('oastProvider');
     const adapterKind = adapter.adapterKind ?? 'real';
@@ -3470,7 +3472,7 @@ export class BaselineFlowService {
     for (const events of pendingEvents) {
       this.recordProviderOastCallbacks(events);
     }
-    return { attemptId, targetUrl: canonical, protocol: input.protocol, token, waitMs: OAST_DEFAULT_WAIT_MS, transport };
+    return { attemptId, targetUrl: canonical, protocol: input.protocol, token, waitMs: OAST_DEFAULT_WAIT_MS, transport, adapterKind };
   }
 
   /**
@@ -3676,7 +3678,7 @@ export class BaselineFlowService {
   async sendWsMessages(
     operator: OperatorProfile,
     input: { readonly targetUrl: string; readonly messages: readonly string[]; readonly role?: string; readonly subprotocols?: readonly string[] },
-  ): Promise<{ planHash: string; sent: number; rejected: 'size' | 'rate' | null; transport: ToolTransport; connectionId?: string; logicalSessionId?: string; sessionCookieNames?: readonly string[]; negotiatedSubprotocol?: string }> {
+  ): Promise<{ planHash: string; sent: number; rejected: 'size' | 'rate' | null; transport: ToolTransport; adapterKind: AdapterKind; connectionId?: string; logicalSessionId?: string; sessionCookieNames?: readonly string[]; negotiatedSubprotocol?: string }> {
     this.requirePermission(operator, 'run.manage');
     const adapter = this.requireToolAdapter('webSocketTransport');
     const adapterKind = adapter.adapterKind ?? 'real';
@@ -3711,7 +3713,7 @@ export class BaselineFlowService {
     if (this.deps.webSocketTransport !== undefined) {
       if (input.messages.some((message) => Buffer.byteLength(message, 'utf8') > 1_000_000)) {
         this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: 0, rejected: 'size' });
-        return { planHash: plan.planHash, sent: 0, rejected: 'size', transport };
+        return { planHash: plan.planHash, sent: 0, rejected: 'size', transport, adapterKind };
       }
       const connectionId = this.deps.ids.next('ws-connection');
       const logicalSessionId = `ws-session-${hashStable('scopepilot2.ws.logical-session', { targetUrl: canonical, role: input.role ?? null, subprotocols }).slice(0, 16)}`;
@@ -3761,6 +3763,7 @@ export class BaselineFlowService {
         sent: transported.sent,
         rejected: null,
         transport,
+        adapterKind,
         connectionId,
         logicalSessionId,
         ...(transported.negotiatedSubprotocol === undefined ? {} : { negotiatedSubprotocol: transported.negotiatedSubprotocol }),
@@ -3789,6 +3792,7 @@ export class BaselineFlowService {
       sent: result.sent,
       rejected: result.rejected,
       transport,
+      adapterKind,
       connectionId,
       logicalSessionId,
       ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),

@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { DomainError, type ScanStateProjection } from '@scopepilot2/contracts';
 import type { BaselineFlowService, ActiveScanExecutionControl } from '@scopepilot2/core';
 import { createCoreApiServer } from '../../src/application/api-server.ts';
+import { JobRegistry } from '../../src/application/job-registry.ts';
 import { TEST_OPERATOR } from '../unit/support/test-flow.ts';
 
 for (const outcome of ['Completed', 'Stopped', 'Failed', 'Failed-result', 'Stopped-result'] as const) {
@@ -11,7 +12,12 @@ for (const outcome of ['Completed', 'Stopped', 'Failed', 'Failed-result', 'Stopp
     let finish!: () => void;
     let control!: ActiveScanExecutionControl;
     const gate = new Promise<void>((resolve) => { finish = resolve; });
-    const service = { async runActiveScan(...args: unknown[]) {
+    const jobs = new JobRegistry();
+    const service = {
+      jobs,
+      scanTransport: () => 'fixture' as const,
+      validateJobScan() {},
+      async runActiveScan(...args: unknown[]) {
       control = args[5] as ActiveScanExecutionControl;
       await gate;
       if (outcome === 'Stopped') throw new DomainError('Cancelled', 'cleanup finished');

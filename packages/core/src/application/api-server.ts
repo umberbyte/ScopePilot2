@@ -357,14 +357,16 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       const events = service.jobs.events().filter(e => e.jobId === executionId);
       const latest = events.findLast(e => e.category === 'phase');
       const command = events.findLast(e => e.refs?.command !== undefined)?.refs?.command ?? '';
-      const runState = job.summary.state;
+      const recorded = (job.result as { runRecord?: { state?: typeof job.summary.state; stopReason?: typeof job.summary.stopReason } } | undefined)?.runRecord;
+      const runState = recorded?.state ?? job.summary.state;
+      const stopReason = recorded?.stopReason ?? job.summary.stopReason;
       const dispatchState = job.summary.state === 'Queued' ? 'queued' : 'dispatched';
       const status = {
         executionId,
         state: runState,
         runState,
         dispatchState,
-        ...(job.summary.stopReason === undefined ? {} : { stopReason: job.summary.stopReason }),
+        ...(stopReason === undefined ? {} : { stopReason }),
         currentEngine: latest?.source === 'zap' || latest?.source === 'nuclei' ? latest.source : 'scopepilot',
         currentCommand: command,
         progress: job.summary.state === 'Completed' ? 100 : job.summary.counters.progress?.done ?? 0,

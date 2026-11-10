@@ -111,7 +111,7 @@ export class JobRegistry {
       } catch (cause) {
         this.require(id).error = redactJobText(cause instanceof Error ? cause.message : String(cause));
         if (!controller.signal.aborted && !(cause instanceof DomainError && cause.code === 'Cancelled')) this.emit(id, { category: 'error', level: 'error', messageKey: 'job.error', message: this.require(id).error!, params: {} });
-        this.transition(id, controller.signal.aborted || (cause instanceof DomainError && cause.code === 'Cancelled') ? 'Stopped' : 'Failed');
+        this.transition(id, (cause instanceof DomainError && cause.code === 'Cancelled') ? 'Stopped' : 'Failed');
       }
     });
   }
