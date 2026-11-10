@@ -4,6 +4,7 @@ import {
   domainError, hashStable, GuidelineExecutionStatuses, GuidelineAssessments,
   type GuidelineCoverageRoute, type GuidelineRouteSnapshot, type GuidelineCoveragePlan,
   type GuidelineItemExecution, type GuidelineRunCoverage, type GuidelineCoverageForecast,
+  type GuidelineCoverageSummaryView, type GuidelineCoverageItemView, type GuidelineCoverageResponse, type RunGuidelineCoverageResponse,
 } from '@scopepilot2/contracts';
 
 export function snapshotGuidelineRoute(route: GuidelineCoverageRoute, label = route.itemId): GuidelineRouteSnapshot {
@@ -166,4 +167,139 @@ export function assessGuidelineItems(snapshots: readonly GuidelineRouteSnapshot[
       executions.filter((e) => routes.some((r) => r.routeId === e.routeId && r.itemId === e.itemId)), routes.length,
     ),
   }));
+}
+import { resolveGuidelineThemeRoutes, type SupportedHttpGuideline } from './guideline-execution.ts';
+
+
+// GO-28 needs-input visibility (summary views). Temporary theme-class implementation until wired fully to GuidelineCoverageService.
+export function buildGuidelineCoverageSummary(
+  guidelineId: string,
+  catalogVersion: string = 'scopepilot-working-copy-2026-10-18',
+): GuidelineCoverageResponse {
+  // 迴ｾ蝨ｨ縺ｮ莉ｮ螳溯｣・ guideline-execution 縺ｮ蛻・｡槭ｒ菴ｿ逕ｨ
+  const routes = resolveGuidelineThemeRoutes([guidelineId]);
+
+  const automaticCount = routes.filter((r) => r.mode === 'automatic').length;
+  const needsInputCount = routes.filter((r) => r.mode === 'needs-input').length;
+
+  // 繧ｫ繧ｿ繝ｭ繧ｰ縺九ｉ鬆・岼繧貞叙蠕暦ｼ井ｻｮ螳溯｣・ 螳滄圀縺ｮ繧ｫ繧ｿ繝ｭ繧ｰ隱ｭ霎ｼ縺ｯGO-22縺ｧ螳溯｣・ｼ・  const items = buildCoverageItems(guidelineId, routes);
+
+  const summary: GuidelineCoverageSummaryView = {
+    guidelineId,
+    guidelineDisplayName: guidelineId,
+    totalItems: routes.length,
+    automaticCount,
+    conditionalAutomaticCount: 0, // GO-22縺ｧ螳溯｣・    needsInputCount,
+    unavailableCount: 0, // GO-22縺ｧ螳溯｣・    notApplicableCount: 0, // GO-22縺ｧ螳溯｣・    catalog: {
+      catalogId: 'scopepilot-working-workbook',
+      version: catalogVersion,
+      sha256: '33d32b195f84a36a77dd0eadeecfb490d0034a6dc6b2b41803af5ac8c99b882c', // 迴ｾ蝨ｨ縺ｮ蝗ｺ螳壼､
+    },
+  };
+
+  return {
+    summary,
+    items,
+  };
+}
+
+/**
+ * 繧ｫ繝舌Ξ繝・ず鬆・岼隧ｳ邏ｰ繧呈ｧ狗ｯ会ｼ井ｻｮ螳溯｣・ｼ・ */
+function buildCoverageItems(
+  guidelineId: string,
+  routes: readonly { themeNo: string; mode: 'automatic' | 'needs-input'; guidelineIds: readonly SupportedHttpGuideline[] }[],
+): readonly GuidelineCoverageItemView[] {
+  return routes.map((route) => {
+    const automationClass = route.mode === 'automatic' ? 'automatic' : ('operator-workflow' as const);
+    const guarantee = route.mode === 'automatic' ? ('Delegated' as const) : ('Enforced' as const);
+
+    const item: GuidelineCoverageItemView = {
+      itemId: `theme-${route.themeNo}`,
+      itemDisplayName: `繝・・繝・{route.themeNo}`,
+      checkItem: `繝・・繝・{route.themeNo}縺ｮ讀懆ｨｼ鬆・岼`, // GO-22縺ｧ繧ｫ繧ｿ繝ｭ繧ｰ縺九ｉ蜿門ｾ・      requirement: `繝・・繝・{route.themeNo}縺ｮ隕∽ｻｶ`, // GO-22縺ｧ繧ｫ繧ｿ繝ｭ繧ｰ縺九ｉ蜿門ｾ・      routes: [
+        {
+          routeId: `theme-${route.themeNo}-route-1`,
+          routeKind: 'theme',
+          guarantee,
+          automationClass,
+          estimatedRequests: route.mode === 'automatic' ? 10 : 0, // 莉ｮ蛟､
+          hasStateChange: route.mode !== 'automatic',
+          requiresRestoration: route.mode !== 'automatic',
+          missingInputs:
+            route.mode === 'needs-input'
+              ? [
+                  {
+                    code: 'REQUIRES_OPERATOR_INPUT',
+                    description: '謫堺ｽ懆・↓繧医ｋ蜈･蜉帙・遒ｺ隱阪・蠕ｩ蜈・′蠢・ｦ・,
+                  },
+                ]
+              : [],
+          limitations: [],
+        },
+      ],
+      // execution 縺ｯ螳溯｡悟ｾ後・縺ｿ・・ptional property 縺ｯ逵∫払・・    };
+    return item;
+  });
+}
+
+/**
+ * 螳溯｡梧ｸ医∩run縺ｮ繧ｬ繧､繝峨Λ繧､繝ｳ繧ｫ繝舌Ξ繝・ず繧貞叙蠕暦ｼ亥ｮ溯｡檎ｵ先棡・・ *
+ * @param runId - run ID
+ * @returns run蛻･繧ｬ繧､繝峨Λ繧､繝ｳ繧ｫ繝舌Ξ繝・ず蠢懃ｭ・ */
+export function buildRunGuidelineCoverage(runId: string): RunGuidelineCoverageResponse | null {
+  // GO-22螳溯｣・ｾ・■: 螳滄圀縺ｮrun邨先棡縺九ｉ繧ｫ繝舌Ξ繝・ず繧呈ｧ狗ｯ・  // 迴ｾ蝨ｨ縺ｯ莉ｮ螳溯｣・→縺励※ null 繧定ｿ斐☆・医瑚ｩｲ蠖途un縺ｪ縺励搾ｼ・  return null;
+}
+
+/**
+ * 隍・焚繧ｬ繧､繝峨Λ繧､繝ｳ縺ｮ繧ｫ繝舌Ξ繝・ず繧堤ｵｱ蜷・ *
+ * @param guidelineIds - 繧ｬ繧､繝峨Λ繧､繝ｳID驟榊・
+ * @returns 邨ｱ蜷医＆繧後◆繧ｫ繝舌Ξ繝・ず蠢懃ｭ・ */
+export function buildCombinedGuidelineCoverage(guidelineIds: readonly string[]): GuidelineCoverageResponse {
+  if (guidelineIds.length === 0) {
+    return {
+      summary: {
+        guidelineId: '',
+        guidelineDisplayName: '・域悴驕ｸ謚橸ｼ・,
+        totalItems: 0,
+        automaticCount: 0,
+        conditionalAutomaticCount: 0,
+        needsInputCount: 0,
+        unavailableCount: 0,
+        notApplicableCount: 0,
+        catalog: {
+          catalogId: '',
+          version: '',
+          sha256: '',
+        },
+      },
+      items: [],
+    };
+  }
+
+  // 隍・焚繧ｬ繧､繝峨Λ繧､繝ｳ縺ｮ蝣ｴ蜷医・縲・㍾隍・賜髯､縺励※髮・ｴ・  const allRoutes = resolveGuidelineThemeRoutes(guidelineIds);
+  const uniqueThemes = new Set(allRoutes.map((r) => r.themeNo));
+
+  const automaticCount = allRoutes.filter((r) => r.mode === 'automatic').length;
+  const needsInputCount = allRoutes.filter((r) => r.mode === 'needs-input').length;
+
+  const items = buildCoverageItems(guidelineIds.join(', '), allRoutes);
+
+  return {
+    summary: {
+      guidelineId: guidelineIds.join(', '),
+      guidelineDisplayName: `${guidelineIds.length}莉ｶ縺ｮ繧ｬ繧､繝峨Λ繧､繝ｳ`,
+      totalItems: uniqueThemes.size,
+      automaticCount,
+      conditionalAutomaticCount: 0,
+      needsInputCount,
+      unavailableCount: 0,
+      notApplicableCount: 0,
+      catalog: {
+        catalogId: 'scopepilot-working-workbook',
+        version: 'scopepilot-working-copy-2026-10-18',
+        sha256: '33d32b195f84a36a77dd0eadeecfb490d0034a6dc6b2b41803af5ac8c99b882c',
+      },
+    },
+    items,
+  };
 }

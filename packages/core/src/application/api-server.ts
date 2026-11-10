@@ -14,6 +14,7 @@ import type { JobEvent, ScanExecutionStatus, SequencerJobParams } from '@scopepi
 import { DomainError, DocumentAuthMethods, JobEventCategories, JobKinds, JobStates, hashStable, type AuthenticationMethod, type DocumentAuthMethod, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
 import type { BaselineFlowService } from './baseline-flow.ts';
 import { CodecRegistry, compareText, compareBinaryRows, fingerprintBytes, parseComparisonHex, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
+import { buildGuidelineCoverageSummary, buildRunGuidelineCoverage, buildCombinedGuidelineCoverage } from '../domain/guideline-coverage.ts';
 import type { LoginFlowStep } from '../domain/authentication-session.ts';
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -1420,6 +1421,40 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       // design/22 §6: 実行中のまま残った run を Interrupted へ。自動再開は行わない。
       const interrupted = runRepository.markInterrupted();
       return respondJson(response, 200, { interrupted });
+    }
+    if (route === 'GET /api/guidelines/coverage') {
+      // GO-28: ガイドラインカバレッジの計画前見込み (design/41 §8.3)
+      const guidelineId = url.searchParams.get('guidelineId');
+      if (guidelineId === null || guidelineId === '') {
+        return respondError(response, 400, 'ValidationFailed', 'guidelineId query parameter is required', false);
+      }
+      try {
+        const coverage = buildGuidelineCoverageSummary(guidelineId);
+        return respondJson(response, 200, coverage);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
+    }
+    if (url.pathname.startsWith('/api/runs/') && url.pathname.endsWith('/guideline-coverage')) {
+      // GO-28: run別ガイドラインカバレッジ (design/41 §8.3)
+      // パターン: /api/runs/{runId}/guideline-coverage
+      const match = /^\/api\/runs\/([^/]+)\/guideline-coverage$/.exec(url.pathname);
+      if (match === null) {
+        return respondError(response, 404, 'NotFound', `unknown route: ${route}`, false);
+      }
+      const runId = match[1];
+      if (runId === undefined || runId === '') {
+        return respondError(response, 400, 'ValidationFailed', 'runId path parameter is required', false);
+      }
+      try {
+        const coverage = buildRunGuidelineCoverage(runId);
+        if (coverage === null) {
+          return respondError(response, 404, 'NotFound', `run not found: ${runId}`, false);
+        }
+        return respondJson(response, 200, coverage);
+      } catch (cause) {
+        return respondDomainError(response, cause);
+      }
     }
     if (route === 'GET /api/events') {
       try {
