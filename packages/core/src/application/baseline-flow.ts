@@ -541,7 +541,8 @@ export class BaselineFlowService {
   private readonly payloadRegistrations = new Map<string, PayloadSetRegistration>();
   private readonly fuzzJobs = new Map<string, { view: FuzzRunView; cancelled: boolean }>();
   fuzzerStatus(): { transport: 'fixture' | 'http' } {
-    return { transport: this.deps.fuzzTransport === undefined ? 'fixture' : 'http' };
+    const kind = this.deps.fuzzTransport?.adapterKind;
+    return { transport: this.deps.fuzzTransport === undefined || kind === 'fixture' ? 'fixture' : 'http' };
   }
   getFuzzJob(runId: string): FuzzRunView {
     const job = this.fuzzJobs.get(runId);
@@ -3147,7 +3148,7 @@ export class BaselineFlowService {
       {
         isCancelled: () => control?.isCancelled() ?? false,
         attack: input.attack ?? 'cluster-bomb', originals, requestsPerSecond: rps,
-        now: () => (realTransport === undefined ? virtualNowMs : Date.now()),
+        now: () => (adapterKind === 'fixture' ? virtualNowMs : Date.now()),
         sleep: async (ms) => {
           if (adapterKind === 'fixture') {
             virtualNowMs += ms;
@@ -3169,7 +3170,7 @@ export class BaselineFlowService {
     (this.fuzzRuns as { adapterKind: AdapterKind; runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[]).push(record);
     this.record({ type: 'FuzzRunCompleted', at: record.executedAt, runId, targetUrl: canonical, total, sent: result.sent });
     return {
-      payloadSources, transport: realTransport === undefined ? 'fixture' : 'http', rows,
+      payloadSources, transport: adapterKind === 'fixture' ? 'fixture' : 'http', rows,
       runId,
       targetUrl: canonical,
       total,
@@ -3228,6 +3229,7 @@ export class BaselineFlowService {
     input: SequencerJobParams & { readonly signal?: AbortSignal; readonly partialOnStop?: boolean },
   ): Promise<SequencerSessionResult> {
     this.requirePermission(operator, 'run.manage');
+    const adapter = this.requireToolAdapter('sequencerTransport');
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
     const decision = ScopePolicy.decide(caseRecord.scope, canonical);
@@ -3284,40 +3286,10 @@ export class BaselineFlowService {
       }
     };
     throwIfCancelled();
-    if (this.deps.sequencerTransport === undefined) {
-      for (let index = 0; index < plan.target; index += 1) {
-        if (input.partialOnStop && input.signal?.aborted) break;
-        throwIfCancelled();
-        if (input.signal !== undefined) {
-          await new Promise<void>((resolve) => setImmediate(resolve));
-          if (input.partialOnStop && input.signal.aborted) break;
-          throwIfCancelled();
-        }
-        let token: string | undefined;
-        if (canonical.includes('no-token') && index % 5 === 4) {
-          token = undefined;
-        } else if (canonical.includes('fixed')) {
-          token = 'fixed-token-value';
-        } else {
-          token = `sample-${index.toString(36)}-${(index * 7 + 3).toString(36)}`;
-        }
-        const response = extractor.source === 'cookie'
-          ? {
-              body: 'cookie token response',
-              ...(token === undefined ? {} : { setCookieHeaders: [`${extractor.cookieName}=${token}; Path=/; HttpOnly`] }),
-            }
-          : extractor.source === 'hidden'
-            ? { body: token === undefined ? '<form></form>' : `<form><input value="${token}" name="${extractor.fieldName}" type="hidden"></form>` }
-            : extractor.source === 'bearer'
-              ? { body: 'bearer token response', ...(token === undefined ? {} : { authorizationHeader: `Bearer ${token}` }) }
-              : extractor.source === 'custom'
-                ? { body: token === undefined ? 'no token in this response' : `${extractor.startDelimiter}${token}${extractor.endDelimiter}` }
-                : { body: token === undefined ? 'no token in this response' : `token=${token}` };
-        recordSample(response);
-      }
-    } else {
+    {
       try {
-        await this.deps.sequencerTransport.collect({
+        await adapter.collect({
+          extractor,
           targetUrl: canonical,
           samples: plan.target,
           replayRequest,

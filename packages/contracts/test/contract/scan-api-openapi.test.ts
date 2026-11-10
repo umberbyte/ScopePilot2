@@ -34,15 +34,16 @@ test('scan async operations preserve current request, success and error contract
   assert.equal(stop.requestBody.content['application/json'].schema.$ref, '#/components/schemas/ScanStopRequest');
   assert.deepEqual(schemas.ScanStopRequest.required, ['executionId']);
   assert.equal(stop.responses['202'].content['application/json'].schema.$ref, '#/components/schemas/ScanStopAccepted');
-  assert.deepEqual(schemas.ScanStopAccepted.required, ['executionId', 'state']);
+  assert.deepEqual(schemas.ScanStopAccepted.required, ['executionId', 'state', 'runState', 'dispatchState']);
   assert.ok(stop.responses['400']);
   assert.ok(stop.responses['404']);
 });
 
 test('scan snapshot describes live progress and optional terminal result/error', () => {
-  assert.deepEqual(schemas.ScanExecutionState.enum, ['queued', 'running', 'stopping', 'stopped', 'completed', 'failed']);
+  const scanState = schemas.ScanExecutionState.$ref === '#/components/schemas/RunState' ? schemas.RunState : schemas.ScanExecutionState;
+  assert.deepEqual(scanState.enum, ['Draft', 'Validated', 'Authorized', 'Confirmed', 'Running', 'Stopping', 'Completed', 'Stopped', 'Failed', 'Interrupted']);
   const snapshot = schemas.ScanExecutionSnapshot;
-  assert.deepEqual(snapshot.required, ['executionId', 'state', 'currentEngine', 'currentCommand', 'progress', 'logs']);
+  assert.deepEqual(snapshot.required, ['executionId', 'state', 'currentEngine', 'currentCommand', 'progress', 'logs', 'runState', 'dispatchState']);
   assert.deepEqual(snapshot.properties.currentEngine.enum, ['zap', 'nuclei', 'scopepilot']);
   assert.equal(snapshot.properties.logs.type, 'array');
   assert.equal(snapshot.properties.logs.items.type, 'string');

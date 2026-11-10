@@ -106,7 +106,4 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'GET', path: '/api/jobs/events', operationId: 'streamJobEvents' },
   { method: 'GET', path: '/api/jobs/{jobId}/events', operationId: 'streamSingleJobEvents' },
   { method: 'POST', path: '/api/jobs/{jobId}/stop', operationId: 'stopJob' },
-  { method: 'POST', path: '/api/run/scan/start', operationId: 'startScanExecution' },
-  { method: 'GET', path: '/api/run/scan/status', operationId: 'getScanExecution' },
-  { method: 'POST', path: '/api/run/scan/stop', operationId: 'stopScanExecution' },
 ];

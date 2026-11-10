@@ -1,6 +1,7 @@
 import { domainError, hashStable, type AuthorizationRecord, type CaseRecord, type ExecutionPlan, type OperatorProfile, type PlanConfirmation, type PlanLimits, type ScopeLimits } from '@scopepilot2/contracts';
 import { ScopePolicy } from '../../domain/scope-policy.ts';
 import { mergeDocumentHintSeeds } from '../../domain/exploration.ts';
+import { discoverySeeds, DISCOVERY_VERSION } from '../../domain/exploration-discovery.ts';
 import { buildPlan, confirmationMatches, DEFAULT_ACTIVE_SCAN_LIMITS, DEFAULT_EXPLORE_LIMITS, firstPlanIssueAsError, planHashOf, validatePlan } from '../../domain/plan-service.ts';
 import { WORKFLOW_SCAN_DEFAULT_MAX_REQUESTS, WORKFLOW_SCAN_PAYLOAD_SET } from '../../domain/workflow-scan.ts';
 import type { BaselineFlowDeps } from '../baseline-contracts.ts';
@@ -51,7 +52,8 @@ export class PlanService {
         // document hint は許可 Origin 内の URL だけ追加開始点へ統合する (AGENTS.md)。
         // 計画の target snapshot に含まれるため、hint 由来の送信も確認画面の対象になる。
         const merged = mergeDocumentHintSeeds(seeds, this.context.documentHintDocuments.flatMap((document) => document.urls), caseRecord.scope);
-        const inputEvidenceHash = hashStable('scopepilot2.plan.input', merged.targets.map((url) => ScopePolicy.canonicalUrl(url)).sort());
+        const targets = [...new Set([...merged.targets, ...discoverySeeds(seeds.map((url) => new URL(url).origin), [])])];
+        const inputEvidenceHash = hashStable('scopepilot2.plan.input', { targets: targets.map((url) => ScopePolicy.canonicalUrl(url)).sort(), discoveryVersion: DISCOVERY_VERSION });
         const planId = this.deps.ids.next('plan');
         const plan = buildPlan({
             planId,
@@ -63,7 +65,7 @@ export class PlanService {
                 {
                     kind: 'explore',
                     operationClass: 'Browse',
-                    targets: merged.targets,
+                    targets,
                     engineKind: 'playwright',
                     guarantee: 'Enforced',
                     limits,

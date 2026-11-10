@@ -3,14 +3,14 @@ import { hashStable } from '@scopepilot2/contracts';
 import type { FuzzTransportPort, OastProviderPort, RepeaterTransportPort, SequencerTransportPort, WebSocketTransportPort } from '@scopepilot2/core';
 /** Explicit deterministic adapters for simulation/test composition only. */
 export function toolFixtures() {
-    const repeaterTransport: RepeaterTransportPort = { async send({ targetUrl }) {
+    const repeaterTransport: RepeaterTransportPort = { adapterKind: 'fixture', async send({ targetUrl }) {
             return { status: 200, headers: [['content-type', 'text/html']], body: Buffer.from(`<html><body>fixture response for ${new URL(targetUrl).pathname}</body></html>`), redirectLocations: [] };
         } };
-    const fuzzTransport: FuzzTransportPort = { async send({ targetUrl, combination }) {
+    const fuzzTransport: FuzzTransportPort = { adapterKind: 'fixture', async send({ targetUrl, combination }) {
             const body = `resp:${combination[0] ?? ''}`;
             return { requestUrl: targetUrl, status: 200, contentType: 'text/html', contentLength: body.length, bodyHash: hashStable('scopepilot2.fuzz.body', body) };
         } };
-    const sequencerTransport: SequencerTransportPort = { async collect(input) {
+    const sequencerTransport: SequencerTransportPort = { adapterKind: 'fixture', async collect(input) {
             for (let index = 0; index < input.samples; index += 1) {
                 if (input.signal !== undefined)
                     await new Promise<void>(resolve => setImmediate(resolve));
