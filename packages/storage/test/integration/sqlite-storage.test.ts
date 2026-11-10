@@ -140,20 +140,35 @@ describe('SQLite storage', () => {
 
   test('ファイル DB は再オープン後も状態を保持する', () => {
     const dir = mkdtempSync(join(tmpdir(), 'scopepilot2-storage-'));
+    let first: ReturnType<typeof openDatabase> | undefined;
+    let second: ReturnType<typeof openDatabase> | undefined;
     try {
       const path = join(dir, 'scopepilot.db');
-      const first = openDatabase(path);
+      first = openDatabase(path);
       migrate(first);
       new CaseRepository(first).save({ caseId: 'case-0001', name: 'persist', revision: 1, scope: { allowedOrigins: ['http://a.test'], deniedOrigins: [], limits: { maxRequests: 1, maxPages: 1, maxDurationMinutes: 1 } }, createdAt: '2026-10-18T09:00:00.000Z' });
       first.close();
+      first = undefined;
 
-      const second = openDatabase(path);
+      second = openDatabase(path);
       const result = migrate(second);
-      assert.deepEqual(result.appliedVersions, [1, 2, 3, 4, 5]);
+      assert.deepEqual(result.appliedVersions, [1, 2, 3, 4, 5, 6]);
       assert.equal(new CaseRepository(second).get('case-0001')?.name, 'persist');
       second.close();
+      second = undefined;
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      try { first?.close(); } catch { /* already closed */ }
+      try { second?.close(); } catch { /* already closed */ }
+      const deadline = Date.now() + 1000;
+      for (;;) {
+        try {
+          rmSync(dir, { recursive: true, force: true });
+          break;
+        } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code !== 'EPERM' || Date.now() >= deadline) throw cause;
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+        }
+      }
     }
   });
 });
