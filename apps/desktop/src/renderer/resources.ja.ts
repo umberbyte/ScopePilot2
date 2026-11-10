@@ -506,6 +506,14 @@ export const jaStrings = {
 
   'a05.intro':
     '実 proxy listener (通信傍受・転送本体) は実 engine 接続と共に後続増分です。ここでは break queue への受付と判断 (forward / drop) を扱います。deadline 経過・queue 上限は既定で drop し、暗黙 forward はしません。',
+  'a05.listenerWarning': '実 proxy listener は未接続です。この画面は fixture・検証用の供給点として動作します。',
+  'a05.interceptControl': 'Intercept 制御',
+  'a05.interceptEnabled': 'Intercept を有効化',
+  'a05.interceptRules': 'Intercept ルール',
+  'a05.interceptRequests': 'リクエストを傍受',
+  'a05.interceptResponses': 'レスポンスを傍受',
+  'a05.urlFilter': 'URL フィルタ（空欄で全て）',
+  'a05.urlFilterPlaceholder': '例: /api/',
   'a05.queueTitle': 'break queue ({items} 件・保持中 {held} 件)',
   'a05.directionLabel': '方向',
   'a05.referenceLabel': 'messageReference (原本参照・秘密値を含めない)',

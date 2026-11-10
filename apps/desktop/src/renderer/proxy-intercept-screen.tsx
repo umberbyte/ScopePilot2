@@ -5,7 +5,7 @@
  * この画面の受付 (intake) は fixture・検証用の供給点である。
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { MessageBar, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import { MessageBar, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens, Switch, Label, Divider } from '@fluentui/react-components';
 import { t } from './resources.ts';
 
 interface BreakItemView {
@@ -53,6 +53,10 @@ export function ProxyInterceptScreen({ apiBase }: { apiBase: string }): React.Re
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [interceptEnabled, setInterceptEnabled] = useState(false);
+  const [interceptRequests, setInterceptRequests] = useState(true);
+  const [interceptResponses, setInterceptResponses] = useState(false);
+  const [urlFilter, setUrlFilter] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -121,12 +125,57 @@ export function ProxyInterceptScreen({ apiBase }: { apiBase: string }): React.Re
   return (
     <div className={styles.section}>
       <Text className={styles.muted}>{t('a05.intro')}</Text>
+
+      <MessageBar intent="warning">
+        {t('a05.listenerWarning')}
+      </MessageBar>
+
       {error !== '' && (
         <MessageBar intent="error">
           {`Error: ${error}`}
         </MessageBar>
       )}
       {notice !== '' && <Text role="status">{notice}</Text>}
+
+      <Divider />
+
+      <div className={styles.section}>
+        <Text weight="semibold">{t('a05.interceptControl')}</Text>
+        <Field>
+          <Switch
+            checked={interceptEnabled}
+            onChange={(_, data) => setInterceptEnabled(data.checked)}
+            label={t('a05.interceptEnabled')}
+          />
+        </Field>
+        <Field label={t('a05.interceptRules')}>
+          <div className={styles.section}>
+            <Switch
+              checked={interceptRequests}
+              onChange={(_, data) => setInterceptRequests(data.checked)}
+              disabled={!interceptEnabled}
+              label={t('a05.interceptRequests')}
+            />
+            <Switch
+              checked={interceptResponses}
+              onChange={(_, data) => setInterceptResponses(data.checked)}
+              disabled={!interceptEnabled}
+              label={t('a05.interceptResponses')}
+            />
+          </div>
+        </Field>
+        <Field label={t('a05.urlFilter')}>
+          <Input
+            value={urlFilter}
+            onChange={(_, data) => setUrlFilter(data.value)}
+            disabled={!interceptEnabled}
+            placeholder={t('a05.urlFilterPlaceholder')}
+          />
+        </Field>
+      </div>
+
+      <Divider />
+
       <Text weight="semibold">{t('a05.queueTitle', { items: queue.items.length, held: held.length })}</Text>
       <Field label={t('a05.directionLabel')}>
         <Input value={direction} onChange={(_, data) => setDirection(data.value === 'response' ? 'response' : 'request')} />
