@@ -1084,10 +1084,21 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
+    if (route === 'GET /api/fuzzer/status') return respondJson(response, 200, service.fuzzerStatus());
+    if (route === 'GET /api/fuzzer/jobs') {
+      try { return respondJson(response, 200, service.getFuzzJob(url.searchParams.get('runId') ?? '')); }
+      catch (cause) { return respondDomainError(response, cause); }
+    }
+    if (route === 'POST /api/fuzzer/stop') {
+      const body = await readJsonBody(request, response);
+      if (body === undefined) return;
+      try { return respondJson(response, 200, service.stopFuzzJob(operator, stringField(body, 'runId'))); }
+      catch (cause) { return respondDomainError(response, cause); }
+    }
     if (route === 'GET /api/fuzzer/runs') {
       return respondJson(response, 200, { runs: service.listFuzzRuns() });
     }
-    if (route === 'POST /api/fuzzer/runs') {
+    if (route === 'POST /api/fuzzer/runs' || route === 'POST /api/fuzzer/jobs') {
       const body = await readJsonBody(request, response);
       if (body === undefined) {
         return;
@@ -1102,16 +1113,26 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
             throw new DomainError('ValidationFailed', `positions[${index}] must be an object`);
           }
           const record = position as Record<string, unknown>;
-          return { name: stringField(record, 'name'), values: stringArrayField(record, 'values') };
+          return { name: stringField(record, 'name'), values: record.values === undefined ? [] : stringArrayField(record, 'values'), ...(record.payloadSet === undefined ? {} : { payloadSet: stringField(record, 'payloadSet') }) };
         });
-        const result = await service.runFuzzSession(operator, {
+        let replay: import('@scopepilot2/contracts').FuzzInput['request'];
+        if (body.request !== undefined) {
+          if (typeof body.request !== 'object' || body.request === null || Array.isArray(body.request)) throw new DomainError('ValidationFailed', 'invalid request');
+          const record = body.request as Record<string, unknown>;
+          replay = { method: stringField(record, 'method') as NonNullable<typeof replay>['method'], bodyTemplate: stringField(record, 'bodyTemplate'), contentType: stringField(record, 'contentType') };
+        }
+        const input = {
+          ...(replay === undefined ? {} : { request: replay }),
+          ...(body.attack === undefined ? {} : { attack: stringField(body, 'attack') as import('@scopepilot2/contracts').FuzzAttack }),
+          ...(body.requestsPerSecond === undefined ? {} : { requestsPerSecond: numberField(body, 'requestsPerSecond') }),
           targetUrl: stringField(body, 'targetUrl'),
           positions,
           ...(body.maxRequests === undefined ? {} : { maxRequests: numberField(body, 'maxRequests') }),
           // role 指定時はその role の session cookie を適用する (design/08)。
           ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
-        });
-        return respondJson(response, 200, result);
+        };
+        const result = route === 'POST /api/fuzzer/jobs' ? service.startFuzzJob(operator, input) : await service.runFuzzSession(operator, input);
+        return respondJson(response, route === 'POST /api/fuzzer/jobs' ? 202 : 200, result);
       } catch (cause) {
         return respondDomainError(response, cause);
       }

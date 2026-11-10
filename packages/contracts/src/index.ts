@@ -21,3 +21,4 @@ export * from './analysis-tools.ts';
 export * from './sequencer.ts';
 export * from './plan/guideline-automation.ts';
 export * from './scan/passive.ts';
+export * from './fuzzer.ts';

@@ -1176,8 +1176,7 @@
                     "items": {
                       "type": "object",
                       "required": [
-                        "name",
-                        "values"
+                        "name"
                       ],
                       "properties": {
                         "name": {
@@ -1185,10 +1184,13 @@
                         },
                         "values": {
                           "type": "array",
-                          "minItems": 1,
+                          "minItems": 0,
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "payloadSet": {
+                          "type": "string"
                         }
                       },
                       "additionalProperties": false
@@ -1201,6 +1203,48 @@
                   "role": {
                     "type": "string",
                     "description": "runLogin 済み role。指定時はその role の session cookie を対象 URL の host/path に一致するものだけ適用する (design/08)"
+                  },
+                  "attack": {
+                    "type": "string",
+                    "enum": [
+                      "sniper",
+                      "battering-ram",
+                      "pitchfork",
+                      "cluster-bomb"
+                    ],
+                    "default": "cluster-bomb"
+                  },
+                  "requestsPerSecond": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2
+                  },
+                  "request": {
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "GET",
+                          "POST",
+                          "PUT",
+                          "PATCH",
+                          "DELETE"
+                        ]
+                      },
+                      "bodyTemplate": {
+                        "type": "string"
+                      },
+                      "contentType": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "bodyTemplate",
+                      "contentType"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -1246,6 +1290,50 @@
                       "description": "適用した session cookie の名前一覧 (role 指定時のみ。値は返さない)",
                       "items": {
                         "type": "string"
+                      }
+                    },
+                    "transport": {
+                      "type": "string",
+                      "enum": [
+                        "fixture",
+                        "http"
+                      ]
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FuzzRow"
+                      }
+                    },
+                    "payloadSources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "position": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          },
+                          "sha256": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "position",
+                          "name",
+                          "source",
+                          "version",
+                          "sha256"
+                        ],
+                        "additionalProperties": false
                       }
                     }
                   },
@@ -5894,6 +5982,214 @@
             }
           }
         ]
+      }
+    },
+    "/api/fuzzer/status": {
+      "get": {
+        "operationId": "getFuzzerStatus",
+        "responses": {
+          "200": {
+            "description": "Configured fuzzer transport; fixture sends no network requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "transport": {
+                      "type": "string",
+                      "enum": [
+                        "fixture",
+                        "http"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "transport"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fuzzer/jobs": {
+      "get": {
+        "operationId": "getFuzzJob",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current progress and bounded result metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FuzzRunView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "startFuzzJob",
+        "description": "Starts an in-memory fuzzer run. Validation/transport failures appear as Failed. One active fuzzer job; 20 jobs retained. No restart recovery.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetUrl",
+                  "positions"
+                ],
+                "properties": {
+                  "targetUrl": {
+                    "type": "string"
+                  },
+                  "positions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "name"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "values": {
+                          "type": "array",
+                          "minItems": 0,
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "payloadSet": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "maxRequests": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "role": {
+                    "type": "string",
+                    "description": "runLogin 済み role。指定時はその role の session cookie を対象 URL の host/path に一致するものだけ適用する (design/08)"
+                  },
+                  "attack": {
+                    "type": "string",
+                    "enum": [
+                      "sniper",
+                      "battering-ram",
+                      "pitchfork",
+                      "cluster-bomb"
+                    ],
+                    "default": "cluster-bomb"
+                  },
+                  "requestsPerSecond": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2
+                  },
+                  "request": {
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "GET",
+                          "POST",
+                          "PUT",
+                          "PATCH",
+                          "DELETE"
+                        ]
+                      },
+                      "bodyTemplate": {
+                        "type": "string"
+                      },
+                      "contentType": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "bodyTemplate",
+                      "contentType"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted job; poll for progress and validation errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FuzzRunView"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/fuzzer/stop": {
+      "post": {
+        "operationId": "stopFuzzJob",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "runId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stop requested; the current in-flight request may finish",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FuzzRunView"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -10811,6 +11107,132 @@
           "evidenceRefs",
           "observation",
           "reproduction"
+        ],
+        "additionalProperties": false
+      },
+      "FuzzRow": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "payload": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "integer"
+          },
+          "contentLength": {
+            "type": "integer"
+          },
+          "bodyHash": {
+            "type": "string"
+          },
+          "elapsedMs": {
+            "type": "number"
+          },
+          "lengthDiff": {
+            "type": "integer"
+          },
+          "changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "index",
+          "payload",
+          "status",
+          "contentLength",
+          "bodyHash",
+          "elapsedMs",
+          "lengthDiff",
+          "changed"
+        ],
+        "additionalProperties": false
+      },
+      "FuzzRunView": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "targetUrl": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "fixture",
+              "http"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "Running",
+              "Completed",
+              "Stopped",
+              "Failed"
+            ]
+          },
+          "total": {
+            "type": "integer"
+          },
+          "sent": {
+            "type": "integer"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FuzzRow"
+            }
+          },
+          "error": {
+            "type": "string"
+          },
+          "payloadSources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "position",
+                "name",
+                "source",
+                "version",
+                "sha256"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "runId",
+          "targetUrl",
+          "transport",
+          "state",
+          "total",
+          "sent",
+          "rows"
         ],
         "additionalProperties": false
       }

@@ -230,6 +230,7 @@ export interface FuzzTransportPort {
   readonly version?: string;
   send(input: {
     readonly targetUrl: string;
+    readonly request?: { readonly method: string; readonly body: string; readonly contentType: string };
     readonly combination: readonly string[];
     readonly positions: readonly { readonly name: string; readonly values: readonly string[] }[];
     readonly sessionCookies?: readonly { readonly name: string; readonly value: string; readonly domain: string; readonly path: string }[];

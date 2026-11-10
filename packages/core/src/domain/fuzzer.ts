@@ -3,11 +3,12 @@
  * 初期既定は concurrency 1、2 RPS、window/lease 25、checkpoint 100 (D-05)。
  * 組合せは materialize せず index で生成する。
  */
-import { domainError } from '@scopepilot2/contracts';
+import { type FuzzAttack, domainError } from '@scopepilot2/contracts';
 
 export interface FuzzPosition {
   readonly name: string;
   readonly values: readonly string[];
+  readonly payloadSet?: string;
 }
 
 export const FUZZ_DEFAULTS = {
@@ -18,7 +19,9 @@ export const FUZZ_DEFAULTS = {
 } as const;
 
 /** 組合せ総数が plan 上限を超えたら送信前に拒否する (F05-UT-001)。 */
-export function planCombinations(positions: readonly FuzzPosition[], maxRequests: number): { total: number } {
+export function planCombinations(positions: readonly FuzzPosition[], maxRequests: number, attack: FuzzAttack = 'cluster-bomb'): { total: number } {
+  if (!Number.isSafeInteger(maxRequests) || maxRequests < 1) throw domainError('ValidationFailed', 'invalid maxRequests');
+  if (!['sniper', 'battering-ram', 'pitchfork', 'cluster-bomb'].includes(attack)) throw domainError('ValidationFailed', 'invalid attack');
   let total = 1;
   const names = new Set<string>();
   for (const position of positions) {
@@ -34,17 +37,32 @@ export function planCombinations(positions: readonly FuzzPosition[], maxRequests
       throw domainError('ValidationFailed', `fuzz position ${position.name} has no values`);
     }
     total *= position.values.length;
-    if (total > maxRequests) {
+    if (attack === 'cluster-bomb' && total > maxRequests) {
       throw domainError('ValidationFailed', `combination count ${total} exceeds plan limit ${maxRequests}`, {
         details: { positions: positions.length, maxRequests },
       });
     }
   }
+  if (attack === 'sniper') total = positions.reduce((n, p) => n + p.values.length, 0);
+  if (attack === 'battering-ram') total = positions[0]?.values.length ?? 0;
+  if (attack === 'pitchfork') total = Math.min(...positions.map(p => p.values.length));
+  if (!Number.isSafeInteger(total) || total > maxRequests) throw domainError('ValidationFailed', `combination count ${total} exceeds plan limit ${maxRequests}`);
   return { total };
 }
 
 /** mixed-radix index から1組合せだけを生成する (全体を materialize しない)。 */
-export function combinationAt(positions: readonly FuzzPosition[], index: number): readonly string[] {
+export function combinationAt(positions: readonly FuzzPosition[], index: number, attack: FuzzAttack = 'cluster-bomb', originals: readonly string[] = []): readonly string[] {
+  if (attack === 'battering-ram') return positions.map(() => positions[0]?.values[index] ?? '');
+  if (attack === 'pitchfork') return positions.map(p => p.values[index] ?? '');
+  if (attack === 'sniper') {
+    let remaining = index;
+    let active = 0;
+    while (active < positions.length && remaining >= (positions[active]?.values.length ?? 0)) {
+      remaining -= positions[active]?.values.length ?? 0;
+      active++;
+    }
+    return positions.map((p, i) => i === active ? p.values[remaining] ?? '' : originals[i] ?? '');
+  }
   let remainder = index;
   const chosen: string[] = [];
   for (let i = positions.length - 1; i >= 0; i -= 1) {
@@ -153,9 +171,9 @@ export async function runFuzz(
   adapter: FuzzSendAdapter,
   positions: readonly FuzzPosition[],
   total: number,
-  options: { isCancelled: () => boolean; now: () => number; sleep: (ms: number) => Promise<void> },
+  options: { isCancelled: () => boolean; now: () => number; sleep: (ms: number) => Promise<void>; attack?: FuzzAttack; originals?: readonly string[]; requestsPerSecond?: number },
 ): Promise<{ sent: number; cancelledAt: number | null }> {
-  const governor = new RateGovernor();
+  const governor = new RateGovernor(options.requestsPerSecond);
   let sent = 0;
   for (let index = 0; index < total; index += 1) {
     if (options.isCancelled()) {
@@ -165,7 +183,8 @@ export async function runFuzz(
     if (waitMs > 0) {
       await options.sleep(waitMs);
     }
-    await adapter.send(index, combinationAt(positions, index));
+    if (options.isCancelled()) return { sent, cancelledAt: index };
+    await adapter.send(index, combinationAt(positions, index, options.attack, options.originals));
     sent += 1;
   }
   return { sent, cancelledAt: null };

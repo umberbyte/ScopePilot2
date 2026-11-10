@@ -142,3 +142,25 @@ describe('NodeFuzzTransport (実 HTTP 送信)', () => {
     }
   });
 });
+
+
+test('GO-15: body insertion transport sends method, UTF-8 byte length and body without query duplication', async () => {
+  let observed: { method: string | undefined; body: string; length: string | undefined; url: string | undefined } | undefined;
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', chunk => chunks.push(chunk));
+    request.on('end', () => {
+      observed = { method: request.method, body: Buffer.concat(chunks).toString('utf8'), length: request.headers['content-length'], url: request.url };
+      response.end('ok');
+    });
+  });
+  const base = await listen(server);
+  try {
+    const result = await new NodeFuzzTransport().send({ targetUrl: `${base}/body?keep=yes`, positions: [], combination: [], request: { method: 'POST', body: 'value=\u65e5', contentType: 'text/plain' } });
+    assert.equal(observed?.method, 'POST');
+    assert.equal(observed?.body, 'value=\u65e5');
+    assert.equal(Number(observed?.length), Buffer.byteLength('value=\u65e5'));
+    assert.equal(observed?.url, '/body?keep=yes');
+    assert.equal(result.status, 200);
+  } finally { await close(server); }
+});
