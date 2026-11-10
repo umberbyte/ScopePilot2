@@ -1,3 +1,4 @@
+import { isStaticReference, readStaticAsset } from './static-assets.ts';
 /**
  * Playwright explorer adapter。`docs/detailed-design/f08-browser-exploration.md`。
  * 実 adapter は browser context の request interception で scope を強制する
@@ -7,15 +8,15 @@
  * browser launcher は差し替え可能で、契約テストは stub context で行う
  * (実 browser での結合は実環境での確認項目)。
  */
-import type { BrowserSessionState, ExplorationPort, LoginSessionCookie } from '@scopepilot2/core';
+import type { BrowserSessionState, ExplorationControl, ExplorationPort, LoginSessionCookie } from '@scopepilot2/core';
 import type { ObservedHttpRequest, PageObservation, RequestInputPoint } from '@scopepilot2/contracts';
-import { ScopePolicy } from '@scopepilot2/core';
+import { analyzeClientAsset, discoveryFingerprint, allowedTextAsset, extractAssetReferences, MAX_ASSET_BYTES, validateComponentDatabase, ScopePolicy, type ComponentDatabase } from '@scopepilot2/core';
 import type { Request as PlaywrightRequest, Response as PlaywrightResponse } from 'playwright';
 
 /** テスト差替え用の最小 browser 面 (playwright の該当部分に対応)。 */
 export interface StubBrowserContext {
   /** session cookie を指定した観測 (observeWithSession 経由)。差替え実装は引数を無視できる。 */
-  newPage(session?: BrowserSessionState): Promise<StubPage>;
+  newPage(session?: BrowserSessionState, control?: ExplorationControl): Promise<StubPage>;
   /** payload 実行検証 (dialog・console 監視付きで URL を開く)。実装は検証結果だけを返す。 */
   verifyExecution?(url: string, session?: BrowserSessionState): Promise<{ executed: boolean; signals: readonly string[] }>;
   close(): Promise<void>;
@@ -38,6 +39,8 @@ export interface StubPage {
   observedResourceIds?(): Promise<readonly string[]>;
   /** Already-loaded JavaScript response bodies. Reading these must not issue another request. */
   scriptSources?(): Promise<readonly string[]>;
+  observedAssets?(): Promise<Pick<PageObservation, 'assets' | 'discoveryLinks' | 'contentFingerprint' | 'serviceWorkerRegistrations'>>;
+  clientRoutes?(): Promise<NonNullable<PageObservation['clientRoutes']>>;
   close(): Promise<void>;
 }
 
@@ -279,12 +282,10 @@ function withResponseBodyDeadline<T>(body: Promise<T>): Promise<T | null> {
 
 /** settle 待ち全体にも上限を設け、 capture task の滞留が観測を固めないようにする。 */
 async function withCaptureDeadline(tasks: Promise<unknown>): Promise<void> {
-  await Promise.race([
-    tasks.catch(() => undefined),
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, CAPTURE_SETTLE_DEADLINE_MS);
-    }),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([tasks.catch(() => undefined), new Promise<void>((resolve) => { timer = setTimeout(resolve, CAPTURE_SETTLE_DEADLINE_MS); })]);
+  } finally { clearTimeout(timer); }
 }
 
 /** 既定 launcher: playwright を動的 import して chromium を起動する。 */
@@ -319,11 +320,12 @@ const createDefaultLauncher = (
   fixedCookies: readonly BrowserCookie[] | undefined,
   proxyServer: string | undefined,
   requestAllowed: (url: string) => boolean,
+  database?: ComponentDatabase,
 ): BrowserLauncher => {
   return async () => {
     const playwright = await import('playwright');
     const browser = await playwright.chromium.launch(proxyServer === undefined ? {} : { proxy: { server: proxyServer } });
-    const newScopedContext = async () => {
+    const newScopedContext = async (control?: ExplorationControl) => {
       const context = await browser.newContext(proxyServer === undefined
         ? { serviceWorkers: 'block' }
         : { ignoreHTTPSErrors: true, serviceWorkers: 'block' });
@@ -332,7 +334,7 @@ const createDefaultLauncher = (
         // blob:/data: and other browser-local resources do not cause network
         // egress. HTTP(S) requests, including redirects and subresources, must
         // pass the current case scope before the browser sends them.
-        if (!/^https?:/i.test(requestUrl) || requestAllowed(requestUrl)) {
+        if (!/^https?:/i.test(requestUrl) || (requestAllowed(requestUrl) && !control?.signal?.aborted && (control?.consumeRequest() ?? true))) {
           await route.continue();
         } else {
           await route.abort('blockedbyclient');
@@ -344,7 +346,7 @@ const createDefaultLauncher = (
         const scopeUrl = webSocket.url()
           .replace(/^ws:/i, 'http:')
           .replace(/^wss:/i, 'https:');
-        if (requestAllowed(scopeUrl)) {
+        if (requestAllowed(scopeUrl) && !control?.signal?.aborted && (control?.consumeRequest() ?? true)) {
           webSocket.connectToServer();
         } else {
           await webSocket.close({ code: 1008, reason: 'blocked by scope' });
@@ -353,11 +355,11 @@ const createDefaultLauncher = (
       return context;
     };
     return {
-      newPage: async (session?: BrowserSessionState) => {
+      newPage: async (session?: BrowserSessionState, control?: ExplorationControl) => {
         // ZAP 等の自前 proxy を通る HTTPS は proxy のルート CA で再署名される。
         // fresh な browser context はその CA を信頼しないため、明示的に proxy を
         // 指定した観測に限り証明書検証を免除する (対象・経路は我々の管理内)。
-        const context = await newScopedContext();
+        const context = await newScopedContext(control);
         // 構成時 cookie と呼出時 cookie (runLogin で得た session) を context へ注入する。
         const cookies = [...(fixedCookies ?? []), ...(session?.cookies ?? [])];
         if (cookies.length > 0) {
@@ -380,12 +382,67 @@ const createDefaultLauncher = (
             for (const entry of state.sessionStorage) globalThis.sessionStorage.setItem(entry.name, entry.value);
           }, session!.origins);
         }
+        await context.addInitScript(() => {
+          const workers: string[] = [];
+          Object.defineProperty(globalThis, '__scopepilotWorkers', { value: workers });
+          if (navigator.serviceWorker) {
+            const register = navigator.serviceWorker.register.bind(navigator.serviceWorker);
+            navigator.serviceWorker.register = (url, options) => {
+              if (workers.length < 32) workers.push(new URL(String(url), location.href).href);
+              return register(url, options);
+            };
+          }
+          const routes: { url: string; source: 'history' | 'hash' }[] = [];
+          Object.defineProperty(globalThis, '__scopepilotRoutes', { value: routes });
+          const record = (source: 'history' | 'hash') => {
+            if (routes.length < 128) routes.push({ url: location.href, source });
+          };
+          for (const method of ['pushState', 'replaceState'] as const) {
+            const original = history[method].bind(history);
+            history[method] = (...args) => { original(...args); record('history'); };
+          }
+          addEventListener('hashchange', () => record('hash'));
+          addEventListener('popstate', () => record('history'));
+        });
         const page = await context.newPage();
+        const abort = () => { void context.close().catch(() => undefined); };
+        control?.signal?.addEventListener('abort', abort, { once: true });
+        if (control?.signal?.aborted) abort();
+        const timeout = control ? setTimeout(abort, control.timeoutMs) : undefined;
         const requests: ObservedHttpRequest[] = [];
         const scriptSources: string[] = [];
+        const assets = new Map<string, NonNullable<PageObservation['assets']>[number]>();
+        const discoveryLinks: { url: string; source: string }[] = [];
+        const assetTasks = new Set<Promise<void>>();
+        let assetBytesReserved = 0;
+        let assetCount = 0;
+        let contentFingerprint: string | undefined;
+        const captureAsset = (response: PlaywrightResponse): void => {
+          const sourceUrl = page.url();
+          const url = response.url();
+          const contentType = response.headers()['content-type'] ?? '';
+          if (assetCount >= 32 || assets.has(url) || response.status() >= 400 || !allowedTextAsset(url, contentType)) return;
+          if (new URL(url).origin !== new URL(sourceUrl).origin) return;
+          const declared = Number(response.headers()['content-length']);
+          if (!response.headers()['content-length'] || declared > MAX_ASSET_BYTES || assetBytesReserved + MAX_ASSET_BYTES > 8 * MAX_ASSET_BYTES) return;
+          assetCount++;
+          assetBytesReserved += MAX_ASSET_BYTES;
+          const task = withResponseBodyDeadline(response.body()).then((body) => {
+            if (!body || body.byteLength > MAX_ASSET_BYTES) return;
+            const text = body.toString('utf8');
+            const asset = analyzeClientAsset({ url, sourceUrl, contentType, body: text, observedTokens: [...(session?.cookies ?? []).map((cookie) => cookie.value), ...(session?.origins ?? []).flatMap((origin) => [...origin.localStorage, ...origin.sessionStorage].map((entry) => entry.value)), ...(session?.headers ?? []).map((header) => header.value.replace(/^Bearer /i, ''))].slice(0, 128), headers: response.headers(), ...(database ? { database } : {}) });
+            if (!asset) return;
+            assets.set(url, asset);
+            discoveryLinks.push(...extractAssetReferences(text, url));
+            if (response.request().isNavigationRequest() && response.frame() === page.mainFrame()) contentFingerprint = discoveryFingerprint(text, url);
+          }).catch(() => undefined).then(() => undefined);
+          assetTasks.add(task);
+          void task.finally(() => assetTasks.delete(task));
+        };
         const scriptCaptureTasks = new Set<Promise<void>>();
         let capturedScriptBytes = 0;
         const captureRequest = (request: PlaywrightRequest): void => {
+          if (requests.length >= 2048 || !ScopePolicy.decide({ allowedOrigins: [new URL(page.url()).origin], deniedOrigins: [] }, request.url()).allowed) return;
           const method = request.method().toUpperCase();
           requests.push({
             requestId: `browser-${String(requests.length + 1).padStart(6, '0')}`,
@@ -423,7 +480,7 @@ const createDefaultLauncher = (
           }
         };
         const captureScriptResponse = (response: PlaywrightResponse): void => {
-          if (response.request().resourceType() !== 'script') return;
+          if (response.request().resourceType() !== 'script' || new URL(response.url()).origin !== new URL(page.url()).origin) return;
           const declaredLength = Number.parseInt(response.headers()['content-length'] ?? '', 10);
           if (Number.isFinite(declaredLength) && declaredLength > MAX_SINGLE_SCRIPT_SOURCE_BYTES) return;
           const task = withResponseBodyDeadline(response.body()).then((body) => {
@@ -444,6 +501,7 @@ const createDefaultLauncher = (
           void task.finally(() => bodyCaptureTasks.delete(task));
         };
         page.on('request', captureRequest);
+        page.on('response', captureAsset);
         page.on('response', captureScriptResponse);
         page.on('response', captureApiResponse);
         return {
@@ -481,7 +539,7 @@ const createDefaultLauncher = (
           },
           settle: async () => {
             await page.waitForLoadState('networkidle', { timeout: 1_500 }).catch(() => undefined);
-            await withCaptureDeadline(Promise.all([...scriptCaptureTasks, ...bodyCaptureTasks]));
+            await withCaptureDeadline(Promise.all([...scriptCaptureTasks, ...bodyCaptureTasks, ...assetTasks]));
           },
           url: () => page.url(),
           title: async () => await page.title(),
@@ -505,7 +563,18 @@ const createDefaultLauncher = (
             await Promise.all([...scriptCaptureTasks]);
             return [...scriptSources];
           },
+          observedAssets: async () => {
+            await withCaptureDeadline(Promise.all([...assetTasks]));
+            const workerRegistrations = await page.evaluate(() => (globalThis as unknown as { __scopepilotWorkers?: string[] }).__scopepilotWorkers ?? []);
+            return { assets: [...assets.values()], serviceWorkerRegistrations: workerRegistrations.filter((url) => new URL(url).origin === new URL(page.url()).origin).map((url) => ({ url, status: 'attempted' as const })), discoveryLinks: discoveryLinks.slice(0, 256), ...(contentFingerprint ? { contentFingerprint } : {}) };
+          },
+          clientRoutes: async () => await page.evaluate(() => {
+            return (globalThis as unknown as { __scopepilotRoutes?: { url: string; source: 'history' | 'hash' }[] }).__scopepilotRoutes ?? [];
+          }),
           close: async () => {
+            clearTimeout(timeout);
+            control?.signal?.removeEventListener('abort', abort);
+            page.off('response', captureAsset);
             page.off('request', captureRequest);
             page.off('response', captureScriptResponse);
             page.off('response', captureApiResponse);
@@ -567,6 +636,7 @@ const createDefaultLauncher = (
 export interface PlaywrightExplorerOptions {
   readonly scope: { readonly allowedOrigins: readonly string[]; readonly deniedOrigins: readonly string[] };
   readonly launcher?: BrowserLauncher;
+  readonly componentDatabase?: ComponentDatabase;
   /** 認証済み session の cookie。既定 launcher でのみ使う (差替え launcher は自前で扱う)。 */
   readonly cookies?: readonly BrowserCookie[];
   /** Route exploration through ZAP so authenticated browser traffic seeds its site tree. */
@@ -651,6 +721,8 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
   readonly engineVersion = 'playwright-chromium';
   private scope: PlaywrightExplorerOptions['scope'];
   private readonly launcher: BrowserLauncher;
+  private readonly staticReader: boolean;
+  private readonly database: ComponentDatabase | undefined;
   private readonly beforeSessionObservation: ((url: string) => Promise<void>) | undefined;
   /**
    * ZAP の active HTTP session 解除は同じ login session / origin につき一度でよい。
@@ -664,10 +736,14 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
 
   constructor(options: PlaywrightExplorerOptions) {
     this.scope = options.scope;
+    this.staticReader = options.launcher === undefined && options.proxyServer === undefined;
+    this.database = options.componentDatabase ? structuredClone(options.componentDatabase) : undefined;
+    if (options.componentDatabase) validateComponentDatabase(options.componentDatabase);
     this.launcher = options.launcher ?? createDefaultLauncher(
       options.cookies,
       options.proxyServer,
       (url) => ScopePolicy.decide(this.scope, url).allowed,
+      this.database,
     );
     this.beforeSessionObservation = options.beforeSessionObservation;
   }
@@ -695,8 +771,8 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
     return this.resolvedVersion;
   }
 
-  async observe(url: string): Promise<PageObservation | null> {
-    return await this.observeInternal(url, undefined);
+  async observe(url: string, control?: ExplorationControl): Promise<PageObservation | null> {
+    return await this.observeInternal(url, undefined, control);
   }
 
   /**
@@ -706,8 +782,9 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
   async observeWithSession(
     url: string,
     session: BrowserSessionState,
+    control?: ExplorationControl,
   ): Promise<PageObservation | null> {
-    return await this.observeInternal(url, session);
+    return await this.observeInternal(url, session, control);
   }
 
   /**
@@ -728,10 +805,18 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
     return await context.verifyExecution(url, session);
   }
 
-  private async observeInternal(url: string, sessionState: BrowserSessionState | undefined): Promise<PageObservation | null> {
+  private async observeInternal(url: string, sessionState: BrowserSessionState | undefined, control?: ExplorationControl): Promise<PageObservation | null> {
     // scope 強制は経路の入口でも行う (Enforced: ここは送信前)。
     if (!ScopePolicy.decide(this.scope, url).allowed) {
       return null;
+    }
+    if (this.staticReader && sessionState === undefined && isStaticReference(url)) {
+      try {
+        return await readStaticAsset({ url, scope: this.scope, ...(control ? { control } : {}), ...(this.database ? { database: this.database } : {}), analyseScript: (body, assetUrl) => ({ links: extractScriptRouteLiterals(body, assetUrl).candidates, routeTemplates: extractScriptRouteLiterals(body, assetUrl).templates, scriptApiCalls: extractScriptApiCalls(body, assetUrl) }) });
+      } catch (cause) {
+        if (control?.signal?.aborted || cause instanceof TypeError || (cause instanceof Error && /abort|timeout/i.test(cause.name))) return navigationFailureObservation(url);
+        throw cause;
+      }
     }
     if (sessionState !== undefined) {
       // ZAP の HTTP Sessions add-on は active session の cookie を上書き注入する。
@@ -749,7 +834,7 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
       }
     }
     const context = await this.ensureContext();
-    const page = await context.newPage(sessionState);
+    const page = await context.newPage(sessionState, control);
     try {
       const response = await page.goto(url);
       if (response === null) {
@@ -758,6 +843,8 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
       await page.settle?.();
       const finalUrl = page.url?.() ?? url;
       const status = response.status();
+      const assetObservation = await page.observedAssets?.() ?? {};
+      const clientRoutes = (await page.clientRoutes?.() ?? []).filter((route) => ScopePolicy.decide(this.scope, route.url).allowed);
       const contentType = response.headers()['content-type'] ?? 'application/octet-stream';
       const scopeAllowedRequests = (page.observedRequests?.() ?? []).filter((request) => ScopePolicy.decide(this.scope, request.url).allowed);
       if (status >= 400 || !/^(?:text\/html|application\/xhtml\+xml)(?:;|$)/i.test(contentType)) {
@@ -772,6 +859,7 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
           discoveredFrom: null,
           depth: 0,
           originType: 'crawl',
+          ...assetObservation,
           links: [],
           ...(errorPageResourceIds.length === 0 ? {} : { observedResourceIds: errorPageResourceIds }),
           forms: [],
@@ -797,6 +885,10 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
           }
         }),
       );
+      const staticReferences = await page.$$eval('script[src], link[rel="manifest"]', (elements) => elements.map((candidate) => {
+        const element = candidate as Element;
+        return new URL(element.getAttribute('src') ?? element.getAttribute('href') ?? '', location.href).href;
+      }));
       const scriptAnalysis = (await page.scriptSources?.() ?? [])
         .reduce((accumulated: { candidates: string[]; templates: string[]; apiCalls: { url: string; method: string }[] }, source) => {
           const extracted = extractScriptRouteLiterals(source, finalUrl);
@@ -857,7 +949,11 @@ export class PlaywrightExplorerAdapter implements ExplorationPort {
         discoveredFrom: null,
         depth: 0,
         originType: 'crawl',
+        ...assetObservation,
+        clientRoutes,
         links: [...new Set([
+          ...(staticReferences as string[]).filter((value) => ScopePolicy.decide(this.scope, value).allowed),
+          ...clientRoutes.map((route) => route.url),
           ...(links as readonly string[]).filter((link) => link.startsWith('http://') || link.startsWith('https://')),
           ...scriptAnalysis.candidates,
         ])],

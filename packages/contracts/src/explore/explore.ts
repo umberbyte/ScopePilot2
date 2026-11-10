@@ -40,6 +40,14 @@ export interface FormDescriptor {
 }
 
 export interface PageObservation {
+  /** Registration attempts observed with service worker execution blocked. */
+  readonly serviceWorkerRegistrations?: readonly { readonly url: string; readonly status: 'attempted' }[];
+  readonly authenticationReview?: readonly import('./assets.ts').ClientReviewSignal[];
+  readonly assets?: readonly import('./assets.ts').AssetObservation[];
+  readonly clientRoutes?: readonly { readonly url: string; readonly source: 'history' | 'hash' | 'workflow' }[];
+  readonly discoveryLinks?: readonly { readonly url: string; readonly source: string }[];
+  /** Fingerprint of bounded text for discovery negative controls. No body is returned. */
+  readonly contentFingerprint?: string;
   /** canonical URL。 */
   readonly url: string;
   /** Final main-frame URL after redirects or client-side routing. */
@@ -89,6 +97,10 @@ export type CandidateCategory = (typeof CandidateCategories)[number];
 
 /** 候補は観測事実から生成される。guidelineBasis は例えば `WSTG-INFO-06` の参照識別子。 */
 export interface ScanCandidate {
+  readonly observedRoles?: readonly string[];
+  readonly score?: number;
+  readonly scoreSignals?: readonly string[];
+  readonly provenance?: readonly { readonly source: string; readonly url: string }[];
   readonly candidateId: string;
   readonly url: string;
   readonly method: string;

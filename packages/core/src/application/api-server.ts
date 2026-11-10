@@ -151,7 +151,9 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return;
       }
       try {
-        const result = service.buildExplorationPlan(operator, stringArrayField(body, 'seeds'), optionalLimitsField(body));
+        const sources = body.discoverySources === undefined ? undefined : stringArrayField(body, 'discoverySources');
+        if (sources?.some((source) => !['robots', 'sitemap', 'manifest', 'wordlist'].includes(source))) throw new DomainError('ValidationFailed', 'unknown discovery source');
+        const result = service.buildExplorationPlan(operator, stringArrayField(body, 'seeds'), optionalLimitsField(body), sources === undefined ? undefined : { discoverySources: sources as import('@scopepilot2/contracts').DiscoverySource[] });
         service.authorizePlan(result.plan);
         return respondJson(response, 200, { plan: result.plan, planHash: result.planHash });
       } catch (cause) {
@@ -306,8 +308,12 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       if (body === undefined) {
         return;
       }
+      const controller = new AbortController();
+      const abortOnDisconnect = () => { if (!response.writableEnded) controller.abort(); };
+      response.on('close', abortOnDisconnect);
       try {
         const result = await service.runExploration(operator, planField(body), confirmationField(body), {
+          signal: controller.signal,
           maxDepth: positiveIntegerField(body, 'maxDepth'),
           // role 指定時は runLogin 済み session で観測する (design/f09)。
           ...(typeof body.role === 'string' ? { role: stringField(body, 'role') } : {}),
@@ -315,6 +321,8 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondJson(response, 200, result);
       } catch (cause) {
         return respondDomainError(response, cause);
+      } finally {
+        response.off('close', abortOnDisconnect);
       }
     }
     if (route === 'POST /api/run/scan/start' || route === 'POST /api/jobs') {
@@ -486,6 +494,9 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
     }
     if (route === 'GET /api/findings') {
       return respondJson(response, 200, { findings: service.listFindings() });
+    }
+    if (route === 'GET /api/observations/assets') {
+      return respondJson(response, 200, { assets: service.listAssetObservations() });
     }
     if (route === 'GET /api/observations') {
       // site map の素材 (design/02 A04)。観測 URL と scope 拒否を開示する。

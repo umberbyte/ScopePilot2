@@ -58,6 +58,8 @@ import {
   type SessionVerification,
 } from '@scopepilot2/contracts';
 import { ScopePolicy } from '../domain/scope-policy.ts';
+import { reviewJwt } from '../domain/client-review.ts';
+import { discoverySeeds, DISCOVERY_VERSION, DISCOVERY_WORDLIST, rankCandidates } from '../domain/exploration-discovery.ts';
 import { mergeDocumentHintSeeds } from '../domain/exploration.ts';
 import { CaseAggregate } from '../domain/case-aggregate.ts';
 import { RunStateMachine } from '../domain/run-state-machine.ts';
@@ -329,6 +331,7 @@ export interface GrantAuthorizationInput {
 }
 
 export interface ExploreRunInput {
+  readonly signal?: AbortSignal;
   readonly maxDepth: number;
   /** runLogin 済みの role。指定時はその role の session cookie で観測する (design/f09)。 */
   readonly role?: string;
@@ -340,6 +343,7 @@ export interface ExploreRunResult {
   readonly observations: readonly PageObservation[];
   readonly deniedUrls: readonly { readonly url: string; readonly reason: string }[];
   readonly candidates: readonly ScanCandidate[];
+  readonly authenticationReview?: readonly import('@scopepilot2/contracts').ClientReviewSignal[];
   readonly engineVersion: string;
 }
 
@@ -654,6 +658,7 @@ export class BaselineFlowService {
    * login 実行時の観測 (role ごと・最新 1 件)。SPA の XHR 裏付け認証 API は
    * 探索では観測できないため、ここから診断候補を補完する (design/f09)。
    */
+  private readonly workflowObservations = new Map<string, PageObservation>();
   private readonly loginObservations = new Map<string, PageObservation>();
   private exploredUrlCount = 0;
   private scannedUrlCount = 0;
@@ -854,6 +859,27 @@ export class BaselineFlowService {
   }
 
   /** 探索で scope 拒否された URL (開示用)。 */
+  private recordWorkflowObservation(result: Awaited<ReturnType<InteractiveBrowserPort['execute']>>): void {
+    const scope = this.currentCase().scope;
+    if (!ScopePolicy.decide(scope, result.finalUrl).allowed) return;
+    const observation: PageObservation = {
+      url: result.finalUrl, status: result.status ?? 0, contentType: 'text/html', discoveredFrom: null,
+      depth: 0, originType: 'crawl', links: [], forms: [],
+      requests: (result.observedRequests ?? []).filter((request) => ScopePolicy.decide(scope, request.url).allowed),
+      clientRoutes: (result.clientRoutes ?? []).filter((route) => ScopePolicy.decide(scope, route.url).allowed),
+    };
+    this.observationsByUrl.set(observation.url, observation);
+    this.workflowObservations.set(observation.url, observation);
+    const extra = candidatesFromObservation(observation, this.deps.ids).map((candidate) => ({ ...candidate, provenance: [{ source: 'reviewed-workflow', url: observation.url }] }));
+    const keys = new Set(this.latestCandidates.map((candidate) => `${candidate.method}|${candidate.url}`));
+    this.latestCandidates = rankCandidates([...this.latestCandidates, ...extra.filter((candidate) => !keys.has(`${candidate.method}|${candidate.url}`) && !isSessionControlUrl(candidate.url))]);
+  }
+
+  listAssetObservations(): readonly import('@scopepilot2/contracts').AssetObservation[] {
+    const assets = this.listObservations().flatMap((observation) => observation.assets ?? []);
+    return [...new Map(assets.map((asset) => [asset.url, asset])).values()];
+  }
+
   listDeniedUrls(): readonly { url: string; reason: string }[] {
     return [...this.deniedUrlLog];
   }
@@ -2637,8 +2663,11 @@ export class BaselineFlowService {
             targetUrl: canonical,
             scope: caseRecord.scope,
             steps: item.steps,
+            maxRequests: Math.min(10000, caseRecord.scope.limits.maxRequests),
+            maxDurationMs: Math.min(300000, caseRecord.scope.limits.maxDurationMinutes * 60000),
             ...(browserSession === undefined ? {} : { browserSession }),
           });
+          this.recordWorkflowObservation(observation);
           observations.push({ role, finalUrl: observation.finalUrl, status: observation.status, bodyHash: observation.bodyHash, assertionsPassed: observation.assertions.every((entry) => entry.passed) });
         }
         const fingerprints = new Set(observations.map((entry) => `${entry.status}:${entry.finalUrl}:${entry.bodyHash}`));
@@ -2658,11 +2687,16 @@ export class BaselineFlowService {
         targetUrl: canonical,
         scope: caseRecord.scope,
         steps: item.steps,
+        maxRequests: Math.min(10000, caseRecord.scope.limits.maxRequests),
+        maxDurationMs: Math.min(300000, caseRecord.scope.limits.maxDurationMinutes * 60000),
         ...(browserSession === undefined ? {} : { browserSession }),
         ...(selectedFiles.length === 0 ? {} : { files: selectedFiles }),
       });
+      this.recordWorkflowObservation(observation);
       const assertionsPassed = observation.assertions.every((entry) => entry.passed);
       const evidenceObservation = {
+        observedRequests: observation.observedRequests ?? [],
+        clientRoutes: observation.clientRoutes ?? [],
         finalUrl: observation.finalUrl,
         status: observation.status,
         bodyHash: observation.bodyHash,
@@ -2890,8 +2924,16 @@ export class BaselineFlowService {
     }
     // login 実行時の観測を候補の根拠として保持する (探索結果へ合成する)。
     // 観測には値が含まれず、scope は探索の合成時に改めて判定する。
-    if ((result.observedRequests?.length ?? 0) > 0) {
+    if (result.authenticated || (result.observedRequests?.length ?? 0) > 0) {
+      const jwtValues = [...result.cookies.map((cookie) => cookie.value), ...(result.browserState?.origins ?? []).flatMap((origin) => [...origin.localStorage, ...origin.sessionStorage].map((entry) => entry.value)), ...(result.browserState?.headers ?? []).map((header) => header.value.replace(/^Bearer /i, ''))];
+      const authenticationReview = jwtValues.slice(0, 128).flatMap((value) => reviewJwt(value));
+      if (authenticationReview.length) {
+        const evidence = await this.deps.evidence.saveText(`jwt-review:${input.role}`, canonicalJson({ analyzerVersion: 'client-review-1', signals: authenticationReview }));
+        const imported = this.importer.importObservationCandidates(authenticationReview.map((signal) => ({ key: `jwt-review:${signal.ruleId}`, title: `JWT: ${signal.ruleId} (passive review; acceptance untested)`, url: result.finalUrl, method: 'GET', param: signal.ruleId, severity: 'info' as const })), { now: this.deps.clock.now().toISOString(), engineVersion: 'client-review-1', makeFindingId: () => this.deps.ids.next('finding'), evidenceRef: evidence.evidenceId });
+        this.persistFindings([...imported.created, ...imported.reobserved]);
+      }
       this.loginObservations.set(input.role, {
+        authenticationReview,
         url: result.finalUrl,
         status: result.authenticated ? 200 : 401,
         contentType: 'text/html',
@@ -2900,7 +2942,7 @@ export class BaselineFlowService {
         originType: 'crawl',
         links: [],
         forms: [],
-        requests: result.observedRequests!,
+        requests: result.observedRequests ?? [],
       });
     }
     const cookieNames = result.cookies.map((cookie) => cookie.name);
@@ -4354,10 +4396,14 @@ export class BaselineFlowService {
     operator: OperatorProfile,
     seeds: readonly string[],
     limitsRequest?: { readonly maxRequests: number; readonly maxPages: number; readonly maxDurationMinutes: number },
+    options?: { readonly discoverySources?: readonly import('@scopepilot2/contracts').DiscoverySource[] },
   ): { plan: ExecutionPlan; planHash: string } {
     this.requirePermission(operator, 'run.manage');
     const caseRecord = this.currentCase();
     const authorization = this.currentAuthorization();
+    const discoverySources = options?.discoverySources;
+    if (discoverySources?.some((source) => !['robots', 'sitemap', 'manifest', 'wordlist'].includes(source))) throw domainError('ValidationFailed', 'unknown discovery source');
+    if (discoverySources?.length && !authorization.allowedOperationClasses.includes('ActiveCrawl')) throw domainError('PermissionDenied', 'discovery requires ActiveCrawl authorization');
     if (seeds.length === 0) {
       throw domainError('ValidationFailed', 'exploration needs at least one seed URL');
     }
@@ -4373,7 +4419,8 @@ export class BaselineFlowService {
       this.documentHintDocuments.flatMap((document) => document.urls),
       caseRecord.scope,
     );
-    const inputEvidenceHash = hashStable('scopepilot2.plan.input', merged.targets.map((url) => ScopePolicy.canonicalUrl(url)).sort());
+    const targets = [...new Set([...merged.targets, ...discoverySeeds(seeds.map((url) => new URL(url).origin), discoverySources ?? [])])];
+    const inputEvidenceHash = hashStable('scopepilot2.plan.input', { targets: targets.map((url) => ScopePolicy.canonicalUrl(url)).sort(), discoveryVersion: DISCOVERY_VERSION });
     const planId = this.deps.ids.next('plan');
     const plan = buildPlan({
       planId,
@@ -4384,8 +4431,9 @@ export class BaselineFlowService {
       steps: [
         {
           kind: 'explore',
-          operationClass: 'Browse',
-          targets: merged.targets,
+          operationClass: discoverySources?.length ? 'ActiveCrawl' : 'Browse',
+          ...(discoverySources === undefined ? {} : { discoverySources }),
+          targets,
           engineKind: 'playwright',
           guarantee: 'Enforced',
           limits,
@@ -4630,6 +4678,9 @@ export class BaselineFlowService {
     if (step === undefined || step.kind !== 'explore') {
       throw domainError('ValidationFailed', 'plan does not contain an exploration step');
     }
+    if (step.discoverySources?.length && (step.operationClass !== 'ActiveCrawl' || !this.currentAuthorization().allowedOperationClasses.includes('ActiveCrawl'))) {
+      throw domainError('PermissionDenied', 'discovery execution requires current ActiveCrawl authorization');
+    }
     if (input.maxDepth < 1) {
       throw domainError('ValidationFailed', 'maxDepth must be at least 1');
     }
@@ -4679,9 +4730,21 @@ export class BaselineFlowService {
 
     let stopReason: StopReason = 'completed';
     let requests = 0;
+    let pageVisits = 0;
+    const maxFrontier = Math.min(20000, step.limits.maxPages * 4);
+    const startedAt = Date.now();
+    const negativeFingerprints = new Set<string>();
+    // A normal missing path is a negative control for wildcard/soft-404 sites.
+    if (step.discoverySources?.length) {
+      for (const origin of new Set(step.targetSnapshot.map((url) => new URL(url).origin))) {
+        frontier.unshift({ url: new URL('/.scopepilot-missing-7d4f92c1', origin).href, depth: 0, discoveredFrom: null, origin: 'crawl', priority: 'high' });
+      }
+    }
 
     while (frontier.length > 0) {
       // 優先付け (AGENTS.md): 高優先 (pii・payment) の entry が残っていれば先に処理する。
+      if (input.signal?.aborted) { stopReason = 'user-request'; break; }
+      if (Date.now() - startedAt >= step.limits.maxDurationMinutes * 60_000) { stopReason = 'budget-exhausted'; break; }
       let nextIndex = frontier.findIndex((candidate) => candidate.priority === 'high');
       if (nextIndex === -1) {
         nextIndex = 0;
@@ -4712,19 +4775,37 @@ export class BaselineFlowService {
         this.record({ type: 'EgressDenied', at: this.deps.clock.now().toISOString(), url: canonical, reason: decision.reason });
         continue;
       }
-      if (requests >= step.limits.maxRequests || observations.length >= step.limits.maxPages) {
+      if (requests >= step.limits.maxRequests || pageVisits >= step.limits.maxPages) {
         stopReason = 'budget-exhausted';
         break;
       }
 
-      requests += 1;
+      pageVisits++;
+      let consumed = false;
+      const control = {
+        ...(input.signal ? { signal: input.signal } : {}),
+        timeoutMs: Math.max(1, step.limits.maxDurationMinutes * 60_000 - (Date.now() - startedAt)),
+        consumeRequest: () => {
+          consumed = true;
+          if (input.signal?.aborted || Date.now() - startedAt >= step.limits.maxDurationMinutes * 60_000 || requests >= step.limits.maxRequests) return false;
+          requests++;
+          return true;
+        },
+      };
       const observed =
         browserSessionState === undefined
-          ? await this.deps.explorer.observe(canonical)
-          : await this.deps.explorer.observeWithSession!(canonical, browserSessionState);
+          ? await this.deps.explorer.observe(canonical, control)
+          : await this.deps.explorer.observeWithSession!(canonical, browserSessionState, control);
+      if (!consumed) requests++;
+      if (input.signal?.aborted) { stopReason = 'user-request'; break; }
       if (observed === null) {
         continue;
       }
+      if (new URL(canonical).pathname === '/.scopepilot-missing-7d4f92c1') {
+        if (observed.contentFingerprint) negativeFingerprints.add(observed.contentFingerprint);
+        continue;
+      }
+      if ((step.discoverySources?.length && observed.status === 404) || (step.discoverySources?.length && [...DISCOVERY_WORDLIST, '/robots.txt', '/sitemap.xml', '/manifest.json'].includes(new URL(canonical).pathname) && observed.contentFingerprint && negativeFingerprints.has(observed.contentFingerprint))) continue;
       const finalUrl = ScopePolicy.canonicalBrowserUrl(observed.finalUrl ?? observed.url);
       const finalDecision = ScopePolicy.decide(caseRecord.scope, finalUrl);
       if (!finalDecision.allowed) {
@@ -4739,9 +4820,10 @@ export class BaselineFlowService {
       this.recordObservedExchange({ url: finalUrl, method: 'GET', status: observation.status, contentType: observation.contentType }, this.deps.clock.now().toISOString(), 'explore');
 
       if (entry.depth + 1 <= input.maxDepth) {
-        for (const link of observation.links) {
+        for (const link of [...observation.links, ...(observation.discoveryLinks ?? []).filter((entry) => step.discoverySources?.length || ['source-map', 'module'].includes(entry.source)).map((entry) => entry.url)]) {
+          if (/\.(?:png|jpe?g|gif|svg|webp|ico|woff2?|ttf|mp4|zip|exe|dll|wasm)(?:[?#]|$)/i.test(link)) continue;
           const linkCanonical = ScopePolicy.canonicalBrowserUrl(link);
-          if (!visited.has(linkCanonical)) {
+          if (!visited.has(linkCanonical) && frontier.length < maxFrontier && !frontier.some((entry) => entry.url === linkCanonical)) {
             frontier.push({ url: linkCanonical, depth: entry.depth + 1, discoveredFrom: finalUrl, origin: 'crawl', priority: this.isPrioritizedUrl(linkCanonical) ? 'high' : 'normal' });
           }
         }
@@ -4791,6 +4873,15 @@ export class BaselineFlowService {
       }
     }
 
+    if (stopReason === 'completed' && (requests >= step.limits.maxRequests || Date.now() - startedAt >= step.limits.maxDurationMinutes * 60000)) stopReason = 'budget-exhausted';
+    const reviewAssets = [...new Map(observations.flatMap((observation) => observation.assets ?? []).map((asset) => [asset.url, asset])).values()];
+    for (const asset of reviewAssets) {
+      const reviewSignals = asset.signals.filter((signal) => !['dependency', 'public-key'].includes(signal.kind) || signal.ruleId === 'weak-rsa-key');
+      if (!reviewSignals.length) continue;
+      const evidence = await this.deps.evidence.saveText(`client-review:${runId}:${asset.sha256.slice(0, 12)}`, canonicalJson(asset));
+      const imported = this.importer.importObservationCandidates(reviewSignals.map((signal) => ({ key: `client-review:${signal.kind}:${signal.ruleId}`, title: `${signal.kind}: ${signal.ruleId} (review required)`, url: asset.url, method: 'GET', param: signal.component?.name ?? signal.ruleId, severity: signal.kind === 'secret' || signal.kind === 'component-db' ? 'medium' as const : 'info' as const })), { now: this.deps.clock.now().toISOString(), engineVersion: asset.analyzerVersion, makeFindingId: () => this.deps.ids.next('finding'), evidenceRef: evidence.evidenceId });
+      this.persistFindings([...imported.created, ...imported.reobserved]);
+    }
     this.exploredUrlCount = observations.length;
     for (const observation of observations) {
       this.observationsByUrl.set(observation.url, observation);
@@ -4820,12 +4911,19 @@ export class BaselineFlowService {
     // 観測横断で同一リクエスト/定義の候補を重複させない (同一スクリプトが複数ページで
     // 読み込まれると API 呼び出し定義が毎ページ再抽出されるため、ここで一意化する)。
     const candidates: ScanCandidate[] = [];
-    const candidateKeys = new Set<string>();
-    for (const observation of observations) {
-      for (const candidate of candidatesFromObservation(observation, this.deps.ids)) {
-        const key = `${candidate.category}|${loginMergeKeyOf(candidate.method, candidate.url, candidate.inputPoints ?? [])}`;
-        if (candidateKeys.has(key)) continue;
-        candidateKeys.add(key);
+    const candidateKeys = new Map<string, number>();
+    for (const observation of [...observations, ...this.workflowObservations.values()]) {
+      for (const rawCandidate of candidatesFromObservation(observation, this.deps.ids)) {
+        const candidate = input.role && observations.includes(observation) && (rawCandidate.requestId || rawCandidate.category !== 'api-endpoint') ? { ...rawCandidate, observedRoles: [input.role] } : rawCandidate;
+        const key = `${candidate.category}|${candidate.category === 'page' ? ScopePolicy.canonicalBrowserUrl(candidate.url) : loginMergeKeyOf(candidate.method, candidate.url, candidate.inputPoints ?? [])}`;
+        const previousIndex = candidateKeys.get(key);
+        if (previousIndex !== undefined) {
+          const previous = candidates[previousIndex]!;
+          const representative = candidate.confidence > previous.confidence ? candidate : previous;
+          candidates[previousIndex] = { ...representative, observedRoles: [...new Set([...(previous.observedRoles ?? []), ...(candidate.observedRoles ?? [])])], provenance: [...(previous.provenance ?? [{ source: previous.guidelineBasis.join(','), url: previous.observationUrl }]), ...(candidate.provenance ?? [{ source: candidate.guidelineBasis.join(','), url: candidate.observationUrl }])] };
+          continue;
+        }
+        candidateKeys.set(key, candidates.length);
         candidates.push(candidate);
       }
     }
@@ -4877,10 +4975,10 @@ export class BaselineFlowService {
         });
       }
     }
-    const allCandidates = [...mergedCandidates, ...apiSpecCandidates];
+    const allCandidates = rankCandidates([...mergedCandidates, ...apiSpecCandidates].filter((candidate) => ScopePolicy.decide(caseRecord.scope, candidate.url).allowed && !isSessionControlUrl(candidate.url)));
     this.latestCandidates = allCandidates;
     this.assessmentEndedAt = this.deps.clock.now().toISOString();
-    return { runRecord, planHash, observations, deniedUrls, candidates: allCandidates, engineVersion: this.deps.explorer.engineVersion };
+    return { runRecord, planHash, observations, deniedUrls, candidates: allCandidates, authenticationReview: [...this.loginObservations.values()].flatMap((observation) => observation.authenticationReview ?? []), engineVersion: this.deps.explorer.engineVersion };
   }
 
   /** 候補の採用。基準シナリオでは提示された候補を全採用する。 */
@@ -6076,6 +6174,7 @@ function candidatesFromObservation(observation: PageObservation, ids: IdGenerato
     const method = call.method.toUpperCase();
     if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) continue;
     if (isTransportChannelUrl(call.url)) continue;
+    if (/\/:[A-Za-z]|[{}]/.test(new URL(call.url).pathname)) continue;
     const canonical = ScopePolicy.canonicalUrl(call.url);
     const key = `${method}|${canonical}|`;
     if (seenRequests.has(key)) continue;
@@ -6093,12 +6192,17 @@ function candidatesFromObservation(observation: PageObservation, ids: IdGenerato
       diagnosticTracks: diagnosticTracksFor(call.url, method, [], false),
     });
   }
+  for (const route of observation.clientRoutes ?? []) {
+    if (route.url === pageUrl || isSessionControlUrl(route.url)) continue;
+    candidates.push({ candidateId: ids.next('cand'), url: route.url, method: 'GET', category: 'page', guidelineBasis: ['observed-client-route'], confidence: 0.9, observationUrl: pageUrl, detectionReason: `Client route observed via ${route.source}; server reachability unverified`, diagnosticTracks: ['browser-dom'], provenance: [{ source: route.source, url: pageUrl }] });
+  }
   return candidates;
 }
 
 export function isSessionControlUrl(value: string): boolean {
   try {
-    const pathname = new URL(value).pathname.toLowerCase();
+    const parsed = new URL(value);
+    const pathname = (parsed.hash.startsWith('#/') || parsed.hash.startsWith('#!/') ? parsed.hash.replace(/^#!?/, '').split('?')[0]! : parsed.pathname).toLowerCase();
     return /\/(?:logout|log-out|logoff|signout|sign-out)(?:\.php)?\/?$/.test(pathname)
       || /\/(?:setup|install)(?:\.php)?\/?$/.test(pathname);
   } catch {

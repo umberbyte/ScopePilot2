@@ -323,6 +323,8 @@ interface SelectedDesktopPath {
 }
 
 interface ScanCandidateView {
+  readonly score?: number;
+  readonly scoreSignals?: readonly string[];
   readonly candidateId: string;
   readonly url: string;
   readonly method: string;
@@ -1765,6 +1767,7 @@ export function WizardApp({ apiBase }: { apiBase: string }): React.ReactElement 
                     {dynamic && <span className={`${styles.badge} ${styles.dynamicBadge}`}>{t('wizard.s04.dynamic')}</span>}
                     {safetyExclusion !== undefined && <span className={styles.badge}>{t('wizard.s04.safetyExcluded')}</span>}
                     <span className={styles.badge}>{Math.round(candidate.confidence * 100)}%</span>
+                    {candidate.score !== undefined && <span className={styles.badge} title={candidate.scoreSignals?.join("; ")}>{t('wizard.s04.priority', { score: candidate.score })}</span>}
                   </div>
                 </div>
               );

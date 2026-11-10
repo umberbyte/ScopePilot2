@@ -3,7 +3,7 @@ import { UnavailableCapability } from '@scopepilot2/core';
  * Production engine composition. Runtime code never falls back to simulation
  * fixtures: exploration uses Playwright and scans use a real ZAP daemon.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { dirname } from 'node:path';
@@ -28,9 +28,12 @@ import { NucleiRunner } from './nuclei-runner.ts';
 import { NodeWorkflowScanTransport, type NodeWorkflowScanTransportOptions } from './workflow-scan-transport.ts';
 import { createSecurityFixtureAdapters } from './security-fixture.ts';
 
+import { validateComponentDatabase, type ComponentDatabase } from '@scopepilot2/core';
+
 const DEFAULT_ZAP_BASE_URL = 'http://127.0.0.1:8080';
 
 export interface EngineSelection {
+  readonly componentDatabase?: ComponentDatabase;
   readonly zapBaseUrl: string;
   readonly zapBaseUrlWasExplicit: boolean;
   readonly explorerAllowedOrigins: readonly string[];
@@ -61,7 +64,17 @@ export function resolveEngineSelection(
   const zapExecutable = env['SCOPEPILOT_ZAP_EXECUTABLE']?.trim();
   const nucleiExecutable = env['SCOPEPILOT_NUCLEI_EXECUTABLE']?.trim();
   const nucleiTemplateManifest = env['SCOPEPILOT_NUCLEI_TEMPLATE_MANIFEST']?.trim();
+  const path = env['SCOPEPILOT_COMPONENT_DB_PATH'];
+  let componentDatabase: ComponentDatabase | undefined;
+  if (path) {
+    if (!env['SCOPEPILOT_COMPONENT_DB_SHA256'] || !env['SCOPEPILOT_COMPONENT_DB_VERSION']) throw new Error('component database requires SHA256 and VERSION pins');
+    if (statSync(path).size > 4 * 1024 * 1024) throw new Error('component database exceeds 4 MiB');
+    componentDatabase = JSON.parse(readFileSync(path, 'utf8')) as ComponentDatabase;
+    validateComponentDatabase(componentDatabase);
+    if (componentDatabase.sha256 !== env['SCOPEPILOT_COMPONENT_DB_SHA256'] || componentDatabase.version !== env['SCOPEPILOT_COMPONENT_DB_VERSION']) throw new Error('component database pin mismatch (including rollback)');
+  }
   return {
+    ...(componentDatabase ? { componentDatabase } : {}),
     zapBaseUrl: explicitZap || DEFAULT_ZAP_BASE_URL,
     zapBaseUrlWasExplicit: Boolean(explicitZap),
     explorerAllowedOrigins: canonicalOrigins(allowedOrigins),
@@ -84,6 +97,7 @@ export function createExplorerEngine(
 ): PlaywrightExplorerAdapter {
   return new PlaywrightExplorerAdapter({
     scope: { allowedOrigins: selection.explorerAllowedOrigins, deniedOrigins: [] },
+    ...(selection.componentDatabase ? { componentDatabase: selection.componentDatabase } : {}),
     ...(proxyServer === undefined ? {} : { proxyServer }),
     ...(beforeSessionObservation === undefined ? {} : { beforeSessionObservation }),
   });

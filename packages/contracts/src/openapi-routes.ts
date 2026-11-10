@@ -30,6 +30,7 @@ export const CORE_API_ROUTE_METHODS: readonly { readonly method: string; readonl
   { method: 'GET', path: '/api/passive/evidence', operationId: 'getPassiveEvidence' },
   { method: 'GET', path: '/api/evidence', operationId: 'listEvidence' },
   { method: 'GET', path: '/api/findings', operationId: 'listFindings' },
+  { method: 'GET', path: '/api/observations/assets', operationId: 'listAssetObservations' },
   { method: 'GET', path: '/api/observations', operationId: 'listObservations' },
   { method: 'POST', path: '/api/findings/merge', operationId: 'mergeFindings' },
   { method: 'POST', path: '/api/findings/status', operationId: 'updateFindingStatus' },

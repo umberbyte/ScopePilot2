@@ -1664,7 +1664,7 @@ describe('Core API server (node:http)', () => {
     // 許可外 URL を混ぜて登録 — acceptedUrlCount は許可内のみ計上。
     const registered = await post('/api/documents/hints', {
       documentLabel: 'API 仕様書 (IT)',
-      urls: ['http://fixture.target.test/setup.php', 'http://elsewhere.example/admin'],
+      urls: ['http://fixture.target.test/document-entry', 'http://elsewhere.example/admin'],
     });
     assert.equal(registered.status, 201);
     const registration = (await registered.json()) as { documentLabel: string; urlCount: number; acceptedUrlCount: number };
@@ -1679,7 +1679,7 @@ describe('Core API server (node:http)', () => {
     // 計画の target snapshot に許可内 hint だけ統合される。
     const planResponse = await post('/api/plan/explore', { seeds: ['http://fixture.target.test/'] });
     const { plan } = (await planResponse.json()) as { plan: { steps: readonly { targetSnapshot: readonly string[] }[] } };
-    assert.deepEqual(plan.steps[0]?.targetSnapshot, ['http://fixture.target.test/', 'http://fixture.target.test/setup.php']);
+    assert.deepEqual(plan.steps[0]?.targetSnapshot, ['http://fixture.target.test/', 'http://fixture.target.test/document-entry']);
     const confirmResponse = await post('/api/plan/confirm', { plan });
     const confirmation = (await confirmResponse.json()) as { confirmationId: string };
     const runResponse = await post('/api/run/explore', { plan, confirmation, maxDepth: 1 });
@@ -1687,7 +1687,7 @@ describe('Core API server (node:http)', () => {
 
     // 観測の由来は文書ヒント (未確認) として残る。
     const observations = (await (await fetch(`${baseUrl}/api/observations`)).json()) as { observations: readonly { url: string; originType: string }[] };
-    assert.equal(observations.observations.find((observation) => observation.url === 'http://fixture.target.test/setup.php')?.originType, 'document-hint');
+    assert.equal(observations.observations.find((observation) => observation.url === 'http://fixture.target.test/document-entry')?.originType, 'document-hint');
     assert.equal(observations.observations.find((observation) => observation.url === 'http://fixture.target.test/')?.originType, 'crawl');
 
     const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
@@ -1800,63 +1800,82 @@ describe('Core API server (node:http)', () => {
   });
 
   test('business-logic check は role 差分検証を inconclusive/pass/fail で返す (design/f17)', async () => {
-    const post = async (path: string, body: unknown): Promise<Response> =>
-      fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const local = createTestService({
+      loginExecutor: { engineVersion: 'owned-business-login', execute: async (input) => ({ authenticated: true, finalUrl: input.expectedUrlPrefix, cookies: [{ name: 'role', value: input.secretValues.role ?? '', domain: 'fixture.target.test', path: '/' }] }) },
+      interactiveBrowser: { engineVersion: 'owned-business-browser', execute: async (input) => {
+        const role = input.sessionCookies?.find((cookie) => cookie.name === 'role')?.value ?? 'unknown';
+        return { finalUrl: input.targetUrl, status: 200, bodyHash: `hash-${role}`, bodyText: `business-response:${role}`, headers: [], elapsedMs: 1, assertions: [] };
+      } },
+    });
+    const localServer = createCoreApiServer({ service: local.service, operator: TEST_OPERATOR });
+    await new Promise<void>((resolve) => localServer.listen(0, '127.0.0.1', resolve));
+    const address = localServer.address();
+    assert.ok(address && typeof address !== 'string');
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    try {
+      const post = async (path: string, body: unknown): Promise<Response> =>
+        fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
-    await post('/api/case', {
-      name: 'bizlogic-it',
-      allowedOrigins: ['http://fixture.target.test'],
-      deniedOrigins: [],
-      limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
-    });
-    // CrossRoleTest を許可する認可。
-    await post('/api/authorization', {
-      allowedOperationClasses: ['Browse', 'ActiveScan', 'CrossRoleTest'],
-      targetRoles: ['admin', 'guest'],
-      validFrom: '2026-10-18T00:00:00.000Z',
-      validUntil: '2026-10-19T00:00:00.000Z',
-      evidenceLabel: '認可(IT)',
-      evidenceContent: 'it authorization evidence',
-    });
-    const steps = [{ kind: 'navigate', target: 'http://fixture.target.test/login.php' }];
-    await post('/api/sessions/flows', { role: 'admin', flowVersion: 'f1', steps });
-    await post('/api/sessions/flows', { role: 'guest', flowVersion: 'f1', steps });
-    await post('/api/sessions/refresh', { role: 'admin' });
-    await post('/api/sessions/refresh', { role: 'guest' });
+      await post('/api/case', {
+        name: 'bizlogic-it',
+        allowedOrigins: ['http://fixture.target.test'],
+        deniedOrigins: [],
+        limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 },
+      });
+      // CrossRoleTest を許可する認可。
+      await post('/api/authorization', {
+        allowedOperationClasses: ['Browse', 'ActiveScan', 'CrossRoleTest'],
+        targetRoles: ['admin', 'guest'],
+        validFrom: '2026-10-18T00:00:00.000Z',
+        validUntil: '2026-10-19T00:00:00.000Z',
+        evidenceLabel: '認可(IT)',
+        evidenceContent: 'it authorization evidence',
+      });
+      const steps = [{ kind: 'navigate', target: 'http://fixture.target.test/login.php' }, { kind: 'assert', target: 'Owned dashboard' }];
+      await post('/api/sessions/flows', { role: 'admin', flowVersion: 'f1', steps });
+      await post('/api/sessions/flows', { role: 'guest', flowVersion: 'f1', steps });
+      for (const role of ['admin', 'guest']) {
+        const login = await post('/api/sessions/login', { role, baseUrl: 'http://fixture.target.test', expectedUrlPrefix: 'http://fixture.target.test/account', secretValues: { role } });
+        assert.equal(login.status, 200);
+      }
 
-    // 期待と一致すれば pass。
-    const pass = await post('/api/business-logic/checks', {
-      roles: ['admin', 'guest'],
-      targetUrl: 'http://fixture.target.test/admin-only',
-      expectation: { expression: 'body.contains', args: ['business-response:admin'] },
-    });
-    assert.equal(pass.status, 200);
-    const passBody = (await pass.json()) as { status: string; comparison: { outcome: string }; matrix: { evidenceSeparated: boolean } };
-    assert.equal(passBody.comparison.outcome, 'pass');
-    assert.equal(passBody.status, 'pass');
-    assert.equal(passBody.matrix.evidenceSeparated, true);
+      // 期待と一致すれば pass。
+      const pass = await post('/api/business-logic/checks', {
+        roles: ['admin', 'guest'],
+        targetUrl: 'http://fixture.target.test/admin-only',
+        expectation: { expression: 'body.contains', args: ['business-response:admin'] },
+      });
+      assert.equal(pass.status, 200);
+      const passBody = (await pass.json()) as { status: string; comparison: { outcome: string }; matrix: { evidenceSeparated: boolean } };
+      assert.equal(passBody.comparison.outcome, 'pass');
+      assert.equal(passBody.status, 'pass');
+      assert.equal(passBody.matrix.evidenceSeparated, true);
 
-    // 期待と不一致なら fail + restore-failed。
-    const fail = await post('/api/business-logic/checks', {
-      roles: ['admin', 'guest'],
-      targetUrl: 'http://fixture.target.test/admin-only',
-      expectation: { expression: 'body.contains', args: ['business-response:guest'] },
-    });
-    const failBody = (await fail.json()) as { status: string; comparison: { outcome: string }; restore: { outcome: string } };
-    assert.equal(failBody.comparison.outcome, 'fail');
-    assert.equal(failBody.restore.outcome, 'restore-failed');
+      // 期待と不一致なら fail + restore-failed。
+      const fail = await post('/api/business-logic/checks', {
+        roles: ['admin', 'guest'],
+        targetUrl: 'http://fixture.target.test/admin-only',
+        expectation: { expression: 'body.contains', args: ['business-response:guest'] },
+      });
+      const failBody = (await fail.json()) as { status: string; comparison: { outcome: string }; restore: { outcome: string } };
+      assert.equal(failBody.comparison.outcome, 'fail');
+      assert.equal(failBody.restore.outcome, 'restore-failed');
 
-    // allowlist 外 expression は 400。履歴と監査に残る。
-    const bad = await post('/api/business-logic/checks', {
-      roles: ['admin', 'guest'],
-      targetUrl: 'http://fixture.target.test/admin-only',
-      expectation: { expression: 'eval.js', args: [] },
-    });
-    assert.equal(bad.status, 400);
-    const history = (await (await fetch(`${baseUrl}/api/business-logic/checks`)).json()) as { checks: readonly { checkId: string; status: string }[] };
-    assert.equal(history.checks.length, 2);
-    const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
-    assert.match(eventsText, /BusinessLogicCheckCompleted/);
+      // allowlist 外 expression は 400。履歴と監査に残る。
+      const bad = await post('/api/business-logic/checks', {
+        roles: ['admin', 'guest'],
+        targetUrl: 'http://fixture.target.test/admin-only',
+        expectation: { expression: 'eval.js', args: [] },
+      });
+      assert.equal(bad.status, 400);
+      const history = (await (await fetch(`${baseUrl}/api/business-logic/checks`)).json()) as { checks: readonly { checkId: string; status: string }[] };
+      assert.equal(history.checks.length, 2);
+      const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
+      assert.match(eventsText, /BusinessLogicCheckCompleted/);
+    } finally {
+      localServer.closeAllConnections();
+      await new Promise<void>((resolve) => localServer.close(() => resolve()));
+    }
   });
 
   test('GET /api/traffic は通信一覧と endpoint 集約を返す (design/f03)', async () => {
@@ -2147,5 +2166,36 @@ describe('Core API server (node:http)', () => {
     const tail = tailText.trim().split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as { eventId: number });
     assert.equal(tail.length, 1);
     assert.equal(tail[0]?.eventId, events.length);
+  });
+});
+
+describe('GO-31 additive exploration API', () => {
+  test('discovery sources survive plan/confirmation and asset metadata is available without secret bodies', async () => {
+    const { analyzeClientAsset } = await import('@scopepilot2/core');
+    const origin = 'http://fixture.target.test';
+    const asset = analyzeClientAsset({ url: `${origin}/main.js`, sourceUrl: origin, contentType: 'application/javascript', body: 'ghp_0123456789abcdefghijklmnopqrstuvwxyz' })!;
+    const flow = await bootstrapFlow({ allowedOperationClasses: ['Browse', 'ActiveCrawl'], explorer: { engineVersion: 'owned-api-explorer', observe: async (url) => ({ url, status: 200, contentType: 'text/html', discoveredFrom: null, depth: 0, originType: 'crawl', links: [], forms: [], assets: [asset] }) } });
+    const server = createCoreApiServer({ service: flow.service, operator: flow.operator });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address(); assert.ok(address && typeof address !== 'string');
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const post = (path: string, body: unknown) => fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    try {
+      const invalid = await post('/api/plan/explore', { seeds: [origin], discoverySources: ['unknown'] });
+      assert.equal(invalid.status, 400);
+      const planned = await post('/api/plan/explore', { seeds: [origin], discoverySources: ['robots'] });
+      assert.equal(planned.status, 200);
+      const { plan } = await planned.json() as { plan: { steps: { operationClass: string; discoverySources: string[] }[] } };
+      assert.equal(plan.steps[0]?.operationClass, 'ActiveCrawl');
+      assert.deepEqual(plan.steps[0]?.discoverySources, ['robots']);
+      const confirmation = await (await post('/api/plan/confirm', { plan })).json();
+      const run = await post('/api/run/explore', { plan, confirmation, maxDepth: 1 });
+      assert.equal(run.status, 200);
+      const response = await fetch(`${baseUrl}/api/observations/assets`);
+      assert.equal(response.status, 200);
+      const body = await response.text();
+      assert.equal(body.includes('0123456789abcdefghijklmnopqrstuvwxyz'), false);
+      assert.equal((JSON.parse(body) as { assets: unknown[] }).assets.length, 1);
+    } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
   });
 });

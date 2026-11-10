@@ -44,3 +44,5 @@ export * from './domain/guideline-automation.ts';
 
 export * from './domain/unsupported-assessment.ts';
 export * from './domain/guideline-coverage.ts';
+export * from './domain/client-review.ts';
+export * from './domain/exploration-discovery.ts';

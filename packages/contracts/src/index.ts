@@ -7,6 +7,7 @@ export * from './plan/canonical.ts';
 export * from './plan/plan.ts';
 export * from './engines/capability.ts';
 export * from './explore/explore.ts';
+export * from './explore/assets.ts';
 export * from './scan/scan.ts';
 export * from './scan/scan-policy.ts';
 export * from './scan/scan-policy-hash.ts';

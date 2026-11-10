@@ -6674,6 +6674,35 @@
           }
         }
       }
+    },
+    "/api/observations/assets": {
+      "get": {
+        "operationId": "listAssetObservations",
+        "summary": "Sanitised passive asset observations (bodies and secrets excluded)",
+        "responses": {
+          "200": {
+            "description": "Assets deduplicated by URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "assets": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AssetObservation"
+                      }
+                    }
+                  },
+                  "required": [
+                    "assets"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7114,6 +7143,12 @@
           },
           "limits": {
             "$ref": "#/components/schemas/PlanLimits"
+          },
+          "discoverySources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscoverySource"
+            }
           }
         }
       },
@@ -7336,6 +7371,12 @@
               }
             },
             "additionalProperties": false
+          },
+          "discoverySources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscoverySource"
+            }
           }
         }
       },
@@ -7738,6 +7779,83 @@
                 "method"
               ]
             }
+          },
+          "assets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssetObservation"
+            }
+          },
+          "authenticationReview": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientReviewSignal"
+            }
+          },
+          "clientRoutes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "history",
+                    "hash",
+                    "workflow"
+                  ]
+                }
+              },
+              "required": [
+                "url",
+                "source"
+              ]
+            }
+          },
+          "discoveryLinks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url",
+                "source"
+              ]
+            }
+          },
+          "contentFingerprint": {
+            "type": "string"
+          },
+          "serviceWorkerRegistrations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "url",
+                "status"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "attempted"
+                  ]
+                }
+              }
+            }
           }
         }
       },
@@ -7819,6 +7937,39 @@
                 "api-schema",
                 "cryptography-review"
               ]
+            }
+          },
+          "score": {
+            "type": "number"
+          },
+          "scoreSignals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "provenance": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source",
+                "url"
+              ]
+            }
+          },
+          "observedRoles": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           }
         }
@@ -7906,6 +8057,12 @@
           },
           "engineVersion": {
             "type": "string"
+          },
+          "authenticationReview": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientReviewSignal"
+            }
           }
         }
       },
@@ -12523,6 +12680,121 @@
           }
         },
         "additionalProperties": false
+      },
+      "DiscoverySource": {
+        "type": "string",
+        "enum": [
+          "robots",
+          "sitemap",
+          "manifest",
+          "wordlist"
+        ]
+      },
+      "ClientReviewSignal": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "dependency",
+              "typosquatting",
+              "unsafe-api",
+              "component-db",
+              "jwt",
+              "public-key",
+              "secret"
+            ]
+          },
+          "ruleId": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "component": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "ruleId",
+          "confidence",
+          "detail"
+        ]
+      },
+      "AssetObservation": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "sourceUrl": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "analyzerVersion": {
+            "type": "string"
+          },
+          "signals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientReviewSignal"
+            }
+          },
+          "database": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "version",
+              "sha256"
+            ]
+          }
+        },
+        "required": [
+          "url",
+          "sourceUrl",
+          "contentType",
+          "bytes",
+          "sha256",
+          "analyzerVersion",
+          "signals"
+        ]
       }
     },
     "responses": {

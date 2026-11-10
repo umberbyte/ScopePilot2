@@ -322,3 +322,55 @@ gated('Playwright explorer adapter (実 browser 結合)', () => {
     }
   });
 });
+
+gated('GO-31 owned workflow observation', () => {
+  test('reviewed click records runtime history/hash routes and request metadata without body values', { timeout: 30000 }, async () => {
+    const server = createServer((req, res) => {
+      if (req.url === '/api/events') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); return; }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(`<button id="open">Open</button><script>
+        document.querySelector('#open').onclick = async () => {
+          await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ note: 'private-canary-value' }) });
+          history.pushState({}, '', '/runtime/' + (20 + 22));
+          location.hash = '/panel/' + (40 + 2);
+          document.body.insertAdjacentHTML('beforeend', '<p id="ready">Ready</p>');
+        };
+      </script>`);
+    });
+    const origin = await listenOnLoopback(server);
+    try {
+      const browser = new PlaywrightInteractiveBrowser();
+      const result = await browser.execute({ targetUrl: origin, scope: { allowedOrigins: [origin], deniedOrigins: [] }, steps: [{ kind: 'navigate', target: origin }, { kind: 'click', target: '#open' }, { kind: 'wait', target: '#ready' }], maxRequests: 20 });
+      assert.ok(result.clientRoutes?.some((route) => route.source === 'history' && route.url.endsWith('/runtime/42')));
+      assert.ok(result.clientRoutes?.some((route) => route.source === 'hash' && route.url.includes('#/panel/42')));
+      const request = result.observedRequests?.find((request) => request.method === 'POST');
+      assert.equal(request?.inputPoints[0]?.name, 'note');
+      assert.equal(JSON.stringify(result.observedRequests).includes('private-canary-value'), false);
+      const controller = new AbortController(); controller.abort();
+      await assert.rejects(browser.execute({ targetUrl: origin, scope: { allowedOrigins: [origin], deniedOrigins: [] }, steps: [{ kind: 'navigate', target: origin }], signal: controller.signal }), /abort/i);
+    } finally { await closeServer(server); }
+  });
+});
+
+gated('GO-31 browser discovery budgets', () => {
+  test('subrequest budget blocks additional sends and worker registration attempts stay distinguishable', { timeout: 30000 }, async () => {
+    const hits: string[] = [];
+    const server = createServer((req, res) => {
+      hits.push(req.url!);
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(`<script>
+        navigator.serviceWorker.register('/owned-worker.js').catch(() => {});
+        fetch('/extra-a').catch(() => {}); fetch('/extra-b').catch(() => {});
+      </script><p>Owned page</p>`);
+    });
+    const origin = await listenOnLoopback(server);
+    const explorer = new PlaywrightExplorerAdapter({ scope: { allowedOrigins: [origin], deniedOrigins: [] } });
+    try {
+      let sent = 0;
+      const observation = await explorer.observe(origin, { timeoutMs: 10000, consumeRequest: () => { if (sent >= 1) return false; sent++; return true; } });
+      assert.equal(sent, 1);
+      assert.deepEqual(hits, ['/']);
+      assert.ok(observation?.serviceWorkerRegistrations?.some((registration) => registration.url === `${origin}/owned-worker.js` && registration.status === 'attempted'));
+    } finally { await explorer.close(); await closeServer(server); }
+  });
+});
