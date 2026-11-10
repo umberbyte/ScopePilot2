@@ -38,6 +38,7 @@
 | [26 要求トレーサビリティ](26-requirements-traceability.md) | F01–F21、横断要件 | 全段階 |
 | [27 ガイドライン参照・候補選定](27-security-guidelines.md) | F03、F08、F19、6.3、5.1 | A1 |
 | [28 Windows UI 原則・AI 実装規則](28-windows-ui-guidelines.md) | 8章、UI 全般 | A1–A4 |
+| [40 Advanced モード UI・ワークフロー再設計](40-advanced-mode-redesign.md) | 8章、6.5、Advanced A01〜A13 の再編（設計案） | A1–A3 |
 
 ## 全文書に適用する規則
 
