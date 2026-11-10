@@ -10,6 +10,7 @@
  *   (AGENTS.md「ペイロード集合の供給元と版を記録する」; 配布昇格は license 検証後)。
  * - 生成結果は決定的とし、catalog hash の安定を保証する。
  */
+import { buildCoverageRoutes } from './coverage.ts';
 import { hashStable } from '@scopepilot2/contracts';
 import type { SheetRows } from './xlsx.ts';
 
@@ -30,47 +31,6 @@ const WEBAPP_PENTEST_SOURCE_SHA256 = 'bc25519a2b270e5c244cebdf26a08dd1387de7e081
 const WEBAPP_PENTEST_SOURCE_COMMIT = 'bcc4df46a7371ea0860e0d0900a22f89286ce5b8';
 const WEBAPP_PENTEST_ITEM_COUNT = 102;
 
-interface CoverageRange {
-  readonly from: number;
-  readonly to: number;
-  readonly routes: readonly string[];
-}
-
-/**
- * 公式 v1.2 の No.1〜102 を、現在の ScopePilot 実行経路へ対応づける。
- * これは公式資料の改変版ではなく、原本行を参照する ScopePilot 側の review 済み対応表である。
- */
-const WEBAPP_PENTEST_COVERAGE: readonly CoverageRange[] = [
-  { from: 1, to: 6, routes: ['workflow:sqli-verify', 'zap:sql-injection'] },
-  { from: 7, to: 14, routes: ['workflow:api-command-injection', 'zap:command-injection'] },
-  { from: 15, to: 16, routes: ['zap:crlf-response-splitting'] },
-  { from: 17, to: 17, routes: ['zap-unsupported:14'] },
-  { from: 18, to: 24, routes: ['workflow:xss-reflected', 'workflow:xss-stored', 'workflow:xss-dom', 'zap:xss'] },
-  { from: 25, to: 26, routes: ['zap-unsupported:28'] },
-  { from: 27, to: 28, routes: ['zap-unsupported:15'] },
-  { from: 29, to: 35, routes: ['workflow:lfi', 'zap:path-traversal'] },
-  { from: 36, to: 46, routes: ['workflow:file-upload', 'zap-unsupported:19'] },
-  { from: 47, to: 52, routes: ['zap:xxe'] },
-  { from: 53, to: 55, routes: ['workflow:open-redirect', 'zap:open-redirect'] },
-  { from: 56, to: 56, routes: ['zap-unsupported:18'] },
-  { from: 57, to: 60, routes: ['zap-unsupported:16'] },
-  { from: 61, to: 61, routes: ['zap-unsupported:27'] },
-  { from: 62, to: 63, routes: ['zap:clickjacking'] },
-  { from: 64, to: 65, routes: ['zap-unsupported:1'] },
-  { from: 66, to: 67, routes: ['zap-unsupported:8'] },
-  { from: 68, to: 68, routes: ['workflow:brute-force', 'zap-unsupported:5'] },
-  { from: 69, to: 73, routes: ['zap-unsupported:3'] },
-  { from: 74, to: 75, routes: ['zap-unsupported:4'] },
-  { from: 76, to: 78, routes: ['workflow:weak-session', 'zap-unsupported:8'] },
-  { from: 79, to: 81, routes: ['workflow:authorization-bypass', 'workflow:bac-open-access', 'zap-unsupported:10'] },
-  { from: 82, to: 84, routes: ['workflow:csrf-password', 'zap-unsupported:12'] },
-  { from: 85, to: 97, routes: ['zap:passive-information-disclosure', 'zap-unsupported:29'] },
-  { from: 98, to: 98, routes: ['zap:directory-listing'] },
-  { from: 99, to: 100, routes: ['zap-unsupported:25'] },
-  { from: 101, to: 101, routes: ['zap:forced-browsing', 'manual-review:published-surface'] },
-  { from: 102, to: 102, routes: ['nuclei:known-vulnerabilities', 'zap:technology-detection'] },
-];
-
 export interface CatalogSource {
   readonly workbookPath: string;
   readonly sha256: string;
@@ -89,7 +49,6 @@ export interface GuidelineCheckRow {
   readonly safeState: string;
   readonly sourceId?: string;
   readonly sourceUrl?: string;
-  readonly coverageRoutes?: readonly string[];
 }
 
 export interface CatalogSourceRecord {
@@ -129,8 +88,8 @@ export interface ZapUnsupportedThemeRow {
 }
 
 export interface GuidelineCatalogFile {
-  readonly schemaVersion: 'scopepilot2.catalog.v2';
-  readonly generator: { readonly tool: '@scopepilot2/guideline-catalog'; readonly version: 2 };
+  readonly schemaVersion: 'scopepilot2.catalog.v3';
+  readonly generator: { readonly tool: '@scopepilot2/guideline-catalog'; readonly version: 3 };
   readonly source: CatalogSource & { readonly importerVersion: 1 };
   readonly sources: readonly CatalogSourceRecord[];
   readonly guidelines: readonly {
@@ -145,6 +104,8 @@ export interface GuidelineCatalogFile {
   readonly zapRules: readonly ZapRuleRow[];
   readonly zapUnsupportedThemes: readonly ZapUnsupportedThemeRow[];
   readonly counts: { readonly guidelineChecks: number; readonly zapRules: number; readonly zapUnsupportedThemes: number };
+  readonly coverageRoutes: readonly import('@scopepilot2/contracts').GuidelineCoverageRoute[];
+  readonly catalogContentHash: string;
   readonly catalogHash: string;
 }
 
@@ -220,8 +181,8 @@ export function buildCatalog(sheets: readonly SheetRows[], source: CatalogSource
   });
 
   const body = {
-    schemaVersion: 'scopepilot2.catalog.v2' as const,
-    generator: { tool: '@scopepilot2/guideline-catalog' as const, version: 2 as const },
+    schemaVersion: 'scopepilot2.catalog.v3' as const,
+    generator: { tool: '@scopepilot2/guideline-catalog' as const, version: 3 as const },
     source: { ...source, importerVersion: 1 as const },
     sources: [
       {
@@ -256,16 +217,15 @@ export function buildCatalog(sheets: readonly SheetRows[], source: CatalogSource
       zapUnsupportedThemes: zapUnsupportedThemes.length,
     },
   };
-  return { ...body, catalogHash: hashStable('scopepilot2.catalog', body) };
+  // Bind routes to catalog content before hashing the complete artifact (no circular hash).
+  const catalogContentHash = hashStable('scopepilot2.catalog-content.v3', body);
+  const complete = { ...body, catalogContentHash, coverageRoutes: buildCoverageRoutes(guidelines, catalogContentHash) };
+  return { ...complete, catalogHash: hashStable('scopepilot2.catalog', complete) };
 }
 
 function buildWebAppPentestGuideline(): GuidelineCatalogFile['guidelines'][number] {
   const checks: GuidelineCheckRow[] = [];
   for (let no = 1; no <= WEBAPP_PENTEST_ITEM_COUNT; no += 1) {
-    const coverage = WEBAPP_PENTEST_COVERAGE.find((candidate) => no >= candidate.from && no <= candidate.to);
-    if (coverage === undefined) {
-      throw new Error(`catalog: WebAppPentestGuidelines v1.2 No.${String(no)} has no ScopePilot coverage route`);
-    }
     const itemId = `WAPG-1.2-${String(no).padStart(3, '0')}`;
     checks.push({
       sheet: 'WebAppPentestGuidelines v1.2',
@@ -280,7 +240,6 @@ function buildWebAppPentestGuideline(): GuidelineCatalogFile['guidelines'][numbe
       safeState: '公式Excelの問題なし判定を参照',
       sourceId: WEBAPP_PENTEST_SOURCE_ID,
       sourceUrl: WEBAPP_PENTEST_SOURCE_URL,
-      coverageRoutes: coverage.routes,
     });
   }
   return {

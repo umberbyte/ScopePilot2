@@ -48,6 +48,7 @@ export function planHashOf(plan: ExecutionPlan): string {
     operatorId: plan.operatorId,
     targetRole: plan.targetRole,
     guidelineIds: plan.guidelineIds,
+    ...(plan.guidelineCoverage === undefined ? {} : { guidelineCoverage: plan.guidelineCoverage }),
     steps: plan.steps.map((step) => ({
       kind: step.kind,
       operationClass: step.operationClass,
@@ -143,6 +144,7 @@ export interface BuildPlanInput {
   readonly operatorId: string;
   readonly targetRole: string;
   readonly guidelineIds?: readonly string[];
+  readonly guidelineCoverage?: import('@scopepilot2/contracts').GuidelineCoveragePlan;
   readonly steps: readonly {
     readonly kind: PlanStepKind;
     readonly operationClass: OperationClass;
@@ -178,6 +180,7 @@ export function buildPlan(input: BuildPlanInput): ExecutionPlan {
     operatorId: input.operatorId,
     targetRole: input.targetRole,
     guidelineIds: [...new Set(input.guidelineIds ?? [])].sort(),
+    ...(input.guidelineCoverage === undefined ? {} : { guidelineCoverage: structuredClone(input.guidelineCoverage) }),
     steps,
     limits: input.limits,
     runtimeBundleHash: input.runtimeBundleHash,

@@ -47,6 +47,15 @@ export function renderMarkdown(model: ReportModel, reportId: string): ReportArti
   lines.push(`- 探索した URL: ${model.coverage.exploredUrlCount}`);
   lines.push(`- 診断した URL: ${model.coverage.scannedUrlCount}`);
   lines.push('');
+  if (model.coverage.guidelineCoverage !== undefined) {
+    lines.push('### Guideline item coverage');
+    for (const execution of model.coverage.guidelineCoverage.executions) {
+      const snapshot = model.coverage.guidelineCoverage.snapshots.find((s) => s.routeId === execution.routeId);
+      lines.push(`- ${snapshot?.guidelineId ?? ''} / ${execution.itemId} / ${execution.routeId}: ${execution.executionStatus} / ${execution.assessment} / ${execution.guarantee}`);
+      lines.push(`  Evidence: ${execution.evidenceRefs.join(', ')}; limitations: ${execution.limitationCodes.join(', ')}`);
+    }
+    lines.push('');
+  }
   if ((model.coverage.exploredUrls?.length ?? 0) > 0) {
     lines.push('### 探索URLと診断対象判定');
     lines.push('');

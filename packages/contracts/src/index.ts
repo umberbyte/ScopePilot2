@@ -24,3 +24,4 @@ export * from './sequencer.ts';
 export * from './plan/guideline-automation.ts';
 export * from './scan/passive.ts';
 export * from './fuzzer.ts';
+export * from './guidelines/coverage.ts';

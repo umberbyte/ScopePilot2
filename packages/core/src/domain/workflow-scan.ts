@@ -117,17 +117,8 @@ export interface WorkflowScanOptions {
   readonly signal?: AbortSignal;
 }
 
-export const WORKFLOW_SCAN_CHECK_IDS = [
-  'security-headers',
-  'cookie-security',
-  'cors-policy',
-  'error-disclosure',
-  'dom-source-sink',
-  'reflected-input',
-  'sql-error',
-  'open-redirect',
-  'path-traversal',
-] as const;
+import { WORKFLOW_SCAN_CHECK_IDS } from './guideline-assertions.ts';
+export { WORKFLOW_SCAN_CHECK_IDS } from './guideline-assertions.ts';
 
 export type WorkflowScanCheckId = (typeof WORKFLOW_SCAN_CHECK_IDS)[number];
 

@@ -62,6 +62,19 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
     if (route === 'GET /api/health') {
       return respondJson(response, 200, { schemaVersion: 'scopepilot2.api.v1', status: 'ok' });
     }
+    if (route === 'GET /api/guidelines/coverage') {
+      try {
+        const guidelineId = url.searchParams.get('guidelineId');
+        if (guidelineId === null || guidelineId.trim() === '') throw new DomainError('ValidationFailed', 'guidelineId is required');
+        return respondJson(response, 200, service.guidelineCoverage.forecast(guidelineId, service.guidelineCoverage.planForObservedTargets([guidelineId], [], service.capabilities())));
+      } catch (cause) { return respondDomainError(response, cause); }
+    }
+    const coverageRun = /^\/api\/runs\/([^/]+)\/guideline-coverage$/.exec(url.pathname);
+    if (method === 'GET' && coverageRun !== null) {
+      try {
+        return respondJson(response, 200, service.guidelineCoverage.getRun(decodeURIComponent(coverageRun[1]!)));
+      } catch (cause) { return respondDomainError(response, cause); }
+    }
     if (route === 'GET /api/case') {
       try {
         return respondJson(response, 200, service.currentCase());

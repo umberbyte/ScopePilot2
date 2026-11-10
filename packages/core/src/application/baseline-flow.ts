@@ -15,6 +15,7 @@ import type { FuzzInput, FuzzRow, FuzzRunView, FuzzPayloadSource } from '@scopep
 import type { AdapterKind, RuntimeProfile, RuntimeAdapterCapability, SequencerJobParams, SequencerTokenSource, SequencerSessionRecord, SequencerSessionResult } from '@scopepilot2/contracts';
 import { UnavailableCapability } from '../ports/runtime-capability.ts';
 import { JobRegistry, jobContext, type JobStore, redactJobText } from './job-registry.ts';
+import { bundledGuidelineCoverage } from '../domain/guideline-coverage.ts';
 import {
   canonicalJson,
   DomainError,
@@ -487,6 +488,9 @@ export class BaselineFlowService {
   readonly jobs: JobRegistry;
   private readonly auditListeners = new Set<(event: BaselineFlowEvent, seq: number) => void>();
   subscribeAudit(listener: (event: BaselineFlowEvent, seq: number) => void): () => void { this.auditListeners.add(listener); return () => { this.auditListeners.delete(listener); }; }
+  readonly guidelineCoverage = bundledGuidelineCoverage();
+  private latestCoverageRunId: string | undefined;
+
   private aggregate: CaseAggregate | null = null;
   private authorization: AuthorizationRecord | null = null;
   private readonly eventsLog: BaselineFlowEvent[] = [];
@@ -698,6 +702,7 @@ export class BaselineFlowService {
     if (authorization !== undefined && authorization.caseId !== record.caseId) {
       throw domainError('ValidationFailed', 'stored authorization belongs to another case');
     }
+    this.latestCoverageRunId = undefined;
     this.aggregate = CaseAggregate.open({
       ...record,
       scope: {
@@ -4512,6 +4517,10 @@ export class BaselineFlowService {
       operatorId: operator.operatorId,
       targetRole: options.targetRole?.trim() || authorization.targetRoles[0] || 'unauthenticated',
       guidelineIds: options.guidelines ?? [],
+      guidelineCoverage: this.guidelineCoverage.planForObservedTargets(
+        options.guidelines ?? [], workflowTargets,
+        includeWorkflowScan ? this.deps.capabilities : this.deps.capabilities.filter((c) => c.engineKind !== 'node-http'),
+      ),
       steps: [
         ...(!includeZap ? [] : [{
           kind: 'active-scan',
@@ -5011,6 +5020,11 @@ export class BaselineFlowService {
 
     const runId = this.deps.ids.next('run');
     await this.saveRuntimeBundle(runId);
+    if (plan.guidelineCoverage !== undefined) {
+      const coverage = this.guidelineCoverage.startRun(runId, plan.guidelineCoverage);
+      this.latestCoverageRunId = runId;
+      await this.deps.evidence.saveText(`guideline-coverage-snapshot:${runId}`, canonicalJson(coverage));
+    }
     const planHash = planHashOf(plan);
     this.record({ type: 'RunStarted', at: this.deps.clock.now().toISOString(), runId, planHash });
     const machine = new RunStateMachine('Confirmed');
@@ -5470,6 +5484,24 @@ export class BaselineFlowService {
             }),
           );
           evidenceRefs.push(evidence.evidenceId);
+          if (plan.guidelineCoverage !== undefined) {
+            for (const execution of this.guidelineCoverage.getRun(runId).executions) {
+              const snapshot = plan.guidelineCoverage.snapshots.find((candidate) => candidate.routeId === execution.routeId)!;
+              if (execution.guarantee === 'Unsupported' || snapshot.assertionIds.length === 0) continue;
+              const skipped = execution.missingInputCodes.includes('ASSERTION_PRECONDITION_NOT_MET') || result.skips.some((skip) => snapshot.assertionIds.includes(skip.checkId));
+              // The legacy runner records findings and skips, not successful assertion invocations.
+              // A baseline HTTP request alone cannot establish that an item assertion ran.
+              const hasAssertionRecords = result.requestLog.length > 0 && snapshot.assertionIds.every((id) => result.checks.some((check) => check.checkId === id));
+              const completed = !skipped && hasAssertionRecords;
+              this.guidelineCoverage.recordExecution({
+                ...execution, executionStatus: skipped ? 'needs-input' : completed ? 'completed' : 'unavailable',
+                assessment: completed ? 'inconclusive' : 'not-assessed',
+                evidenceRefs: [...execution.evidenceRefs, evidence.evidenceId],
+                missingInputCodes: skipped ? ['ASSERTION_PRECONDITION_NOT_MET'] : [],
+                limitationCodes: [...execution.limitationCodes, 'GENERIC_WORKFLOW_HAS_NO_ITEM_LEVEL_PASS_ORACLE', ...(hasAssertionRecords ? [] : ['ASSERTION_EXECUTION_RECORD_MISSING'])],
+              });
+            }
+          }
           allChecks.push(...result.checks);
           skipCount += result.skips.length;
           const imported = this.importer.importObservationCandidates(
@@ -5674,6 +5706,9 @@ export class BaselineFlowService {
       this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'user-request' });
       throw domainError('Cancelled', 'scan stopped by user');
     }
+    if (plan.guidelineCoverage !== undefined) {
+      await this.deps.evidence.saveText(`guideline-coverage-result:${runId}`, canonicalJson(this.guidelineCoverage.getRun(runId)));
+    }
     const runRecord: RunRecord = {
       runId,
       planId: plan.planId,
@@ -5801,6 +5836,7 @@ export class BaselineFlowService {
       guidelines: input.guidelines,
       findings,
       coverage: {
+        ...(this.latestCoverageRunId === undefined ? {} : { guidelineCoverage: this.guidelineCoverage.getRun(this.latestCoverageRunId) }),
         exploredUrlCount: this.observationsByUrl.size,
         scannedUrlCount: this.scannedUrls.size,
         delegatedSteps: this.delegatedSteps,

@@ -20,7 +20,7 @@ describe('診断項目 workbook からの catalog 生成 (design/27)', () => {
     assert.equal(sheets.length, 14);
 
     const catalog = buildCatalog(sheets, { workbookPath: 'docs/WebAppPentestGuidelines_診断項目_ScopePilot_作業用.xlsx', sha256 });
-    assert.equal(catalog.schemaVersion, 'scopepilot2.catalog.v2');
+    assert.equal(catalog.schemaVersion, 'scopepilot2.catalog.v3');
     assert.equal(catalog.counts.guidelineChecks, 871);
     assert.equal(catalog.counts.zapRules, 102);
     // 末尾の注記行 (※…) はデータ行に数えない。
@@ -49,7 +49,7 @@ describe('診断項目 workbook からの catalog 生成 (design/27)', () => {
     assert.equal(webAppPentest?.checks[0]?.row, 2);
     assert.equal(webAppPentest?.checks[101]?.row, 103);
     for (const check of webAppPentest?.checks ?? []) {
-      assert.ok((check.coverageRoutes ?? []).length > 0, `${check.itemId} must have a coverage route`);
+      assert.ok(catalog.coverageRoutes.some((route) => route.itemId === check.itemId && route.guidelineId === webAppPentest?.sheet), `${check.itemId} must have a coverage route`);
       assert.match(check.sourceUrl ?? '', /^https:\/\/github\.com\/WebAppPentestGuidelines\//u);
       assert.ok(!('payload' in check) && !('procedure' in check), 'upstream text/payload is not redistributed');
     }

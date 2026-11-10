@@ -17,7 +17,10 @@
     "test:simulation": "npm run test --workspace @scopepilot2/simulation --if-present",
     "test:fixture": "npm run test:fixture --workspace @scopepilot2/simulation --if-present && npm run test:fixture --workspace @scopepilot2/guideline-catalog --if-present",
     "lint:docs": "node scripts/lint-design-docs.mjs",
-    "test:docs-lint": "node --test scripts/lint-design-docs.test.mjs"
+    "test:docs-lint": "node --test scripts/lint-design-docs.test.mjs",
+    "generate:guideline-catalog": "node --experimental-strip-types tools/guideline-catalog/src/main.ts docs/WebAppPentestGuidelines_診断項目_ScopePilot_作業用.xlsx --output docs/generated/guideline-catalog.json",
+    "pretypecheck": "npm run generate:guideline-catalog",
+    "pretest": "npm run generate:guideline-catalog"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
