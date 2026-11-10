@@ -9,9 +9,8 @@
  */
 import type { Server } from 'node:http';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
-import { assertRunStopReason, DomainError, DocumentAuthMethods, hashStable, type DocumentAuthMethod, type DomainErrorCode, type OperatorProfile, type StopReason } from '@scopepilot2/contracts';
-import { RunStateMachine } from '../domain/run-state-machine.ts';
+import type { JobEvent, ScanExecutionStatus } from '@scopepilot2/contracts';
+import { DomainError, DocumentAuthMethods, JobEventCategories, JobKinds, JobStates, hashStable, type DocumentAuthMethod, type DomainErrorCode, type OperatorProfile } from '@scopepilot2/contracts';
 import type { BaselineFlowService } from './baseline-flow.ts';
 import { CodecRegistry, compareText, provenanceOf, transformPipeline, type CompareOptions } from '../domain/decoder-comparer.ts';
 import type { LoginFlowStep } from '../domain/authentication-session.ts';
@@ -44,22 +43,6 @@ export interface CoreApiServerOptions {
 
 export function createCoreApiServer(options: CoreApiServerOptions): Server {
   const { service, operator, runRepository } = options;
-  type ScanResult = Awaited<ReturnType<BaselineFlowService['runActiveScan']>>;
-  interface ScanExecution {
-    readonly executionId: string;
-    readonly controller: AbortController;
-    readonly machine: RunStateMachine;
-    dispatchState: 'queued' | 'dispatched';
-    stopReason?: StopReason;
-    currentEngine: 'zap' | 'nuclei' | 'scopepilot';
-    currentCommand: string;
-    progress: number;
-    logs: string[];
-    result?: ScanResult;
-    error?: string;
-  }
-  const scanExecutions = new Map<string, ScanExecution>();
-
   const server = createServer((request, response) => {
     void handle(request, response).catch((cause: unknown) => {
       respondError(response, 500, 'InternalError', 'unexpected server error', false);
@@ -250,115 +233,108 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
         return respondDomainError(response, cause);
       }
     }
-    if (route === 'POST /api/run/scan/start') {
+    if (route === 'POST /api/run/scan/start' || route === 'POST /api/jobs') {
       const body = await readJsonBody(request, response);
-      if (body === undefined) {
-        return;
-      }
+      if (body === undefined) return;
       try {
-        const plan = planField(body);
-        const confirmation = confirmationField(body);
-        const adopted = adoptedField(body);
-        const role = typeof body.role === 'string' ? stringField(body, 'role') : undefined;
-        const executionId = randomUUID();
-        const controller = new AbortController();
-        const execution: ScanExecution = {
-          executionId,
-          controller,
-          machine: new RunStateMachine('Confirmed'),
-          dispatchState: 'queued',
-          currentEngine: 'scopepilot',
-          currentCommand: '',
-          progress: 0,
-          logs: [`${new Date().toISOString()} [ScopePilot] 診断実行を受け付けました`],
-        };
-        scanExecutions.set(executionId, execution);
-        void (async () => {
-          execution.dispatchState = 'dispatched';
-          execution.machine.transition('Running');
-          try {
-            const result = await service.runActiveScan(operator, plan, confirmation, adopted, role, {
-              signal: controller.signal,
-              onEvent: (event) => {
-                execution.currentEngine = event.engine;
-                execution.progress = event.progress ?? execution.progress;
-                if (event.command !== undefined) execution.currentCommand = event.command;
-                execution.logs.push(`${event.at} [${event.engine.toUpperCase()}] ${event.message}${event.command === undefined ? '' : `\n  $ ${event.command}`}`);
-                if (execution.logs.length > 500) execution.logs.splice(0, execution.logs.length - 500);
-                // Engine stop events are progress only; await final persistence/cleanup.
-              },
-            });
-            assertRunStopReason(result.runRecord.state, result.runRecord.stopReason);
-            if (result.runRecord.state === 'Stopped') execution.machine.requestStop();
-            execution.machine.transition(result.runRecord.state);
-            execution.result = result;
-            if (result.runRecord.stopReason !== undefined) execution.stopReason = result.runRecord.stopReason;
-            execution.progress = 100;
-          } catch (cause) {
-            const cancelled = cause instanceof DomainError && cause.code === 'Cancelled';
-            if (cancelled) execution.machine.requestStop();
-            execution.machine.transition(cancelled ? 'Stopped' : 'Failed');
-            execution.stopReason = cancelled ? 'user-request' : 'engine-failure';
-            execution.error = cause instanceof Error ? cause.message : String(cause);
-            execution.logs.push(`${new Date().toISOString()} [ScopePilot] ${cancelled ? '停止しました' : `エラー: ${execution.error}`}`);
-          }
-        })();
-        return respondJson(response, 202, { executionId });
-      } catch (cause) {
-        return respondDomainError(response, cause);
-      }
+        if (route === 'POST /api/jobs' && body.kind !== 'active-scan') throw new DomainError('Unsupported', 'P0 supports active-scan jobs');
+        const input = route === 'POST /api/jobs' ? { ...body, ...objectField(body, 'params') } : body;
+        const plan = planField(input);
+        const confirmation = confirmationField(input);
+        const adopted = adoptedField(input);
+        const role = typeof input.role === 'string' ? stringField(input, 'role') : undefined;
+        // Fail confirmation/permission/scope checks before accepting the job.
+        service.validateJobScan(operator, plan, confirmation);
+        const registry = service.jobs;
+        const jobId = registry.create({ kind: 'active-scan', label: 'Active scan', planHash: confirmation.planHash,
+          ...(role === undefined ? {} : { role }), guarantee: 'Mixed', transport: service.scanTransport(), budgetLimit: plan.limits.maxRequests });
+        void registry.execute(jobId, signal => service.runActiveScan(operator, plan, confirmation, adopted, role, {
+          signal,
+          onEvent: event => registry.recordScanEvent(jobId, event),
+        })).catch(cause => server.emit('core-api-error', cause));
+        return respondJson(response, 202, route === 'POST /api/jobs' ? { jobId } : { executionId: jobId });
+      } catch (cause) { return respondDomainError(response, cause); }
     }
     if (route === 'GET /api/run/scan/status') {
       const executionId = url.searchParams.get('executionId') ?? '';
-      const execution = scanExecutions.get(executionId);
-      if (execution === undefined) {
-        return respondError(response, 404, 'ValidationFailed', 'scan execution was not found', false);
-      }
-      return respondJson(response, 200, {
-        executionId: execution.executionId,
-        state: execution.machine.state,
-        runState: execution.machine.state,
-        dispatchState: execution.dispatchState,
-        ...(execution.stopReason === undefined ? {} : { stopReason: execution.stopReason }),
-        currentEngine: execution.currentEngine,
-        currentCommand: execution.currentCommand,
-        progress: execution.progress,
-        logs: execution.logs,
-        ...(execution.result === undefined ? {} : {
-          result: {
-            runRecord: execution.result.runRecord,
-            planHash: execution.result.planHash,
-            scanRequest: execution.result.scanRequest,
-            overshootReservation: execution.result.overshootReservation,
-            engineVersion: execution.result.engineVersion,
-            requestCorpusEvidenceRef: execution.result.requestCorpusEvidenceRef,
-            findings: execution.result.findings,
-            diagnosticRoutes: execution.result.diagnosticRoutes,
-            guidelineRoutes: execution.result.guidelineRoutes,
-            ...(execution.result.workflow === undefined ? {} : { workflow: execution.result.workflow }),
-            ...(execution.result.nuclei === undefined ? {} : { nuclei: execution.result.nuclei }),
-          },
-        }),
-        ...(execution.error === undefined ? {} : { error: execution.error }),
-      });
+      const job = service.jobs.get(executionId);
+      if (job === undefined || job.summary.kind !== 'active-scan') return respondError(response, 404, 'ValidationFailed', 'scan execution was not found', false);
+      const events = service.jobs.events().filter(e => e.jobId === executionId);
+      const latest = events.findLast(e => e.category === 'phase');
+      const command = events.findLast(e => e.refs?.command !== undefined)?.refs?.command ?? '';
+      const runState = job.summary.state;
+      const dispatchState = job.summary.state === 'Queued' ? 'queued' : 'dispatched';
+      const status = {
+        executionId,
+        state: runState,
+        runState,
+        dispatchState,
+        ...(job.summary.stopReason === undefined ? {} : { stopReason: job.summary.stopReason }),
+        currentEngine: latest?.source === 'zap' || latest?.source === 'nuclei' ? latest.source : 'scopepilot',
+        currentCommand: command,
+        progress: job.summary.state === 'Completed' ? 100 : job.summary.counters.progress?.done ?? 0,
+        logs: events.slice(-500).map(e => `${e.at} [${e.source.toUpperCase()}] ${e.message}${e.refs?.command === undefined ? '' : `\n  $ ${e.refs.command}`}`),
+        ...(job.result === undefined ? {} : { result: job.result }),
+        ...(job.error === undefined ? {} : { error: job.error }),
+      };
+      return respondJson(response, 200, status);
     }
     if (route === 'POST /api/run/scan/stop') {
       const body = await readJsonBody(request, response);
-      if (body === undefined) {
-        return;
-      }
-      const executionId = stringField(body, 'executionId');
-      const execution = scanExecutions.get(executionId);
-      if (execution === undefined) {
-        return respondError(response, 404, 'ValidationFailed', 'scan execution was not found', false);
-      }
-      if (execution.machine.state === 'Running') {
-        execution.machine.requestStop();
-        execution.stopReason = 'user-request';
-        execution.logs.push(`${new Date().toISOString()} [ScopePilot] 停止要求を送信しました`);
-        execution.controller.abort();
-      }
-      return respondJson(response, 202, { executionId, state: execution.machine.state, runState: execution.machine.state, dispatchState: execution.dispatchState, ...(execution.stopReason === undefined ? {} : { stopReason: execution.stopReason }) });
+      if (body === undefined) return;
+      try {
+        const id = stringField(body, 'executionId');
+        if (service.jobs.get(id) === undefined) return respondError(response, 404, 'ValidationFailed', 'scan execution was not found', false);
+        requireJobPermission(operator, 'run.manage');
+        const job = service.jobs.stop(id);
+        const runState = job.state; const dispatchState = job.state === 'Queued' ? 'queued' : 'dispatched'; return respondJson(response, 202, { executionId: id, state: runState, runState, dispatchState, ...(job.stopReason === undefined ? {} : { stopReason: job.stopReason }) });
+      } catch (cause) { return respondDomainError(response, cause); }
+    }
+    // GET /api/jobs/{jobId}, GET /api/jobs/{jobId}/events, POST /api/jobs/{jobId}/stop
+    if (url.pathname === '/api/jobs' || url.pathname.startsWith('/api/jobs/')) {
+      try {
+        requireJobPermission(operator, 'case.read');
+        const match = /^\/api\/jobs\/([^/]+)(?:\/(events|stop))?$/.exec(url.pathname);
+        const id = match?.[1] === 'events' ? undefined : match?.[1];
+        if (id !== undefined && service.jobs.get(id) === undefined) return respondError(response, 404, 'NotFound', 'job was not found', false);
+        if (method === 'GET' && (url.pathname === '/api/jobs/events' || match?.[2] === 'events')) {
+          const since = cursorField(url.searchParams.get('since') ?? request.headers['last-event-id'] ?? '0');
+          const before = cursorField(url.searchParams.get('before') ?? String(Number.MAX_SAFE_INTEGER));
+          const limit = Math.min(5000, cursorField(url.searchParams.get('limit') ?? '500'));
+          if (limit === 0) throw new DomainError('ValidationFailed', 'limit must be positive');
+          const category = url.searchParams.get('category');
+          const level = url.searchParams.get('level');
+          if (category !== null && !JobEventCategories.some(c => c === category)) throw new DomainError('ValidationFailed', 'unknown job event category');
+          if (level !== null && !['debug', 'info', 'warn', 'error'].includes(level)) throw new DomainError('ValidationFailed', 'unknown job event level');
+          const accepts = (e: JobEvent): boolean => e.seq > since && e.seq < before && (id === undefined || e.jobId === id)
+            && (!url.searchParams.has('category') || e.category === url.searchParams.get('category'))
+            && (!url.searchParams.has('level') || e.level === url.searchParams.get('level'));
+          if (!(request.headers.accept ?? '').includes('application/x-ndjson')) {
+            streamEvents(response, service.jobs.events().filter(accepts), listener => service.jobs.subscribe(e => { if (accepts(e)) listener(e); }), e => e.seq, () => 'job.event');
+          } else {
+            const events = service.jobs.events().filter(accepts);
+            const page = url.searchParams.has('before') ? events.slice(-limit) : events.slice(0, limit);
+            respondNdjson(response, page);
+          }
+          return;
+        }
+        if (method === 'GET' && url.pathname === '/api/jobs') {
+          const state = url.searchParams.get('state');
+          const kind = url.searchParams.get('kind');
+          if (state !== null && state !== 'active' && !JobStates.some(s => s === state)) throw new DomainError('ValidationFailed', 'unknown job state');
+          if (kind !== null && !JobKinds.some(k => k === kind)) throw new DomainError('ValidationFailed', 'unknown job kind');
+          const offset = cursorField(url.searchParams.get('cursor') ?? '0');
+          const limit = Math.min(500, cursorField(url.searchParams.get('limit') ?? '100'));
+          if (limit === 0) throw new DomainError('ValidationFailed', 'limit must be positive');
+          const jobs = service.jobs.list().filter(j => (!state || (state === 'active' ? service.jobs.active(j.state) : j.state === state)) && (!kind || j.kind === kind));
+          return respondJson(response, 200, { jobs: jobs.slice(offset, offset + limit), ...(offset + limit < jobs.length ? { cursor: String(offset + limit) } : {}) });
+        }
+        if (method === 'GET' && match && !match[2]) return respondJson(response, 200, service.jobs.get(id!));
+        if (method === 'POST' && match?.[2] === 'stop') {
+          requireJobPermission(operator, 'run.manage');
+          return respondJson(response, 202, service.jobs.stop(id!));
+        }
+      } catch (cause) { return respondDomainError(response, cause); }
     }
     if (route === 'POST /api/run/scan') {
       const body = await readJsonBody(request, response);
@@ -1279,34 +1255,15 @@ export function createCoreApiServer(options: CoreApiServerOptions): Server {
       return respondJson(response, 200, { interrupted });
     }
     if (route === 'GET /api/events') {
-      const accept = request.headers.accept ?? '';
-      const lastEventIdHeader = Number(request.headers['last-event-id'] ?? '0');
-      const sinceQuery = url.searchParams.get('since');
-      const since = sinceQuery !== null ? Number(sinceQuery) : Number.isFinite(lastEventIdHeader) ? lastEventIdHeader : 0;
-      if (!Number.isInteger(since) || since < 0) {
-        return respondError(response, 400, 'ValidationFailed', 'since must be a non-negative integer', false);
-      }
-      const events = service.events();
-      // cursor は監査 event の連番。以後の event だけを返す (F20-UT-004 と同じ意味論)。
-      if (accept.includes('text/event-stream')) {
-        // SSE 形式 (design/18): Last-Event-ID (または ?since) 以降を再送する。
-        const sseLines = events
-          .slice(since)
-          .map((event, index) => {
-            const eventId = since + index + 1;
-            const body = JSON.stringify({ eventId, ...event });
-            return `id: ${eventId}\nevent: ${event.type}\ndata: ${body}\n\n`;
-          });
-        response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store' });
-        response.end(sseLines.join(''));
+      try {
+        const since = cursorField(url.searchParams.get('since') ?? request.headers['last-event-id'] ?? '0');
+        const matches = (e: { jobId?: string }): boolean => !url.searchParams.has('jobId') || e.jobId === url.searchParams.get('jobId');
+        const events = service.events().map((e, index) => ({ ...e, eventId: index + 1 })).filter(e => e.eventId > since && matches(e));
+        if ((request.headers.accept ?? '').includes('text/event-stream')) {
+          streamEvents(response, events, listener => service.subscribeAudit((e, seq) => { if (seq > since && matches(e)) listener({ ...e, eventId: seq }); }), e => e.eventId, e => e.type);
+        } else respondNdjson(response, events);
         return;
-      }
-      const lines = events
-        .slice(since)
-        .map((event, index) => JSON.stringify({ eventId: since + index + 1, ...event }));
-      response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8' });
-      response.end(`${lines.join('\n')}${lines.length > 0 ? '\n' : ''}`);
-      return;
+      } catch (cause) { return respondDomainError(response, cause); }
     }
     if (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
       return respondError(response, 404, 'NotFound', `unknown route: ${route}`, false);
@@ -1541,4 +1498,38 @@ function expectPositiveInteger(value: unknown, field: string): number {
     throw new DomainError('ValidationFailed', `field ${field} must be a positive integer`);
   }
   return value;
+}
+
+function requireJobPermission(operator: OperatorProfile, permission: 'case.read' | 'run.manage'): void {
+  if (!operator.permissions.includes(permission)) throw new DomainError('PermissionDenied', `missing permission: ${permission}`);
+}
+function cursorField(value: unknown): number {
+  if (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new DomainError('ValidationFailed', 'cursor must be a non-negative safe integer');
+  return Number(value);
+}
+function respondNdjson(response: ServerResponse, events: readonly unknown[]): void {
+  response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8' });
+  response.end(events.map(e => JSON.stringify(e) + '\n').join(''));
+}
+function streamEvents<T>(response: ServerResponse, replay: readonly T[], subscribe: (listener: (e: T) => void) => () => void, seq: (e: T) => number, name: (e: T) => string): void {
+  response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+  response.flushHeaders();
+  // Snapshot, replay and subscribe run synchronously: no asynchronous gap can lose events.
+  const send = (e: T): void => {
+    if (response.destroyed) return;
+    // A slow consumer reconnects using its last received ID; never grow an unbounded queue.
+    if (response.writableLength > 1024 * 1024) { response.destroy(); return; }
+    response.write(`id: ${seq(e)}\nevent: ${name(e)}\ndata: ${JSON.stringify(e)}\n\n`);
+  };
+  for (const e of replay) send(e);
+  const unsubscribe = subscribe(send);
+  const timer = setInterval(() => { response.write(': keep-alive\n\n'); }, 15_000);
+  timer.unref();
+  response.once('close', () => { clearInterval(timer); unsubscribe(); });
+}
+
+function objectField(body: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = body[key];
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new DomainError('ValidationFailed', `${key} must be an object`);
+  return value as Record<string, unknown>;
 }

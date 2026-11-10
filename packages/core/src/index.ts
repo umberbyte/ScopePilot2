@@ -38,3 +38,4 @@ export * from './application/api-error.ts';
 export * from './application/api-server.ts';
 
 export * from './ports/runtime-capability.ts';
+export * from './application/job-registry.ts';

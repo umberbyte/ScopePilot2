@@ -2,7 +2,7 @@
 import type { FindingSourceKind } from '../findings/findings.ts';
 import type { StopReason } from '../common/runtime.ts';
 
-export type BaselineFlowEvent =
+export type BaselineFlowEvent = { readonly jobId?: string; readonly runId?: string } & (
   | { readonly type: 'CaseCreated'; readonly at: string; readonly caseId: string; readonly revision: number }
   | { readonly type: 'CaseScopeUpdated'; readonly at: string; readonly caseId: string; readonly revision: number; readonly narrowed: boolean }
   | { readonly type: 'ConfirmationsInvalidated'; readonly at: string; readonly caseId: string; readonly confirmationIds: readonly string[]; readonly reason: string }
@@ -34,4 +34,4 @@ export type BaselineFlowEvent =
   | { readonly type: 'WsMessagesSent'; readonly at: string; readonly targetUrl: string; readonly sent: number; readonly rejected?: 'size' | 'rate' }
   | { readonly type: 'TransportNegotiated'; readonly at: string; readonly targetUrl: string; readonly protocol: 'h2' | 'http/1.1'; readonly downgraded: boolean }
   | { readonly type: 'ExtensionInstalled'; readonly at: string; readonly extensionId: string; readonly version: string }
-  | { readonly type: 'ReportGenerated'; readonly at: string; readonly reportId: string; readonly modelHash: string };
+  | { readonly type: 'ReportGenerated'; readonly at: string; readonly reportId: string; readonly modelHash: string });

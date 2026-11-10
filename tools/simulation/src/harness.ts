@@ -83,6 +83,7 @@ export function createHarness(options: HarnessOptions = {}): SimulationHarness {
   const loginExecutor = options.engines === undefined ? new FixtureLoginExecutor() : options.engines.loginExecutor;
   const service = new BaselineFlowService({
     runtimeProfile: options.engines === undefined ? 'simulation' : 'production',
+    jobTransport: options.engines === undefined ? 'fixture' : 'live',
     ...(options.engines === undefined ? createFixtureToolAdapters() : {}),
     // 実 engine 時は実時間 (認可の有効期間・監査記録)。既定は決定的な固定 clock。
     clock: options.engines?.clock ?? (options.engines === undefined ? new FixedClock(FIXTURE_CLOCK_TIMES) : new SystemClock()),

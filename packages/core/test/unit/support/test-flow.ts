@@ -199,6 +199,7 @@ export function createTestService(
   const scanEngine = options.scanEngine ?? new FakeScanEngine();
   const service = new BaselineFlowService({
     runtimeProfile: 'test',
+    jobTransport: 'fixture',
     ...createFixtureToolAdapters(),
     clock: new FixedClock([TEST_NOW]),
     ids: new SequentialIdGenerator(),

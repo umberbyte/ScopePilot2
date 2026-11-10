@@ -12,10 +12,10 @@ describe('SQLite storage', () => {
     const db = openDatabase(':memory:');
     const first = migrate(db);
     const second = migrate(db);
-    assert.deepEqual(first.appliedVersions, [1, 2, 3, 4, 5]);
-    assert.deepEqual(second.appliedVersions, [1, 2, 3, 4, 5]);
+    assert.deepEqual(first.appliedVersions, [1, 2, 3, 4, 5, 6]);
+    assert.deepEqual(second.appliedVersions, [1, 2, 3, 4, 5, 6]);
     const rows = db.prepare('SELECT COUNT(*) AS c FROM schema_migrations').get() as { c: number };
-    assert.equal(rows.c, 5);
+    assert.equal(rows.c, 6);
     db.close();
   });
 

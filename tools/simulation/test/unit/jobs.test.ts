@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { createHarness, FIXTURE_OPERATOR, FIXTURE_AUTHORIZATION_PERIOD } from '../../src/harness.ts';
+import { SITE_ORIGIN } from '../../src/fixtures/target-site.ts';
+import type { ExploreRunResult } from '@scopepilot2/core';
+test('explore to active scan completes through jobs with attributed lifecycle, phase and findings', async () => {
+  const { service } = createHarness(); const operator = FIXTURE_OPERATOR;
+  service.createCase(operator, { name: 'jobs', allowedOrigins: [SITE_ORIGIN], deniedOrigins: [], limits: { maxRequests: 5000, maxPages: 500, maxDurationMinutes: 60 } });
+  await service.grantAuthorization(operator, { allowedOperationClasses: ['Browse', 'ActiveScan'], targetRoles: ['unauthenticated'], ...FIXTURE_AUTHORIZATION_PERIOD, evidence: { label: 'fixture', content: 'fixture permission' } });
+  const { plan } = service.buildExplorationPlan(operator, [`${SITE_ORIGIN}/`]); service.authorizePlan(plan);
+  const confirmation = service.confirmPlan(plan, operator);
+  const crawl = service.jobs.create({ kind: 'crawl', label: 'fixture crawl', guarantee: 'Enforced', transport: service.scanTransport() });
+  await service.jobs.execute(crawl, () => service.runExploration(operator, plan, confirmation, { maxDepth: 2 }));
+  assert.equal(service.jobs.get(crawl)?.summary.state, 'Completed');
+  const exploration = service.jobs.get(crawl)!.result as ExploreRunResult;
+  const adopted = service.adoptCandidates(operator, exploration.candidates);
+  const scan = service.buildActiveScanPlan(operator, adopted.map(c => c.url)); service.authorizePlan(scan.plan);
+  const scanConfirmation = service.confirmPlan(scan.plan, operator);
+  const job = service.jobs.create({ kind: 'active-scan', label: 'fixture scan', guarantee: 'Delegated', transport: service.scanTransport() });
+  await service.jobs.execute(job, signal => service.runActiveScan(operator, scan.plan, scanConfirmation, adopted, undefined, { signal, onEvent: e => service.jobs.recordScanEvent(job, e) }));
+  assert.equal(service.jobs.get(job)?.summary.state, 'Completed');
+  assert.equal(service.jobs.get(job)?.summary.transport, 'fixture');
+  assert.ok(service.jobs.get(job)!.summary.counters.findings > 0);
+  assert.ok(service.jobs.events().some(e => e.jobId === job && e.category === 'phase'));
+  assert.ok(service.jobs.events().some(e => e.jobId === job && e.category === 'finding'));
+  assert.ok(service.jobs.events().some(e => e.jobId === crawl && e.category === 'request' && e.refs?.exchangeId));
+  assert.ok(service.listTraffic(500).entries?.some(e => 'jobId' in e && e.jobId === crawl));
+});

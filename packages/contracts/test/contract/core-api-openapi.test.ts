@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
 import { CORE_API_ROUTE_METHODS } from '../../src/openapi-routes.ts';
 import {
+  JobKinds, JobStates, JobEventCategories, JobMessageKeys,
   CandidateCategories,
   ControlAspects,
   DomainErrorCodes,
@@ -73,6 +74,12 @@ const EXPECTED_EVENT_TYPES = [
 describe('Core API OpenAPI 契約', () => {
   const spec: OpenApiSpec = JSON.parse(readFileSync(SPEC_PATH, 'utf8'));
 
+  test('scan compatibility routes participate in parity checks', () => {
+    for (const [method, path] of [['POST', '/api/run/scan/start'], ['GET', '/api/run/scan/status'], ['POST', '/api/run/scan/stop']]) {
+      assert.ok(CORE_API_ROUTE_METHODS.some(route => route.method === method && route.path === path));
+    }
+  });
+
   test('spec は OpenAPI 3.1 で、契約 version を info に持つ', () => {
     assert.equal(spec.openapi, '3.1.0');
     assert.equal(spec.info.title, 'ScopePilot2 Core API');
@@ -140,6 +147,10 @@ describe('Core API OpenAPI 契約', () => {
   });
 
   test('spec の enum 値は contracts の契約配列と一致する', () => {
+    assert.deepEqual(schemaEnum(spec, 'JobKind'), [...JobKinds]);
+    assert.deepEqual(schemaEnum(spec, 'JobState'), [...JobStates]);
+    assert.deepEqual(schemaEnum(spec, 'JobEventCategory'), [...JobEventCategories]);
+    assert.deepEqual(schemaEnum(spec, 'JobMessageKey'), [...JobMessageKeys]);
     assert.deepEqual(schemaEnum(spec, 'OperationClass'), [...OperationClasses]);
     assert.deepEqual(schemaEnum(spec, 'RunState'), [...RunStates]);
     assert.deepEqual(schemaEnum(spec, 'StopReason'), [...StopReasons]);

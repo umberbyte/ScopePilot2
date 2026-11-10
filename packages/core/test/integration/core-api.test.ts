@@ -562,7 +562,9 @@ describe('Core API server (node:http)', () => {
     });
     assert.equal(sseResponse.status, 200);
     assert.match(sseResponse.headers.get('content-type') ?? '', /text\/event-stream/);
-    const text = await sseResponse.text();
+    const reader = sseResponse.body!.getReader();
+    const text = new TextDecoder().decode((await reader.read()).value);
+    await reader.cancel();
     const blocks = text.split('\n\n').filter((block) => block !== '');
     assert.ok(blocks.length >= 2);
     const first = blocks[0] ?? '';
@@ -574,7 +576,9 @@ describe('Core API server (node:http)', () => {
     const resumed = await fetch(`${baseUrl}/api/events`, {
       headers: { Accept: 'text/event-stream', 'Last-Event-ID': String(total - 1) },
     });
-    const resumedText = await resumed.text();
+    const resumedReader = resumed.body!.getReader();
+    const resumedText = new TextDecoder().decode((await resumedReader.read()).value);
+    await resumedReader.cancel();
     const resumedBlocks = resumedText.split('\n\n').filter((block) => block !== '');
     assert.equal(resumedBlocks.length, 1);
     assert.match(resumedBlocks[0] ?? '', new RegExp(`^id: ${total}
