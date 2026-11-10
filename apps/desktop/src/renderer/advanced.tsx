@@ -6,7 +6,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { MessageBar, Badge, Button, Field, Input, makeStyles, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
-import { advancedDefaultRoute, advancedNavGroups, normalizeRoute, type AdvancedNavGroup, type AdvancedRoute } from '@scopepilot2/ui';
+import { advancedDefaultRoute, advancedNavGroups, normalizeRoute, type AdvancedNavGroup, type AdvancedRoute, ActivityPanel, useActivityPanel } from '@scopepilot2/ui';
 import { revisionConflictDecision } from '@scopepilot2/ui';
 import type { AuthorizationRecord, CaseRecord, EngineCapabilitySnapshot, OperatorPermission, RunRecord } from '@scopepilot2/contracts';
 import { GuidelinesCatalogScreen } from './guidelines-catalog.tsx';
@@ -1147,6 +1147,22 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
     }
   }, [apiBase, newCaseOrigin, refreshAudit, refreshCase]);
 
+  // アクティビティパネルの状態管理
+  const activityPanel = useActivityPanel({
+    apiBase,
+    currentRunId: undefined, // TODO: 現在の画面のジョブ/runId を渡す
+  });
+
+  const handleEventClick = useCallback((event: import('@scopepilot2/ui').ActivityEvent) => {
+    // TODO: イベントの詳細を表示する (P0 後に実装)
+    console.log('Event clicked:', event);
+  }, []);
+
+  const handleJobClick = useCallback((jobId: string) => {
+    // TODO: ジョブ詳細画面 (A70) へ遷移
+    console.log('Job clicked:', jobId);
+  }, []);
+
   const activeItem = items.find((item) => item.route === activeRoute);
   const host = SCREEN_HOSTS[activeRoute];
   return (
@@ -1299,6 +1315,16 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {host === 'settings' && <SettingsScreen apiBase={apiBase} />}
         {host === undefined && <Text className={styles.muted}>{t('nav.pendingScreen')}</Text>}
       </div>
+      <ActivityPanel
+        events={activityPanel.events}
+        jobs={activityPanel.jobs}
+        filter={activityPanel.filter}
+        onFilterChange={activityPanel.setFilter}
+        collapsed={activityPanel.collapsed}
+        onCollapsedChange={activityPanel.setCollapsed}
+        onEventClick={handleEventClick}
+        onJobClick={handleJobClick}
+      />
     </div>
   );
 }

@@ -11,3 +11,4 @@ export * from './wizard/wizard-state.ts';
 export * from './features/feature-spec.ts';
 export * from './features/feature-page.tsx';
 export * from './features/repeater-spec.ts';
+export * from './activity-panel/index.ts';
