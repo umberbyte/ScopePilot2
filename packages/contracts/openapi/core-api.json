@@ -5609,6 +5609,74 @@
           }
         ]
       }
+    },
+    "/api/tools/hash": {
+      "post": {
+        "operationId": "hashToolInput",
+        "summary": "hashToolInput",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HashRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "HashResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HashResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/tools/compare-binary": {
+      "post": {
+        "operationId": "compareBinaryInput",
+        "summary": "compareBinaryInput",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryCompareRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "BinaryCompareResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BinaryCompareResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -9847,6 +9915,230 @@
           "currentCommand",
           "progress",
           "logs"
+        ],
+        "additionalProperties": false
+      },
+      "HashRequest": {
+        "type": "object",
+        "required": [
+          "inputText"
+        ],
+        "properties": {
+          "inputText": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "BinaryCompareRequest": {
+        "type": "object",
+        "required": [
+          "left",
+          "right"
+        ],
+        "properties": {
+          "left": {
+            "type": "string"
+          },
+          "right": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 983040,
+            "multipleOf": 65536
+          }
+        },
+        "additionalProperties": false
+      },
+      "HashResult": {
+        "type": "object",
+        "required": [
+          "sha256",
+          "md5"
+        ],
+        "properties": {
+          "sha256": {
+            "type": "string"
+          },
+          "md5": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "BinaryCompareResult": {
+        "type": "object",
+        "required": [
+          "equal",
+          "leftBytes",
+          "rightBytes",
+          "firstDifferenceOffset",
+          "commonPrefixBytes",
+          "rows",
+          "differingRows",
+          "truncated",
+          "provenance",
+          "offset",
+          "nextOffset"
+        ],
+        "properties": {
+          "equal": {
+            "type": "boolean"
+          },
+          "leftBytes": {
+            "type": "integer"
+          },
+          "rightBytes": {
+            "type": "integer"
+          },
+          "firstDifferenceOffset": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "commonPrefixBytes": {
+            "type": "integer"
+          },
+          "differingRows": {
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "rows": {
+            "type": "array",
+            "maxItems": 4096,
+            "items": {
+              "type": "object",
+              "required": [
+                "offset",
+                "leftHex",
+                "rightHex"
+              ],
+              "properties": {
+                "offset": {
+                  "type": "integer"
+                },
+                "leftHex": {
+                  "type": "string"
+                },
+                "rightHex": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "provenance": {
+            "type": "object",
+            "required": [
+              "leftHash",
+              "rightHash",
+              "options"
+            ],
+            "properties": {
+              "leftHash": {
+                "type": "string"
+              },
+              "rightHash": {
+                "type": "string"
+              },
+              "options": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "nextOffset": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "SequencerJobParams": {
+        "type": "object",
+        "properties": {
+          "targetUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "samples": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 10000
+          },
+          "role": {
+            "type": "string"
+          },
+          "tokenSource": {
+            "type": "string",
+            "enum": [
+              "body",
+              "cookie",
+              "hidden",
+              "bearer",
+              "custom"
+            ],
+            "default": "body"
+          },
+          "tokenCookieName": {
+            "type": "string"
+          },
+          "tokenFieldName": {
+            "type": "string"
+          },
+          "tokenStartDelimiter": {
+            "type": "string"
+          },
+          "tokenEndDelimiter": {
+            "type": "string"
+          },
+          "replayRequest": {
+            "type": "object",
+            "properties": {
+              "method": {
+                "type": "string",
+                "default": "GET"
+              },
+              "headers": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              "body": {
+                "type": "string",
+                "description": "At most 1 MiB in UTF-8. Values are never persisted."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "targetUrl",
+          "samples"
         ],
         "additionalProperties": false
       }

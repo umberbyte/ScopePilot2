@@ -5,6 +5,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { MessageBar, Button, Checkbox, Field, Input, makeStyles, ProgressBar, Select, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text, Textarea, tokens } from '@fluentui/react-components';
+import type { JobEvent, JobSummary, SequencerSessionResult as SequencerResult, StartJobRequest } from '@scopepilot2/contracts';
 import { t } from './resources.ts';
 import { useRuntimeCapabilities } from './use-runtime-capabilities.ts';
 
@@ -42,54 +43,6 @@ interface TransportResult {
   };
 }
 
-interface AlphabetClassCounts {
-  readonly digit: number;
-  readonly lowerAscii: number;
-  readonly upperAscii: number;
-  readonly base64UrlPunctuation: number;
-  readonly base64StandardPunctuation: number;
-  readonly padding: number;
-  readonly otherAscii: number;
-  readonly nonAscii: number;
-}
-
-interface SequencerResult {
-  readonly tokenSource: SequencerTokenSource;
-  readonly requestMethod: string;
-  readonly requestHeaderNames: readonly string[];
-  readonly requestBodyBytes: number;
-  readonly tokenCookieName?: string;
-  readonly tokenFieldName?: string;
-  readonly tokenStartDelimiter?: string;
-  readonly tokenEndDelimiter?: string;
-  readonly verdict: string;
-  readonly sampleCount: number;
-  readonly duplicates: number;
-  readonly missing: number;
-  readonly shannonEntropyBitsPerByte?: number;
-  readonly shannonEntropyBitsPerToken?: number;
-  readonly distinctByteValues?: number;
-  readonly byteFrequencyBuckets?: readonly number[];
-  readonly tokenLengthBucketMinimums?: readonly number[];
-  readonly tokenByteLengthBuckets?: readonly number[];
-  readonly tokenCharacterLengthBuckets?: readonly number[];
-  readonly tokenMaximumCharacterRunLengthBuckets?: readonly number[];
-  readonly adjacentTokenBitHammingDistanceBuckets?: readonly number[];
-  readonly adjacentTokenHammingUnequalByteLengthPairs?: number;
-  readonly adjacentNumericAbsoluteDeltaBuckets?: readonly number[];
-  readonly adjacentNumericDeltaSignCounts?: Readonly<{ decreasing: number; unchanged: number; increasing: number }>;
-  readonly adjacentNumericIneligiblePairs?: number;
-  readonly adjacentNumericSerialCorrelationPairs?: number;
-  readonly adjacentNumericSerialCorrelation?: number;
-  readonly observedAlphabetSize?: number;
-  readonly alphabetClassCounts?: AlphabetClassCounts;
-  readonly positionAnalysisLimit?: number;
-  readonly positionAlphabetClassCounts?: readonly AlphabetClassCounts[];
-  readonly positionOverflowSamples?: number;
-  readonly minimum?: number;
-  readonly sessionCookieNames?: readonly string[];
-}
-
 const useStyles = makeStyles({
   section: { display: 'flex', flexDirection: 'column', gap: '4px' },
   muted: { color: tokens.colorNeutralForeground3 },
@@ -122,7 +75,7 @@ function lengthBucketRange(minimums: readonly number[], index: number): string {
   return minimum === maximum ? `${minimum}` : `${minimum}–${maximum}`;
 }
 
-export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.ReactElement {
+export function DecoderComparerScreen({ apiBase, sequencerOnly = false }: { apiBase: string; sequencerOnly?: boolean }): React.ReactElement {
   const runtime = useRuntimeCapabilities(apiBase);
   const styles = useStyles();
   const [inputText, setInputText] = useState('');
@@ -146,7 +99,9 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   const [sequencerResult, setSequencerResult] = useState<SequencerResult | null>(null);
   const [sequencerRunning, setSequencerRunning] = useState(false);
   const [sequencerNotice, setSequencerNotice] = useState('');
-  const sequencerAbort = useRef<AbortController | null>(null);
+  const [sequencerJobId, setSequencerJobId] = useState<string | null>(null);
+  const [sequencerJob, setSequencerJob] = useState<JobSummary | null>(null);
+  const sequencerMounted = useRef(true);
   const [oastTarget, setOastTarget] = useState('');
   const [oastProtocol, setOastProtocol] = useState('http');
   const [oastToken, setOastToken] = useState('');
@@ -200,13 +155,12 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
   }, [apiBase, left, normalizeNewlines, right]);
 
   const runSequencer = useCallback(async () => {
-    const controller = new AbortController();
-    sequencerAbort.current = controller;
     setBusy(true);
     setSequencerRunning(true);
     setError('');
     setSequencerNotice('');
     setSequencerResult(null);
+    setSequencerJob(null);
     try {
       const samples = Number(sequencerSamples);
       const replayHeaders = sequencerRequestHeaders
@@ -218,7 +172,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
           if (separator <= 0) throw new Error(t('a10.sequencerReplayHeaderFormatError'));
           return [line.slice(0, separator).trim(), line.slice(separator + 1).trimStart()];
         });
-      setSequencerResult(await callJson<SequencerResult>(apiBase, '/api/tools/sequencer/runs', {
+      const request: StartJobRequest = { kind: 'sequencer', params: {
         targetUrl: sequencerTarget,
         samples,
         tokenSource: sequencerTokenSource,
@@ -227,33 +181,69 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
         ...(sequencerTokenSource === 'custom' ? { tokenStartDelimiter: sequencerTokenStartDelimiter, tokenEndDelimiter: sequencerTokenEndDelimiter } : {}),
         ...(sequencerRole.trim() === '' ? {} : { role: sequencerRole.trim() }),
         replayRequest: { method: sequencerRequestMethod, headers: replayHeaders, body: sequencerRequestBody },
-      }, 'POST', controller.signal));
+      } };
+      const { jobId } = await callJson<{ jobId: string }>(apiBase, '/api/jobs', request);
+      if (sequencerMounted.current) setSequencerJobId(jobId);
     } catch (cause) {
-      if (controller.signal.aborted) {
-        setSequencerNotice(t('a10.sequencerCancelled'));
-      } else {
-        setError(String(cause));
-      }
-    } finally {
-      if (sequencerAbort.current === controller) {
-        sequencerAbort.current = null;
-        setSequencerRunning(false);
-        setBusy(false);
-      }
+      if (sequencerMounted.current) { setError(String(cause)); setSequencerRunning(false); setBusy(false); }
     }
   }, [apiBase, sequencerRequestBody, sequencerRequestHeaders, sequencerRequestMethod, sequencerRole, sequencerSamples, sequencerTarget, sequencerTokenCookieName, sequencerTokenEndDelimiter, sequencerTokenFieldName, sequencerTokenSource, sequencerTokenStartDelimiter]);
 
-  const stopSequencer = useCallback(() => {
-    const controller = sequencerAbort.current;
-    if (controller !== null && !controller.signal.aborted) {
+  const stopSequencer = useCallback(async () => {
+    if (sequencerJobId === null) return;
+    try {
+      await callJson(apiBase, `/api/jobs/${sequencerJobId}/stop`, {});
       setSequencerNotice(t('a10.sequencerCancelRequested'));
-      controller.abort();
-    }
+    } catch (cause) { setError(String(cause)); }
+  }, [apiBase, sequencerJobId]);
+
+  useEffect(() => {
+    sequencerMounted.current = true;
+    return () => { sequencerMounted.current = false; };
   }, []);
 
-  useEffect(() => () => {
-    sequencerAbort.current?.abort();
-  }, []);
+  // Leaving the screen leaves the job running. Reopening A52 restores its latest job.
+  useEffect(() => {
+    let disposed = false;
+    void callJson<{ jobs: JobSummary[] }>(apiBase, '/api/jobs?kind=sequencer&limit=500', undefined, 'GET').then(({ jobs }) => {
+      if (!disposed) setSequencerJobId(current => current ?? jobs.findLast(j => ['Queued', 'Running', 'Stopping'].includes(j.state))?.jobId ?? jobs.at(-1)?.jobId ?? null);
+    }).catch(cause => { if (!disposed) setError(String(cause)); });
+    return () => { disposed = true; };
+  }, [apiBase]);
+
+  useEffect(() => {
+    if (sequencerJobId === null) return;
+    let disposed = false;
+    let refreshVersion = 0;
+    let stream: EventSource | undefined;
+    const refresh = async (): Promise<void> => {
+      const version = ++refreshVersion;
+      const detail = await callJson<{ summary: JobSummary; result?: SequencerResult; error?: string }>(apiBase, `/api/jobs/${sequencerJobId}`, undefined, 'GET');
+      if (disposed || version !== refreshVersion) return;
+      setSequencerJob(current => current !== null && current.jobId === detail.summary.jobId && current.lastEventSeq > detail.summary.lastEventSeq ? current : detail.summary);
+      const active = ['Queued', 'Running', 'Stopping'].includes(detail.summary.state);
+      setSequencerRunning(active);
+      setBusy(active);
+      if (!active) {
+        stream?.close();
+        if (detail.result !== undefined) setSequencerResult(detail.result);
+        if (detail.error !== undefined && detail.summary.state === 'Failed') setError(detail.error);
+        if (detail.summary.state === 'Stopped') setSequencerNotice(t('a10.sequencerCancelled'));
+      }
+    };
+    const reportError = (cause: unknown): void => { if (!disposed) setError(String(cause)); };
+    // Subscribe before reading the snapshot: replay handles completion before subscription.
+    stream = new EventSource(`${apiBase}/api/jobs/${sequencerJobId}/events`);
+    stream.addEventListener('job.event', event => {
+      if (disposed) return;
+      const data = JSON.parse((event as MessageEvent<string>).data) as JobEvent;
+      if (data.counters !== undefined) setSequencerJob(current => current === null || data.seq <= current.lastEventSeq ? current : { ...current, lastEventSeq: data.seq, counters: { ...current.counters, ...data.counters } });
+      if (data.category === 'lifecycle') void refresh().catch(reportError);
+    });
+    stream.onerror = () => { void refresh().catch(reportError); }; // EventSource reconnects with Last-Event-ID.
+    void refresh().catch(reportError);
+    return () => { disposed = true; stream?.close(); };
+  }, [apiBase, sequencerJobId]);
 
   const analyzeDomFlowsAction = useCallback(async () => {
     setBusy(true);
@@ -422,6 +412,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
           {`Error: ${error}`}
         </MessageBar>
       )}
+      {!sequencerOnly && <>
       <Text weight="semibold">{t('a10.decoderTitle')}</Text>
       <Field label={t('a10.inputLabel')}>
         <Textarea value={inputText} onChange={(_, data) => setInputText(data.value)} rows={3} />
@@ -487,6 +478,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
           <Text className={styles.muted}>{t('a10.provenance', { leftHash: compareResult.provenance.leftHash.slice(0, 12), rightHash: compareResult.provenance.rightHash.slice(0, 12) })}</Text>
         </div>
       )}
+      </>}
       <Text weight="semibold">{t('a10.sequencerTitle')}</Text>
       <Text className={styles.muted}>{t('a10.sequencerIntro')}</Text>
       <Field label={t('common.targetUrlInScope')}>
@@ -542,9 +534,14 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
           {t('a10.sequencerRun')}
         </Button>
         {sequencerRunning && (
-          <Button onClick={stopSequencer}>{t('a10.sequencerStop')}</Button>
+          <Button disabled={sequencerJobId === null} onClick={() => void stopSequencer()}>{t('a10.sequencerStop')}</Button>
         )}
       </div>
+      {sequencerJob !== null && <div data-testid="sequencer-job" className={styles.section}>
+        <Text role="status">{t('a52.jobStatus', { state: sequencerJob.state, transport: sequencerJob.transport, guarantee: sequencerJob.guarantee })}</Text>
+        <Text>{t('a52.progress', { done: sequencerJob.counters.progress?.done ?? 0, total: sequencerJob.counters.progress?.total ?? 0 })}</Text>
+        <ProgressBar aria-label={t('a52.progressLabel')} value={sequencerJob.counters.progress?.done ?? 0} max={Math.max(1, sequencerJob.counters.progress?.total ?? 1)} />
+      </div>}
       {sequencerNotice !== '' && <Text role="status">{sequencerNotice}</Text>}
       {sequencerResult !== null && (
         <div className={styles.section} data-testid="sequencer-result">
@@ -731,6 +728,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
           )}
         </div>
       )}
+      {!sequencerOnly && <>
       <Text weight="semibold">{t('a10.oastTitle')}</Text>
       <Text className={styles.muted}>{t('a10.oastIntro')}</Text>
       <Field label={t('a10.oastTargetLabel')}>
@@ -883,6 +881,7 @@ export function DecoderComparerScreen({ apiBase }: { apiBase: string }): React.R
           </TableBody>
         </Table>
       )}
+      </>}
     </div>
   );
 }

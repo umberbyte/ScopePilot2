@@ -6,7 +6,7 @@
  * command pipeline の順序 (権限判定 → 認可 → 確認 → domain 処理 → 証跡 → event) を
  * 最初から踏襲する (SYS-UT-001/005 の土台)。
  */
-import type { AdapterKind, RuntimeProfile, RuntimeAdapterCapability } from '@scopepilot2/contracts';
+import type { AdapterKind, RuntimeProfile, RuntimeAdapterCapability, SequencerJobParams, SequencerTokenSource, SequencerSessionRecord, SequencerSessionResult } from '@scopepilot2/contracts';
 import { UnavailableCapability } from '../ports/runtime-capability.ts';
 import { JobRegistry, jobContext, type JobStore, redactJobText } from './job-registry.ts';
 import {
@@ -339,49 +339,6 @@ export interface InteractiveDiagnosticItemResult {
   readonly detail: string;
   readonly evidenceId?: string;
 }
-
-type SequencerTokenSource = 'body' | 'cookie' | 'hidden' | 'bearer' | 'custom';
-type SequencerSessionRecord = {
-  adapterKind: AdapterKind;
-  sessionId: string;
-  targetUrl: string;
-  tokenSource: SequencerTokenSource;
-  tokenCookieName?: string;
-  tokenFieldName?: string;
-  tokenStartDelimiter?: string;
-  tokenEndDelimiter?: string;
-  requestMethod: string;
-  requestHeaderNames: readonly string[];
-  requestBodyBytes: number;
-  verdict: 'assessed' | 'insufficient';
-  sampleCount: number;
-  duplicates: number;
-  missing: number;
-  shannonEntropyBitsPerByte?: number;
-  shannonEntropyBitsPerToken?: number;
-  distinctByteValues?: number;
-  byteFrequencyBuckets?: readonly number[];
-  tokenLengthBucketMinimums?: readonly number[];
-  tokenByteLengthBuckets?: readonly number[];
-  tokenCharacterLengthBuckets?: readonly number[];
-  tokenMaximumCharacterRunLengthBuckets?: readonly number[];
-  adjacentTokenBitHammingDistanceBuckets?: readonly number[];
-  adjacentTokenHammingUnequalByteLengthPairs?: number;
-  adjacentNumericAbsoluteDeltaBuckets?: readonly number[];
-  adjacentNumericDeltaSignCounts?: NumericDeltaSignCounts;
-  adjacentNumericIneligiblePairs?: number;
-  adjacentNumericSerialCorrelationPairs?: number;
-  adjacentNumericSerialCorrelation?: number;
-  observedAlphabetSize?: number;
-  alphabetClassCounts?: AlphabetClassCounts;
-  positionAnalysisLimit?: number;
-  positionAlphabetClassCounts?: readonly AlphabetClassCounts[];
-  positionOverflowSamples?: number;
-  minimum?: number;
-  sessionCookieNames?: readonly string[];
-  executedAt: string;
-};
-type SequencerSessionResult = Omit<SequencerSessionRecord, 'executedAt'>;
 
 export interface ActiveScanRunResult {
   readonly runRecord: RunRecord;
@@ -844,12 +801,12 @@ export class BaselineFlowService {
   }
 
   /** 観測通信の記録 (traffic log と endpoint 集約の両方に入れる)。 */
-  private recordObservedExchange(summary: { url: string; method: string; status: number; contentType: string }, at: string, source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' | 'workflow-scan'): void {
+  private recordObservedExchange(summary: { url: string; method: string; status: number; contentType: string }, at: string, source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' | 'workflow-scan', requestAlreadyCounted = false): void {
     const context = jobContext.getStore();
     const exchangeId = this.deps.ids.next('exchange');
     if (context) {
       const counters = context.registry.get(context.jobId)!.summary.counters;
-      context.registry.emit(context.jobId, { category: 'request', messageKey: 'job.request.sent', message: 'HTTP request observed', params: { method: summary.method, status: summary.status }, refs: { url: summary.url, exchangeId }, counters: { budget: { ...counters.budget, used: counters.budget.used + 1 }, requestsSent: counters.requestsSent + 1, ...(summary.status >= 500 ? { errors: counters.errors + 1 } : {}) } });
+      context.registry.emit(context.jobId, { category: 'request', messageKey: 'job.request.sent', message: 'HTTP request observed', params: { method: summary.method, status: summary.status }, refs: { url: summary.url, exchangeId }, counters: { budget: { ...counters.budget, used: counters.budget.used + (requestAlreadyCounted ? 0 : 1) }, requestsSent: counters.requestsSent + (requestAlreadyCounted ? 0 : 1), ...(summary.status >= 500 ? { errors: counters.errors + 1 } : {}) } });
     }
     (this.trafficLog as { exchangeId: string; url: string; method: string; status: number; contentType: string; at: string; source: 'explore' | 'repeater' | 'fuzzer' | 'sequencer' | 'workflow-scan'; jobId?: string }[]).push({
       exchangeId,
@@ -2788,11 +2745,9 @@ export class BaselineFlowService {
    */
   async runSequencerSession(
     operator: OperatorProfile,
-    input: { readonly targetUrl: string; readonly samples: number; readonly role?: string; readonly tokenSource?: SequencerTokenSource; readonly tokenCookieName?: string; readonly tokenFieldName?: string; readonly tokenStartDelimiter?: string; readonly tokenEndDelimiter?: string; readonly replayRequest?: { readonly method?: string; readonly headers?: readonly (readonly [string, string])[]; readonly body?: string }; readonly signal?: AbortSignal },
+    input: SequencerJobParams & { readonly signal?: AbortSignal; readonly partialOnStop?: boolean },
   ): Promise<SequencerSessionResult> {
     this.requirePermission(operator, 'run.manage');
-    const adapter = this.requireToolAdapter('sequencerTransport');
-    const adapterKind = adapter.adapterKind ?? 'real';
     const caseRecord = this.currentCase();
     const canonical = ScopePolicy.canonicalUrl(input.targetUrl);
     const decision = ScopePolicy.decide(caseRecord.scope, canonical);
@@ -2811,6 +2766,37 @@ export class BaselineFlowService {
     const replayRequest = createSequencerReplayRequest(input.replayRequest);
     const collector = new SampleCollector();
     const extractor = createSequencerExtractor(input.tokenSource ?? 'body', input.tokenCookieName, input.tokenFieldName, input.tokenStartDelimiter, input.tokenEndDelimiter);
+    const context = jobContext.getStore();
+    const collectionJob = context?.registry.get(context.jobId)?.summary.kind === 'sequencer' ? context : undefined;
+    const collectionStartedAt = Date.now();
+    let sent = 0;
+    const beforeRequest = (): void => {
+      throwIfCancelled();
+      const current = this.currentCase();
+      if (current.caseId !== caseRecord.caseId || !ScopePolicy.decide(current.scope, canonical).allowed) {
+        const context = jobContext.getStore();
+        context?.registry.emit(context.jobId, { category: 'egress-denied', messageKey: 'job.egress.denied', message: 'Sequencer target denied before sending', params: {} });
+        throw domainError('OutOfScope', 'sequencer scope changed during collection');
+      }
+      if (sent >= Math.min(plan.target, current.scope.limits.maxRequests) || Date.now() - collectionStartedAt >= current.scope.limits.maxDurationMinutes * 60_000) {
+        throw domainError('ValidationFailed', 'sequencer collection limit reached');
+      }
+      sent++;
+      if (collectionJob !== undefined) {
+        const counters = collectionJob.registry.get(collectionJob.jobId)!.summary.counters;
+        collectionJob.registry.emit(collectionJob.jobId, { category: 'budget', messageKey: 'job.request.sent', message: 'Collection request dispatched', params: { method: replayRequest.method },
+          counters: { requestsSent: counters.requestsSent + 1, budget: { ...counters.budget, used: counters.budget.used + 1 } } });
+      }
+    };
+    let attempted = 0;
+    const recordSample = (response: Parameters<typeof extractSequencerToken>[0]): void => {
+      collector.record(extractSequencerToken(response, extractor, pattern));
+      attempted++;
+      if (collectionJob !== undefined) {
+        collectionJob.registry.emit(collectionJob.jobId, { category: 'phase', messageKey: 'job.phase', message: 'Sample collected',
+          params: { phase: 'collect', samples: attempted }, counters: { progress: { done: attempted, total: plan.target, unit: 'samples' } } });
+      }
+    };
     const pattern = /token=([A-Za-z0-9_-]+)/;
     const throwIfCancelled = (): void => {
       if (input.signal?.aborted === true) {
@@ -2818,45 +2804,75 @@ export class BaselineFlowService {
       }
     };
     throwIfCancelled();
-
-    try {
-      await adapter.collect({
-        targetUrl: canonical,
-        samples: plan.target,
-        extractor,
-        replayRequest,
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-        ...(appliedCookies === undefined ? {} : {
-          sessionCookies: appliedCookies.map((cookie) => ({
-            name: cookie.name,
-            value: cookie.value,
-            domain: cookie.domain,
-            path: cookie.path,
-          })),
-        }),
-        onResponse: (response) => {
-          collector.record(extractSequencerToken(response, extractor, pattern));
-          this.recordObservedExchange(
-            { url: response.requestUrl, method: replayRequest.method, status: response.status, contentType: response.contentType },
-            this.deps.clock.now().toISOString(),
-            'sequencer',
-          );
-        },
-      });
-    } catch (cause) {
-      if (input.signal?.aborted === true) {
-        throw domainError('Cancelled', 'sequencer session cancelled');
+    if (this.deps.sequencerTransport === undefined) {
+      for (let index = 0; index < plan.target; index += 1) {
+        if (input.partialOnStop && input.signal?.aborted) break;
+        throwIfCancelled();
+        if (input.signal !== undefined) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          if (input.partialOnStop && input.signal.aborted) break;
+          throwIfCancelled();
+        }
+        let token: string | undefined;
+        if (canonical.includes('no-token') && index % 5 === 4) {
+          token = undefined;
+        } else if (canonical.includes('fixed')) {
+          token = 'fixed-token-value';
+        } else {
+          token = `sample-${index.toString(36)}-${(index * 7 + 3).toString(36)}`;
+        }
+        const response = extractor.source === 'cookie'
+          ? {
+              body: 'cookie token response',
+              ...(token === undefined ? {} : { setCookieHeaders: [`${extractor.cookieName}=${token}; Path=/; HttpOnly`] }),
+            }
+          : extractor.source === 'hidden'
+            ? { body: token === undefined ? '<form></form>' : `<form><input value="${token}" name="${extractor.fieldName}" type="hidden"></form>` }
+            : extractor.source === 'bearer'
+              ? { body: 'bearer token response', ...(token === undefined ? {} : { authorizationHeader: `Bearer ${token}` }) }
+              : extractor.source === 'custom'
+                ? { body: token === undefined ? 'no token in this response' : `${extractor.startDelimiter}${token}${extractor.endDelimiter}` }
+                : { body: token === undefined ? 'no token in this response' : `token=${token}` };
+        recordSample(response);
       }
-      throw cause;
+    } else {
+      try {
+        await this.deps.sequencerTransport.collect({
+          targetUrl: canonical,
+          samples: plan.target,
+          replayRequest,
+          beforeRequest,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          ...(appliedCookies === undefined ? {} : {
+            sessionCookies: appliedCookies.map((cookie) => ({
+              name: cookie.name,
+              value: cookie.value,
+              domain: cookie.domain,
+              path: cookie.path,
+            })),
+          }),
+          onResponse: (response) => {
+            recordSample(response);
+            this.recordObservedExchange(
+              { url: response.requestUrl, method: replayRequest.method, status: response.status, contentType: response.contentType },
+              this.deps.clock.now().toISOString(),
+              'sequencer',
+              sent > 0 && collectionJob !== undefined,
+            );
+          },
+        });
+      } catch (cause) {
+        if (!input.signal?.aborted) throw cause;
+        if (!input.partialOnStop) throw domainError('Cancelled', 'sequencer session cancelled');
+      }
     }
-    throwIfCancelled();
+    if (!input.partialOnStop) throwIfCancelled();
     const collection = collector.snapshot();
     const projection = reportProjection(collection);
     const assessment = assess(collection.tokens);
     const sessionId = this.deps.ids.next('seq');
     const verdict = assessment.verdict;
     const record = {
-      adapterKind,
       sessionId,
       targetUrl: canonical,
       tokenSource: extractor.source,
@@ -2894,7 +2910,7 @@ export class BaselineFlowService {
       executedAt: this.deps.clock.now().toISOString(),
     };
     (this.sequencerSessions as typeof record[]).push(record);
-    this.record({
+    if (!input.signal?.aborted) this.record({
       type: 'SequencerSessionCompleted',
       at: record.executedAt,
       sessionId,

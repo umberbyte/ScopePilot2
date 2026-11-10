@@ -23,7 +23,7 @@ test.afterAll(async () => {
 test('A01〜A13 のナビが表示され、A01 が既定の着地画面', async () => {
   const nav = page.getByRole('navigation', { name: 'Advanced 画面ナビ' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('button')).toHaveCount(13);
+  await expect(nav.getByRole('button')).toHaveCount(16);
   await expect(page.getByText('A13 Settings / Certificates / Engines / AI')).toBeVisible();
   await expect(page.getByText('外部 engine 能力 (保証等級)')).toBeVisible();
 });
@@ -432,15 +432,7 @@ test('A10: codec chain 復号とテキスト比較 (provenance 付き) ができ
   await expect(page.getByText('抽出元: 応答 Authorization の Bearer token')).toBeVisible();
   await expect(page.getByText(/sample-[a-z0-9-]+/)).toHaveCount(0);
 
-  // 長時間収集は画面から停止でき、cancel後の完了結果を表示しない。
-  await page.route('**/api/tools/sequencer/runs', async (route) => {
-    await new Promise<void>((resolve) => setTimeout(resolve, 500));
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ tokenSource: 'bearer', verdict: 'assessed', sampleCount: 40, duplicates: 39, missing: 0 }),
-    }).catch(() => undefined);
-  });
+  // 停止はHTTP切断ではなく、Jobs APIで要求する。収集済みの統計はStopped結果に残る。
   await page.getByRole('button', { name: 'sample を収集して解析する' }).click();
   await expect(page.getByRole('button', { name: '収集を停止する' })).toBeVisible();
   await page.getByRole('button', { name: '収集を停止する' }).click();

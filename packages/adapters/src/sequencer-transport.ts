@@ -45,6 +45,7 @@ export class NodeSequencerTransport implements SequencerTransportPort {
         await delay(waitMs, undefined, input.signal === undefined ? undefined : { signal: input.signal });
       }
       input.signal?.throwIfAborted();
+      input.beforeRequest?.();
       input.onResponse(await this.requestOnce(target, input.replayRequest, input.sessionCookies, input.signal));
     }
   }

@@ -3,6 +3,22 @@
  * 文は資源側で完結し、連結用断片 key を持たない。placeholder は {name} 形式。
  */
 export const jaStrings = {
+  "tools.decoderPurpose": "文字列を標準 codec の順に復号し、指紋を計算します。",
+  "tools.comparerPurpose": "2つの入力の行差分、または16進入力のバイト差分を比較します。",
+  "tools.noTraffic": "対象への通信は発生しません。処理はローカル Core 内で行います。",
+  "tools.hash": "入力の指紋を計算",
+  "tools.fingerprintOnly": "SHA-256 / MD5 は指紋確認用です。暗号学的な安全性の判定には使いません。",
+  "tools.lineDiff": "行差分",
+  "tools.compareMode": "比較形式",
+  "tools.textMode": "テキスト（行差分）",
+  "tools.hexMode": "バイト（16進入力）",
+  "tools.hexHint": "バイト比較は完全な16進数2桁の組で入力します。空白可、各入力1 MiBまで。64 KiB単位で差分を表示します。",
+  "tools.byteSummary": "左 {left} bytes / 右 {right} bytes。最初の差分 offset: {offset}。",
+  "tools.truncated": "差分は全体で {count} 行です。現在の64 KiB範囲外にも差分があります。",
+  "tools.range": "表示範囲: offset {offset} から64 KiB",
+  "tools.previousRange": "前の64 KiB",
+  "tools.nextRange": "次の64 KiB",
+  "tools.offset": "バイト位置（0始まり）",
   'app.settings': '設定',
   'run.state.Draft': '下書き',
   'run.state.Validated': '検証済み',
@@ -354,6 +370,9 @@ export const jaStrings = {
   'a10.diff': '差分 {lines} 行 (左 {left} 行 / 右 {right} 行)',
   'a10.col.line': '行',
   'a10.provenance': 'provenance: 左 {leftHash}… / 右 {rightHash}…',
+  'a52.jobStatus': 'ジョブ: {state}・{transport}・{guarantee}',
+  'a52.progress': 'サンプル: {done} / {total}',
+  'a52.progressLabel': 'サンプル収集の進捗',
   'a10.sequencerTitle': 'Sequencer',
   'a10.sequencerIntro':
     '対象 URL から token sample を収集して乱数性の統計を返します (design/f07)。統計は観測に対するもので、暗号学的安全性は断定しません。token 原文は保持しません。custom抽出は正規表現を実行せず、上限付きdelimiter対を使います。',

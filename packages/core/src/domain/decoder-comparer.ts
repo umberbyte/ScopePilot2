@@ -4,7 +4,44 @@
  * 圧縮 bomb は出力 byte 上限で停止し、部分値を成功扱いしない (F06-UT-003)。
  */
 import { gunzipSync, inflateRawSync } from 'node:zlib';
-import { domainError, hashStable } from '@scopepilot2/contracts';
+import { createHash } from 'node:crypto';
+import { domainError, type BinaryComparisonResult, type FingerprintResult } from '@scopepilot2/contracts';
+
+/** Fingerprints only; MD5 is not a security integrity guarantee. */
+export function fingerprintBytes(input: Buffer): FingerprintResult {
+  return {
+    sha256: createHash('sha256').update(input).digest('hex'),
+    md5: createHash('md5').update(input).digest('hex'),
+  };
+}
+
+export function parseComparisonHex(value: string): Buffer {
+  const hex = value.replace(/\s/g, '');
+  if (hex.length > 2 * 1024 * 1024 || !/^(?:[a-fA-F0-9]{2})*$/.test(hex)) {
+    throw domainError('ValidationFailed', 'hex input must contain complete byte pairs and at most 1 MiB');
+  }
+  return Buffer.from(hex, 'hex');
+}
+
+/** Every differing 16-byte row in a selected 64 KiB range. */
+export function compareBinaryRows(left: Buffer, right: Buffer, offset = 0): BinaryComparisonResult {
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > 15 * 65536 || offset % 65536 !== 0) {
+    throw domainError('ValidationFailed', 'offset must select a 64 KiB range within 1 MiB');
+  }
+  const rows: { offset: number; leftHex: string; rightHex: string }[] = [];
+  let differingRows = 0;
+  for (let rowOffset = 0; rowOffset < Math.max(left.length, right.length); rowOffset += 16) {
+    const l = left.subarray(rowOffset, rowOffset + 16);
+    const r = right.subarray(rowOffset, rowOffset + 16);
+    if (!l.equals(r)) {
+      differingRows += 1;
+      if (rowOffset >= offset && rowOffset < offset + 65536) rows.push({ offset: rowOffset, leftHex: l.toString('hex'), rightHex: r.toString('hex') });
+    }
+  }
+  return { ...compareBinary(left, right), rows, differingRows, truncated: differingRows > rows.length,
+    offset, nextOffset: offset + 65536 < Math.max(left.length, right.length) ? offset + 65536 : null,
+    provenance: provenanceOf(left, right, {}) };
+}
 
 export type CodecName = 'base64' | 'url' | 'hex' | 'html-entity' | 'gzip' | 'deflate-raw';
 
@@ -120,7 +157,7 @@ export function compareText(left: string, right: string, options: CompareOptions
   for (let line = 0; line < max; line += 1) {
     const l = leftLines[line] ?? '';
     const r = rightLines[line] ?? '';
-    if (l !== r) {
+    if (l !== r || line >= leftLines.length || line >= rightLines.length) {
       differingLines.push({ line: line + 1, left: l, right: r });
     }
   }
@@ -168,9 +205,9 @@ export function compareBinary(left: Buffer, right: Buffer): BinaryCompareSummary
         break;
       }
     }
-    if (firstDifferenceOffset === null && left.length !== right.length) {
-      firstDifferenceOffset = max;
-    }
+  }
+  if (firstDifferenceOffset === null && left.length !== right.length) {
+    firstDifferenceOffset = Math.min(left.length, right.length);
   }
   return {
     equal: common === 0 && left.length === right.length,
@@ -190,8 +227,8 @@ export interface DiffProvenance {
 /** 比較結果は元 artifact hash と option を持つ (F06-UT-007)。 */
 export function provenanceOf(left: Buffer, right: Buffer, options: CompareOptions): DiffProvenance {
   return {
-    leftHash: hashStable('scopepilot2.artifact', new TextDecoder().decode(left)),
-    rightHash: hashStable('scopepilot2.artifact', new TextDecoder().decode(right)),
+    leftHash: createHash('sha256').update(left).digest('hex'),
+    rightHash: createHash('sha256').update(right).digest('hex'),
     options,
   };
 }

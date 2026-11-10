@@ -26,6 +26,9 @@ export type UiRoute =
   | 'fuzzer'
   | 'scan-plans'
   | 'decoder'
+  | 'adv.tools.decoder'
+  | 'adv.tools.comparer'
+  | 'adv.tools.sequencer'
   | 'findings'
   | 'settings';
 
@@ -58,6 +61,9 @@ const ROUTE_PERMISSIONS: Readonly<Record<UiRoute, OperatorPermission>> = {
   fuzzer: 'run.manage',
   'scan-plans': 'run.manage',
   decoder: 'case.read',
+  'adv.tools.decoder': 'case.read',
+  'adv.tools.comparer': 'case.read',
+  'adv.tools.sequencer': 'run.manage',
   findings: 'finding.confirm',
   settings: 'case.manage',
 };
