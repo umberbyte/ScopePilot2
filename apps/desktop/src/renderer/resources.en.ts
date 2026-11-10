@@ -6,6 +6,17 @@ import type { StringKey } from './resources.ja.ts';
 
 export const enStrings: Readonly<Record<StringKey, string>> = {
   'app.settings': 'Settings',
+  'run.state.Draft': 'Draft',
+  'run.state.Validated': 'Validated',
+  'run.state.Authorized': 'Authorized',
+  'run.state.Confirmed': 'Confirmed',
+  'run.state.Running': 'Running',
+  'run.state.Stopping': 'Stopping',
+  'run.state.Completed': 'Completed',
+  'run.state.Stopped': 'Stopped',
+  'run.state.Failed': 'Failed',
+  'run.state.Interrupted': 'Interrupted (recovery review required)',
+  'run.dispatch.queued': 'Queued',
   'app.mode.label': 'Mode:',
   'app.mode.simple': 'Simple',
   'app.mode.advanced': 'Advanced',

@@ -12,10 +12,10 @@ describe('SQLite storage', () => {
     const db = openDatabase(':memory:');
     const first = migrate(db);
     const second = migrate(db);
-    assert.deepEqual(first.appliedVersions, [1, 2, 3, 4]);
-    assert.deepEqual(second.appliedVersions, [1, 2, 3, 4]);
+    assert.deepEqual(first.appliedVersions, [1, 2, 3, 4, 5]);
+    assert.deepEqual(second.appliedVersions, [1, 2, 3, 4, 5]);
     const rows = db.prepare('SELECT COUNT(*) AS c FROM schema_migrations').get() as { c: number };
-    assert.equal(rows.c, 4);
+    assert.equal(rows.c, 5);
     db.close();
   });
 
@@ -44,11 +44,18 @@ describe('SQLite storage', () => {
     runs.save(running);
     runs.save(stopping);
     runs.save(completed);
+    for (const [state, stopReason] of [['Stopped', 'user-request'], ['Failed', 'engine-failure'], ['Interrupted', 'interrupted']] as const) {
+      runs.save({ ...completed, runId: state, state, stopReason, attempt: 2 });
+    }
 
     const interrupted = runs.markInterrupted();
     assert.deepEqual(interrupted.map((run) => run.runId).sort(), ['run-0001', 'run-0002']);
     assert.ok(interrupted.every((run) => run.state === 'Interrupted' && run.stopReason === 'interrupted'));
     assert.equal(runs.get('run-0003')?.state, 'Completed');
+    for (const state of ['Stopped', 'Failed', 'Interrupted'] as const) {
+      assert.equal(runs.get(state)?.state, state);
+      assert.equal(runs.get(state)?.attempt, 2);
+    }
     // 自動再開はしない: 再実行しても対象が残らない。
     assert.deepEqual(runs.markInterrupted(), []);
     assert.deepEqual(runs.listInterruptedCandidates(), []);
@@ -142,7 +149,7 @@ describe('SQLite storage', () => {
 
       const second = openDatabase(path);
       const result = migrate(second);
-      assert.deepEqual(result.appliedVersions, [1, 2, 3, 4]);
+      assert.deepEqual(result.appliedVersions, [1, 2, 3, 4, 5]);
       assert.equal(new CaseRepository(second).get('case-0001')?.name, 'persist');
       second.close();
     } finally {
@@ -153,4 +160,31 @@ describe('SQLite storage', () => {
 
 after(() => {
   // tmpdir の掃除は各 test 内の finally で行う。
+});
+
+test('GO-26: migration only changes legacy run states and preserves identity/history', () => {
+  const db = openDatabase(':memory:');
+  try {
+    migrate(db);
+    new CaseRepository(db).save({ caseId: 'case-legacy', name: 'legacy', revision: 1,
+      scope: { allowedOrigins: ['http://a.test'], deniedOrigins: [], limits: { maxRequests: 1, maxPages: 1, maxDurationMinutes: 1 } }, createdAt: '2026-10-18T09:00:00.000Z' });
+    const insert = db.prepare('INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    insert.run('legacy-success', 'plan', 'case-legacy', 'Succeeded', 2, null, 'start', 'end');
+    insert.run('legacy-cancel', 'plan', 'case-legacy', 'Cancelled', 3, 'budget-exhausted', 'start', 'end');
+    insert.run('canonical', 'plan', 'case-legacy', 'Failed', 4, 'engine-failure', 'start', 'end');
+    const before = db.prepare("SELECT * FROM runs WHERE run_id = 'canonical'").get();
+    db.exec('DELETE FROM schema_migrations WHERE version = 5');
+    migrate(db);
+    assert.deepEqual(db.prepare("SELECT * FROM runs WHERE run_id = 'canonical'").get(), before);
+    const runs = new RunRepository(db);
+    assert.deepEqual(runs.get('legacy-success'), { runId: 'legacy-success', planId: 'plan', caseId: 'case-legacy',
+      state: 'Completed', attempt: 2, stopReason: 'completed', startedAt: 'start', endedAt: 'end' });
+    assert.equal(runs.get('legacy-cancel')?.state, 'Stopped');
+    assert.equal(runs.get('legacy-cancel')?.stopReason, 'budget-exhausted');
+    assert.throws(() => runs.save({ ...runs.get('legacy-success')!, state: 'Running', stopReason: undefined } as unknown as RunRecord), { code: 'Conflict' });
+    assert.throws(() => runs.save({ ...runs.get('canonical')!, stopReason: 'completed' }), { code: 'ValidationFailed' });
+    assert.throws(() => runs.save({ ...runs.get('canonical')!, attempt: 5 }), { code: 'Conflict' });
+    migrate(db);
+    assert.equal(runs.get('legacy-success')?.attempt, 2);
+  } finally { db.close(); }
 });

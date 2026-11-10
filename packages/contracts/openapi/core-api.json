@@ -5157,7 +5157,7 @@
       "post": {
         "operationId": "stopActiveScan",
         "summary": "Request cooperative scan cancellation",
-        "description": "Queued/running executions become stopping. Repeated requests and terminal executions return their current state.",
+        "description": "Queued or running executions become Stopping. Repeated requests and terminal executions return their current state. Stopped is reported after cooperative cleanup; failures remain Failed.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5976,7 +5976,12 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RunStopReasonConstraint"
+          }
+        ]
       },
       "FormClassification": {
         "enum": [
@@ -8396,15 +8401,7 @@
         "additionalProperties": false
       },
       "ScanExecutionState": {
-        "type": "string",
-        "enum": [
-          "queued",
-          "running",
-          "stopping",
-          "stopped",
-          "completed",
-          "failed"
-        ]
+        "$ref": "#/components/schemas/RunState"
       },
       "ScanExecutionAccepted": {
         "type": "object",
@@ -8433,16 +8430,37 @@
         "type": "object",
         "required": [
           "executionId",
-          "state"
+          "state",
+          "runState",
+          "dispatchState"
         ],
         "properties": {
           "executionId": {
             "type": "string"
           },
           "state": {
-            "$ref": "#/components/schemas/ScanExecutionState"
+            "$ref": "#/components/schemas/RunState",
+            "description": "Compatibility alias of canonical runState."
+          },
+          "runState": {
+            "$ref": "#/components/schemas/RunState"
+          },
+          "dispatchState": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "dispatched"
+            ]
+          },
+          "stopReason": {
+            "$ref": "#/components/schemas/StopReason"
           }
-        }
+        },
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RunStopReasonConstraint"
+          }
+        ]
       },
       "ScanExecutionSnapshot": {
         "type": "object",
@@ -8452,14 +8470,17 @@
           "currentEngine",
           "currentCommand",
           "progress",
-          "logs"
+          "logs",
+          "runState",
+          "dispatchState"
         ],
         "properties": {
           "executionId": {
             "type": "string"
           },
           "state": {
-            "$ref": "#/components/schemas/ScanExecutionState"
+            "$ref": "#/components/schemas/RunState",
+            "description": "Compatibility alias of canonical runState."
           },
           "currentEngine": {
             "type": "string",
@@ -8487,9 +8508,27 @@
           },
           "error": {
             "type": "string"
+          },
+          "runState": {
+            "$ref": "#/components/schemas/RunState"
+          },
+          "dispatchState": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "dispatched"
+            ]
+          },
+          "stopReason": {
+            "$ref": "#/components/schemas/StopReason"
           }
         },
-        "description": "Current in-memory execution snapshot. Execution IDs are lost on server restart. Execution failures are returned in state/error, not as start HTTP errors."
+        "description": "Current in-memory execution snapshot. Execution IDs are lost on server restart. Execution failures are returned in state/error, not as start HTTP errors.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RunStopReasonConstraint"
+          }
+        ]
       },
       "ScanExecutionResult": {
         "type": "object",
@@ -8744,6 +8783,110 @@
             }
           }
         }
+      },
+      "RunStopReasonConstraint": {
+        "description": "Canonical terminal run states require their matching stop reason (design 41 section 6).",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "Completed"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            "then": {
+              "required": [
+                "stopReason"
+              ],
+              "properties": {
+                "stopReason": {
+                  "enum": [
+                    "completed"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "Stopped"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            "then": {
+              "required": [
+                "stopReason"
+              ],
+              "properties": {
+                "stopReason": {
+                  "enum": [
+                    "user-request",
+                    "budget-exhausted",
+                    "scope-violation",
+                    "authorization-expired"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "Failed"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            "then": {
+              "required": [
+                "stopReason"
+              ],
+              "properties": {
+                "stopReason": {
+                  "enum": [
+                    "engine-failure"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "Interrupted"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            "then": {
+              "required": [
+                "stopReason"
+              ],
+              "properties": {
+                "stopReason": {
+                  "enum": [
+                    "interrupted"
+                  ]
+                }
+              }
+            }
+          }
+        ]
       }
     },
     "responses": {

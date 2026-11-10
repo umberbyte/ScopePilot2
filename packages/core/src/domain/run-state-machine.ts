@@ -12,7 +12,7 @@ const TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
   Authorized: ['Confirmed'],
   Confirmed: ['Running'],
   Running: ['Stopping', 'Completed', 'Failed'],
-  Stopping: ['Stopped', 'Failed', 'Interrupted'],
+  Stopping: ['Stopped', 'Failed'],
   Completed: [],
   Stopped: [],
   Failed: [],

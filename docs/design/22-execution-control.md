@@ -12,7 +12,7 @@
 request/page/time/byte/concurrency/rateの各上限、engine capability、runtime bundle、入力証拠、認可IDを
 正規化しhash化する。
 
-状態は `Draft → Validated → Authorized → Confirmed → Running → Stopping → Completed|Stopped|Failed` とする。
+状態は `Draft → Validated → Authorized → Confirmed → Running`、`Running → Stopping → Stopped`、`Running → Completed|Failed`、`Stopping → Failed` とする。Running/Stopping のcrash recoveryのみInterruptedへ移す。終端はCompleted/Stopped/Failed/Interruptedであり、同一runから再開しない。再開は新しいrunと増加したattemptで行う。queuedはdispatchStateとして別管理し、その間のrunStateはConfirmedとする（設計41 §6）。
 `Authorized`は計画hashを有効な案件認可へ結び付けた状態、`Confirmed`は操作者またはautomation grantが
 同じplan hash、対象、操作、上限、routeを確認した状態であり、両者を代用しない。desktopはSimple / Advanced
 とも送信開始前に`PlanConfirmation`を要求する。Simpleではこれが実行内容を変更しない最後の操作となる。

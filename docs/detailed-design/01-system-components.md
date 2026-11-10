@@ -84,7 +84,24 @@ type CommandResult<T> =
 
 API エラーは `code`, `message`, `retryable`, `details`, `correlationId` を持つ。少なくとも `ValidationFailed`, `PermissionDenied`, `OutOfScope`, `ConfirmationRequired`, `Conflict`, `CapabilityUnavailable`, `NeedsInput`, `Unsupported`, `EngineFailure`, `Cancelled` を定義する。
 
-実行状態は `Draft → Validated → Authorized → Confirmed → Running → {Succeeded, Failed, Cancelled, Interrupted}` を基本とする。再開は新しい attempt を作り、完了済み step の evidence を参照する。
+実行状態の正本は設計41 §6とし、次の状態機械を実装する。
+
+```text
+Draft -> Validated -> Authorized -> Confirmed -> Running
+Running -> Stopping -> Stopped
+Running -> Completed
+Running -> Failed
+Stopping -> Failed
+Running/Stopping --crash recovery--> Interrupted
+```
+
+終端は `Completed | Stopped | Failed | Interrupted`。Succeeded/Cancelled はrun状態に使わない。成功は Completed、利用者・安全制御の協調停止は Stopped、engine/保存障害は Failed、process消失等は Interrupted とする。停止要求時は Stopping、子job停止と最終証跡保存の確認後に Stopped とする。API error code Cancelled は維持する。
+
+Completed のreasonは completed、Stopped は user-request/budget-exhausted/scope-violation/authorization-expired、Failed は engine-failure（保存障害を含む）、Interrupted は interrupted とする。保存時に整合性を検証する。
+
+queued はrun状態ではなく `dispatchState=queued|dispatched` として別管理し、queue中の `runState` は Confirmed とする。非同期scan APIのstateはcanonicalなrunStateの互換aliasであり、小文字の別状態機械は持たない。
+
+再開は新しいrunと増加したattemptで行い、完了済みstepのevidenceを参照する。同一runの終端からの遷移とattemptの上書きは拒否する。旧DB値Succeeded/Cancelledのみversion 5の明示migrationでCompleted/Stoppedへ変換し、既存canonical値・run識別子・attempt・時刻は変更しない。
 
 ## 7. コンポーネント単体テスト
 

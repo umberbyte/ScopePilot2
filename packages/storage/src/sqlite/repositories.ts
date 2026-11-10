@@ -7,7 +7,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { canonicalJson, hashStable, type AuthorizationRecord, type CaseRecord, type Finding, type RunRecord, type StopReason } from '@scopepilot2/contracts';
+import { assertRunStopReason, domainError, canonicalJson, hashStable, type AuthorizationRecord, type CaseRecord, type Finding, type RunRecord, type StopReason } from '@scopepilot2/contracts';
 import type { EvidenceStorePort, StoredEvidence } from '@scopepilot2/core';
 import { RunStateMachine } from '@scopepilot2/core';
 
@@ -362,6 +362,17 @@ export class RunRepository {
   }
 
   save(record: RunRecord): void {
+    assertRunStopReason(record.state, record.stopReason);
+    const previous = this.get(record.runId);
+    if (previous !== null) {
+      if (previous.attempt !== record.attempt || previous.planId !== record.planId || previous.caseId !== record.caseId) {
+        throw domainError('Conflict', 'run identity is immutable; resume requires a new run with an increased attempt');
+      }
+      if (previous.state !== record.state) {
+        const recovery = RunStateMachine.detectInterrupted(previous.state) === record.state;
+        if (!recovery) new RunStateMachine(previous.state).transition(record.state);
+      }
+    }
     this.db
       .prepare(
         `INSERT INTO runs (run_id, plan_id, case_id, state, attempt, stop_reason, started_at, ended_at)

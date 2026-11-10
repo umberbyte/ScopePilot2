@@ -4177,6 +4177,7 @@ export class BaselineFlowService {
       runState = machine.transition('Completed');
     } else {
       machine.transition('Stopping');
+      this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Stopping', attempt: 1, stopReason });
       runState = machine.transition('Stopped');
     }
     const runRecord: RunRecord = {
@@ -4385,6 +4386,8 @@ export class BaselineFlowService {
     machine.transition('Running');
     this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Running', attempt: 1 });
 
+    try {
+
     // Delegated 経路は最大 overshoot 分を共有上限の内側に予約する。ガイドラインから
     // 自動接続するScopePilot HTTP検査も同じ案件上限の内側へ先に予約し、ZAP leaseと
     // 二重計上しない。
@@ -4509,15 +4512,17 @@ export class BaselineFlowService {
 
     if (monitored.status === 'stopped') {
       machine.requestStop();
+      this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Stopping', attempt: 1, stopReason: 'user-request' });
       const stoppedRecord: RunRecord = {
         runId,
         planId: plan.planId,
         caseId: caseRecord.caseId,
-        state: machine.transition('Stopped'),
+        state: 'Stopped',
         attempt: 1,
         stopReason: 'user-request',
       };
       this.deps.runSink?.save(stoppedRecord);
+      machine.transition('Stopped');
       this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'user-request' });
       emit({ phase: 'stopped', engine: 'zap', message: 'ZAP active scan を停止しました', progress: monitored.progress });
       throw domainError('Cancelled', 'scan stopped by user');
@@ -4593,7 +4598,7 @@ export class BaselineFlowService {
             evidenceRef: verification.evidenceRef,
           });
         } catch (cause) {
-          if (control.signal?.aborted === true || (cause instanceof DomainError && cause.code === 'Cancelled')) {
+          if ((cause instanceof DomainError && cause.code === 'Cancelled') || (control.signal?.aborted === true && cause instanceof Error && cause.name === 'AbortError')) {
             throw domainError('Cancelled', 'scan stopped by user');
           }
           payloadVerifications.push({
@@ -4632,7 +4637,7 @@ export class BaselineFlowService {
             }
           : route);
       } catch (cause) {
-        if (control.signal?.aborted === true || (cause instanceof DomainError && cause.code === 'Cancelled')) {
+        if ((cause instanceof DomainError && cause.code === 'Cancelled') || (control.signal?.aborted === true && cause instanceof Error && cause.name === 'AbortError')) {
           throw domainError('Cancelled', 'scan stopped by user');
         }
         const error = cause instanceof Error ? cause.message : String(cause);
@@ -4851,7 +4856,7 @@ export class BaselineFlowService {
           progress: 100,
         });
       } catch (cause) {
-        if (control.signal?.aborted === true || (cause instanceof DomainError && cause.code === 'Cancelled')) {
+        if ((cause instanceof DomainError && cause.code === 'Cancelled') || (control.signal?.aborted === true && cause instanceof Error && cause.name === 'AbortError')) {
           throw domainError('Cancelled', 'workflow scan stopped by user');
         }
         const error = cause instanceof Error ? cause.message : String(cause);
@@ -4945,17 +4950,19 @@ export class BaselineFlowService {
         };
         emit({ phase: 'completed', engine: 'nuclei', message: `Nuclei scan 完了: 新規所見 ${imported.importedCount} 件`, progress: 100 });
       } catch (cause) {
-        if (control.signal?.aborted === true || (cause instanceof DomainError && cause.code === 'Cancelled')) {
+        if ((cause instanceof DomainError && cause.code === 'Cancelled') || (control.signal?.aborted === true && cause instanceof Error && cause.name === 'AbortError')) {
           machine.requestStop();
+          this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Stopping', attempt: 1, stopReason: 'user-request' });
           const stoppedRecord: RunRecord = {
             runId,
             planId: plan.planId,
             caseId: caseRecord.caseId,
-            state: machine.transition('Stopped'),
+            state: 'Stopped',
             attempt: 1,
             stopReason: 'user-request',
           };
           this.deps.runSink?.save(stoppedRecord);
+          machine.transition('Stopped');
           this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'user-request' });
           emit({ phase: 'stopped', engine: 'nuclei', message: 'Nuclei scan を停止しました' });
           throw domainError('Cancelled', 'scan stopped by user');
@@ -4991,16 +4998,27 @@ export class BaselineFlowService {
         engineVersion: this.deps.nucleiRunner.engineVersion,
       }]),
     ];
+    const failed = workflowSummary?.status === 'failed' || nucleiSummary?.status === 'failed';
+    if (!failed && control.signal?.aborted === true) {
+      machine.requestStop();
+      this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state: 'Stopping', attempt: 1, stopReason: 'user-request' });
+      this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId,
+        state: 'Stopped', attempt: 1, stopReason: 'user-request' });
+      machine.transition('Stopped');
+      this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'user-request' });
+      throw domainError('Cancelled', 'scan stopped by user');
+    }
     const runRecord: RunRecord = {
       runId,
       planId: plan.planId,
       caseId: caseRecord.caseId,
-      state: machine.transition('Completed'),
+      state: failed ? 'Failed' : 'Completed',
       attempt: 1,
-      stopReason: 'completed',
+      stopReason: failed ? 'engine-failure' : 'completed',
     };
     this.deps.runSink?.save(runRecord);
-    this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: 'completed' });
+    machine.transition(runRecord.state);
+    this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason: runRecord.stopReason! });
     emit({ phase: 'completed', engine: 'scopepilot', message: `診断完了: 所見 ${this.importer.list().length} 件`, progress: 100 });
     this.record({
       type: 'FindingsImported',
@@ -5024,6 +5042,23 @@ export class BaselineFlowService {
       ...(nucleiSummary === undefined ? {} : { nuclei: nucleiSummary }),
       ...(payloadVerifications.length === 0 ? {} : { payloadVerifications }),
     };
+    } catch (cause) {
+      // Cover failures outside individual adapter handlers, including engine start and final persistence.
+      if (!machine.isTerminal()) {
+        const cancelled = cause instanceof DomainError && cause.code === 'Cancelled';
+        if (cancelled) {
+          machine.requestStop();
+          this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId,
+            state: 'Stopping', attempt: 1, stopReason: 'user-request' });
+        }
+        const state = cancelled ? 'Stopped' : 'Failed';
+        const stopReason = cancelled ? 'user-request' : 'engine-failure';
+        this.deps.runSink?.save({ runId, planId: plan.planId, caseId: caseRecord.caseId, state, attempt: 1, stopReason });
+        machine.transition(state);
+        this.record({ type: 'RunCompleted', at: this.deps.clock.now().toISOString(), runId, stopReason });
+      }
+      throw cause;
+    }
   }
 
   /**
