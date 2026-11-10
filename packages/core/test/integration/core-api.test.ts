@@ -1332,10 +1332,11 @@ describe('Core API server (node:http)', () => {
       subprotocols: ['scopepilot.echo', 'json-v2'],
     });
     assert.equal(sent.status, 200);
-    const sentBody = (await sent.json()) as { sent: number; rejected: string | null; planHash: string };
+    const sentBody = (await sent.json()) as { sent: number; rejected: string | null; planHash: string; transport: string; connectionId: string };
     assert.equal(sentBody.sent, 2);
     assert.equal(sentBody.rejected, null);
     assert.match(sentBody.planHash, /^[0-9a-f]{64}$/);
+    assert.equal(sentBody.transport, 'fixture');
 
     const badSubprotocol = await post('/api/websocket/send', {
       targetUrl: 'http://fixture.target.test/ws',
@@ -1354,9 +1355,11 @@ describe('Core API server (node:http)', () => {
     const badDirection = await post('/api/websocket/frames', { targetUrl: 'http://fixture.target.test/ws', frames: [{ direction: 'sideways', payload: 'x' }] });
     assert.equal(badDirection.status, 400);
 
-    const list = (await (await fetch(`${baseUrl}/api/websocket/frames`)).json()) as { frames: readonly { direction: string; text: string; rawHash: string }[] };
+    const list = (await (await fetch(`${baseUrl}/api/websocket/frames`)).json()) as { transport: string; connections: readonly { connectionId: string; transport: string }[]; frames: readonly { connectionId: string; direction: string; text: string; rawHash: string; transport: string }[] };
+    assert.equal(list.transport, 'fixture');
+    assert.ok(list.connections.some((connection) => connection.connectionId === sentBody.connectionId && connection.transport === 'fixture'));
     assert.ok(list.frames.some((frame) => frame.direction === 'sent' && frame.text === 'ping'));
-    assert.ok(list.frames.every((frame) => frame.rawHash.length === 12));
+    assert.ok(list.frames.every((frame) => frame.rawHash.length === 12 && frame.connectionId !== '' && frame.transport === 'fixture'));
 
     const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();
     assert.match(eventsText, /WsFramesImported/);
@@ -1372,8 +1375,9 @@ describe('Core API server (node:http)', () => {
 
     const started = await post('/api/oast/attempts', { targetUrl: 'http://fixture.target.test/xss', protocol: 'http' });
     assert.equal(started.status, 201);
-    const attempt = (await started.json()) as { attemptId: string; token: string };
+    const attempt = (await started.json()) as { attemptId: string; token: string; transport: string };
     assert.match(attempt.token, /^oast-/);
+    assert.equal(attempt.transport, 'fixture');
 
     const recorded = await post('/api/oast/callbacks', {
       events: [
@@ -1385,10 +1389,15 @@ describe('Core API server (node:http)', () => {
     const counts = (await recorded.json()) as { kept: number; correlated: number; uncorrelated: number };
     assert.deepEqual(counts, { kept: 2, duplicates: 0, correlated: 1, uncorrelated: 1 });
 
-    const list = (await (await fetch(`${baseUrl}/api/oast/attempts`)).json()) as { attempts: readonly { attemptId: string; status: string; interactions: number; candidateOnly: boolean }[] };
+    const list = (await (await fetch(`${baseUrl}/api/oast/attempts`)).json()) as { transport: string; provider: string; attempts: readonly { attemptId: string; status: string; interactions: number; candidateOnly: boolean; transport: string }[]; callbacks: readonly { attemptId: string | null; correlation: string; rawHash: string; transport: string }[] };
+    assert.equal(list.transport, 'fixture');
+    assert.equal(list.provider, 'fixture');
     const entry = list.attempts.find((candidate) => candidate.attemptId === attempt.attemptId);
     assert.equal(entry?.status, 'waiting');
     assert.equal(entry?.interactions, 1);
+    assert.equal(entry?.transport, 'fixture');
+    assert.deepEqual(list.callbacks.map((callback) => callback.correlation), ['correlated', 'uncorrelated']);
+    assert.ok(list.callbacks.every((callback) => callback.rawHash.length === 12 && callback.transport === 'fixture'));
     assert.equal(JSON.stringify(list).includes(attempt.token), false, '一覧に token を出さない');
 
     const eventsText = await (await fetch(`${baseUrl}/api/events`)).text();

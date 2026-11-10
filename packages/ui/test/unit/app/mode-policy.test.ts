@@ -6,7 +6,7 @@ const fullPermissions = ['case.manage', 'case.read', 'run.manage', 'finding.conf
 
 describe('UiModePolicy', () => {
   test('[UI-UT-001] Simple で raw 編集 route を要求すると拒否して wizard へ戻す', () => {
-    for (const route of ['adv.manual.repeater', 'adv.manual.fuzzer', 'adv.manual.proxy', 'adv.tools.decoder'] as const) {
+    for (const route of ['adv.manual.repeater', 'adv.manual.fuzzer', 'adv.manual.proxy', 'adv.tools.decoder', 'adv.manual.websocket', 'adv.manual.oast'] as const) {
       const decision = resolveRoute('simple', route, fullPermissions);
       assert.equal(decision.allowed, false, `${route} は Simple で拒否`);
       assert.equal(decision.fallback, 'wizard.guideline');

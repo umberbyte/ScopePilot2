@@ -22,8 +22,8 @@ import { PassiveScreen } from './passive-screen.tsx';
 import { SessionsScreen } from './sessions-screen.tsx';
 import { ActiveScanScreen } from './active-scan-screen.tsx';
 import { ScanPolicyScreen } from './scan-policy-screen.tsx';
-import { ActiveScanScreen } from './active-scan-screen.tsx';
-import { ScanPolicyScreen } from './scan-policy-screen.tsx';
+import { WebSocketScreen } from './websocket-screen.tsx';
+import { OastScreen } from './oast-screen.tsx';
 
 /** ローカル desktop operator。operator 照会 API は後続増分で追加する。 */
 const OPERATOR_PERMISSIONS: readonly OperatorPermission[] = ['case.manage', 'case.read', 'run.manage', 'finding.confirm', 'report.export'];
@@ -42,6 +42,8 @@ type ScreenHost =
   | 'proxy'
   | 'repeater'
   | 'fuzzer'
+  | 'websocket'
+  | 'oast'
   | 'decoder'
   | 'decoderOnly'
   | 'comparerOnly'
@@ -65,8 +67,8 @@ const SCREEN_HOSTS: Partial<Record<AdvancedRoute, ScreenHost>> = {
   'adv.manual.proxy': 'proxy',
   'adv.manual.repeater': 'repeater',
   'adv.manual.fuzzer': 'fuzzer',
-  'adv.manual.websocket': 'decoder',
-  'adv.manual.oast': 'decoder',
+  'adv.manual.websocket': 'websocket',
+  'adv.manual.oast': 'oast',
   'adv.manual.dom': 'decoder',
   'adv.scan.active': 'activeScan',
   'adv.scan.passive': 'passive',
@@ -1389,6 +1391,8 @@ export function AdvancedApp({ apiBase }: { apiBase: string }): React.ReactElemen
         {host === 'proxy' && <ProxyInterceptScreen apiBase={apiBase} />}
         {host === 'repeater' && <RepeaterScreen apiBase={apiBase} />}
         {host === 'fuzzer' && <FuzzerScreen apiBase={apiBase} />}
+        {host === 'websocket' && <WebSocketScreen apiBase={apiBase} />}
+        {host === 'oast' && <OastScreen apiBase={apiBase} />}
         {host === 'sessions' && <SessionsScreen apiBase={apiBase} />}
         {host === 'decoder' && <DecoderComparerScreen apiBase={apiBase} />}
         {host === 'decoderOnly' && <DecoderScreen apiBase={apiBase} />}

@@ -224,6 +224,30 @@ const PAYLOAD_VERIFICATION_MAX = 5;
 
 const TOOL_PORTS = ['repeaterTransport', 'fuzzTransport', 'sequencerTransport', 'oastProvider', 'webSocketTransport', 'advancedTransport'] as const;
 type ToolPortName = typeof TOOL_PORTS[number];
+type ToolTransport = 'real' | 'fixture' | 'unavailable';
+
+function oastCallbackMetadata(payload: string, fallbackProtocol: OastProtocol): {
+  readonly protocol: OastProtocol;
+  readonly remoteAddress?: string;
+} {
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    if (typeof parsed !== 'object' || parsed === null) return { protocol: fallbackProtocol };
+    const record = parsed as Record<string, unknown>;
+    const rawProtocol = record.protocol;
+    const protocol = rawProtocol === 'https' ? 'http' : rawProtocol;
+    const normalized = protocol === 'http' || protocol === 'dns' || protocol === 'smtp' || protocol === 'icmp'
+      ? protocol
+      : fallbackProtocol;
+    const remote = record['remote-address'] ?? record.remote_address ?? record.remote;
+    return {
+      protocol: normalized,
+      ...(typeof remote === 'string' && remote.trim() !== '' ? { remoteAddress: remote.trim() } : {}),
+    };
+  } catch {
+    return { protocol: fallbackProtocol };
+  }
+}
 
 export interface BaselineFlowDeps {
   readonly runtimeProfile?: RuntimeProfile;
@@ -540,13 +564,39 @@ export class BaselineFlowService {
   private readonly fuzzRuns: readonly { runId: string; targetUrl: string; total: number; sent: number; clusters: readonly { key: string; members: readonly number[]; representative: readonly string[] }[]; executedAt: string }[] = [];
 
   /** OAST の attempt・観測 (design/f13)。token は発行時に一度だけ応答し、一覧には出さない。 */
-  private readonly oastAttempts: { adapterKind: AdapterKind; attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; issuedAtMs: number }[] = [];
+  private readonly oastIssuer = new TokenIssuer();
+  private readonly oastAttempts: { attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; issuedAtMs: number; transport: ToolTransport }[] = [];
   private readonly oastSeenEventIds = new Set<string>();
   private readonly oastInteractions: { token: string; payload: string; recordedAt: string }[] = [];
   private readonly oastUncorrelated: { token: string; reason: string; recordedAt: string }[] = [];
+  private readonly oastCallbacks: {
+    eventId: string;
+    attemptId: string | null;
+    protocol: OastProtocol;
+    remoteAddress?: string;
+    recordedAt: string;
+    rawHash: string;
+    correlation: 'correlated' | 'uncorrelated';
+    transport: ToolTransport;
+  }[] = [];
 
-  /** WebSocket frame 台帳 (design/f14)。text のみ・重複 fingerprint は持越しで dedupe。 */
-  private readonly wsFrames: WsFrame[] = [];
+  /** WebSocket connection/frame 台帳 (design/f14)。text のみ・frame は connection 単位で表示する。 */
+  private readonly wsConnections: {
+    connectionId: string;
+    logicalSessionId: string;
+    targetUrl: string;
+    transport: ToolTransport;
+    state: 'closed' | 'failed' | 'imported';
+    openedAt: string;
+    sentFrames: number;
+    receivedFrames: number;
+    negotiatedSubprotocol?: string;
+  }[] = [];
+  private readonly wsFrames: (WsFrame & {
+    connectionId: string;
+    targetUrl: string;
+    transport: ToolTransport;
+  })[] = [];
   private readonly wsSeenFingerprints = new Set<string>();
   private wsSessionRevision = 1;
 
@@ -3307,7 +3357,7 @@ export class BaselineFlowService {
   async startOastAttempt(
     operator: OperatorProfile,
     input: { readonly targetUrl: string; readonly protocol: OastProtocol },
-  ): Promise<{ adapterKind: AdapterKind; attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; waitMs: number }> {
+  ): Promise<{ attemptId: string; targetUrl: string; protocol: OastProtocol; token: string; waitMs: number; transport: ToolTransport }> {
     this.requirePermission(operator, 'run.manage');
     const adapter = this.requireToolAdapter('oastProvider');
     const adapterKind = adapter.adapterKind ?? 'real';
@@ -3317,7 +3367,11 @@ export class BaselineFlowService {
     if (!decision.allowed) {
       throw domainError('OutOfScope', `oast target is out of scope: ${decision.reason}`);
     }
-    const supportedProtocols = adapter.supportedProtocols;
+    const transport = this.deps.oastProvider?.adapterKind ?? 'fixture';
+    if (transport === 'unavailable') {
+      throw domainError('CapabilityUnavailable', 'oast provider is not configured');
+    }
+    const supportedProtocols = this.deps.oastProvider?.supportedProtocols ?? ['http', 'dns'];
     if (providerCapability(supportedProtocols, input.protocol) === 'Unsupported') {
       throw domainError('CapabilityUnavailable', `oast provider does not support protocol ${input.protocol}`);
     }
@@ -3335,13 +3389,13 @@ export class BaselineFlowService {
             this.recordProviderOastCallbacks(events);
           },
         });
-    this.oastAttempts.push({ adapterKind, attemptId, targetUrl: canonical, protocol: input.protocol, token, issuedAtMs: this.deps.clock.now().getTime() });
+    this.oastAttempts.push({ attemptId, targetUrl: canonical, protocol: input.protocol, token, issuedAtMs: this.deps.clock.now().getTime(), transport });
     attemptRegistered = true;
     this.record({ type: 'OastAttemptStarted', at: this.deps.clock.now().toISOString(), attemptId, targetUrl: canonical, protocol: input.protocol });
     for (const events of pendingEvents) {
       this.recordProviderOastCallbacks(events);
     }
-    return { adapterKind, attemptId, targetUrl: canonical, protocol: input.protocol, token, waitMs: OAST_DEFAULT_WAIT_MS };
+    return { attemptId, targetUrl: canonical, protocol: input.protocol, token, waitMs: OAST_DEFAULT_WAIT_MS, transport };
   }
 
   /**
@@ -3373,7 +3427,12 @@ export class BaselineFlowService {
     let correlatedCount = 0;
     let uncorrelatedCount = 0;
     const at = this.deps.clock.now().toISOString();
-    for (const callback of callbacks) {
+    for (const [index, callback] of callbacks.entries()) {
+      const event = kept[index];
+      if (event === undefined) continue;
+      const attempt = this.oastAttempts.find((candidate) => candidate.token === callback.token);
+      const metadata = oastCallbackMetadata(event.payload, attempt?.protocol ?? 'http');
+      const transport = attempt?.transport ?? this.deps.oastProvider?.adapterKind ?? 'fixture';
       if (callback.kind === 'correlated') {
         correlatedCount += 1;
         this.oastInteractions.push({ token: callback.token, payload: callback.payload, recordedAt: at });
@@ -3381,13 +3440,23 @@ export class BaselineFlowService {
         uncorrelatedCount += 1;
         this.oastUncorrelated.push({ token: callback.token, reason: callback.reason, recordedAt: at });
       }
+      this.oastCallbacks.push({
+        eventId: event.eventId,
+        attemptId: attempt?.attemptId ?? null,
+        protocol: metadata.protocol,
+        ...(metadata.remoteAddress === undefined ? {} : { remoteAddress: metadata.remoteAddress }),
+        recordedAt: at,
+        rawHash: hashStable('scopepilot2.oast.callback.raw', event.payload).slice(0, 12),
+        correlation: callback.kind,
+        transport,
+      });
     }
     this.record({ type: 'OastCallbacksRecorded', at, kept: kept.length, duplicates, correlated: correlatedCount, uncorrelated: uncorrelatedCount });
     return { kept: kept.length, duplicates, correlated: correlatedCount, uncorrelated: uncorrelatedCount };
   }
 
   /** attempt 一覧 (token なし。interactions と曖昧判定のみ)。 */
-  listOastAttempts(): readonly { attemptId: string; targetUrl: string; protocol: OastProtocol; adapterKind: AdapterKind; status: 'waiting' | 'expired'; interactions: number; candidateOnly: boolean }[] {
+  listOastAttempts(): readonly { attemptId: string; targetUrl: string; protocol: OastProtocol; status: 'waiting' | 'expired'; interactions: number; candidateOnly: boolean; transport: ToolTransport }[] {
     const nowMs = this.deps.clock.now().getTime();
     return this.oastAttempts.map((attempt) => {
       const interactions = this.oastInteractions.filter((interaction) => interaction.token === attempt.token);
@@ -3399,10 +3468,34 @@ export class BaselineFlowService {
         adapterKind: attempt.adapterKind,
         status: pollDeadline(attempt.issuedAtMs, nowMs).expired ? ('expired' as const) : ('waiting' as const),
         interactions: interactions.length,
+        transport: attempt.transport,
         // 複数 token にまたがる相関は無い (attempt 単位) が、観測 0 件は候補にもしない。
         candidateOnly: linked.linkedTokens.length === 1 && linked.candidateOnly === false ? false : true,
       };
     });
+  }
+
+  /** OAST capability and callback list. Tokens and raw provider payloads never leave Core. */
+  oastTransport(): { transport: ToolTransport; provider: 'interactsh' | 'fixture' | 'unavailable'; supportedProtocols: readonly OastProtocol[] } {
+    const transport = this.deps.oastProvider?.adapterKind ?? 'fixture';
+    return {
+      transport,
+      provider: transport === 'real' ? 'interactsh' : transport,
+      supportedProtocols: this.deps.oastProvider?.supportedProtocols ?? ['http', 'dns'],
+    };
+  }
+
+  listOastCallbacks(): readonly {
+    eventId: string;
+    attemptId: string | null;
+    protocol: OastProtocol;
+    remoteAddress?: string;
+    recordedAt: string;
+    rawHash: string;
+    correlation: 'correlated' | 'uncorrelated';
+    transport: ToolTransport;
+  }[] {
+    return this.oastCallbacks.map((callback) => ({ ...callback }));
   }
 
   /**
@@ -3436,7 +3529,7 @@ export class BaselineFlowService {
     const fresh: WsFrame[] = [];
     let duplicates = 0;
     for (const frame of staged) {
-      const fingerprint = `${frame.direction}:${frame.payload}`;
+      const fingerprint = `${canonical}:${frame.direction}:${frame.payload}`;
       if (this.wsSeenFingerprints.has(fingerprint) || batchFingerprints.has(fingerprint)) {
         duplicates += 1;
         continue;
@@ -3445,17 +3538,59 @@ export class BaselineFlowService {
       fresh.push(frame);
     }
     const { imported } = importFrames(fresh);
+    const connectionId = this.deps.ids.next('ws-connection');
+    const logicalSessionId = `ws-session-${hashStable('scopepilot2.ws.logical-session', { targetUrl: canonical, source: 'import' }).slice(0, 16)}`;
     for (const frame of imported) {
-      this.wsSeenFingerprints.add(`${frame.direction}:${frame.payload}`);
-      this.wsFrames.push(frame);
+      this.wsSeenFingerprints.add(`${canonical}:${frame.direction}:${frame.payload}`);
+      this.wsFrames.push({ ...frame, connectionId, targetUrl: canonical, transport: 'fixture' });
+    }
+    if (imported.length > 0) {
+      this.wsConnections.push({
+        connectionId,
+        logicalSessionId,
+        targetUrl: canonical,
+        transport: 'fixture',
+        state: 'imported',
+        openedAt: this.deps.clock.now().toISOString(),
+        sentFrames: imported.filter((frame) => frame.direction === 'sent').length,
+        receivedFrames: imported.filter((frame) => frame.direction === 'received').length,
+      });
     }
     this.record({ type: 'WsFramesImported', at: this.deps.clock.now().toISOString(), targetUrl: canonical, imported: imported.length, duplicates });
     return { imported: imported.length, duplicates };
   }
 
   /** frame 一覧 (text と raw hash を区別した表示素材)。 */
-  listWsFrames(): readonly { frameId: string; direction: 'sent' | 'received'; text: string; rawHash: string }[] {
-    return this.wsFrames.map((frame) => ({ frameId: frame.frameId, direction: frame.direction, text: wsEvidence(frame).text, rawHash: wsEvidence(frame).rawHash.slice(0, 12) }));
+  listWsFrames(): readonly { frameId: string; connectionId: string; targetUrl: string; direction: 'sent' | 'received'; text: string; rawHash: string; recordedAt: string; transport: ToolTransport }[] {
+    return this.wsFrames.map((frame) => ({
+      frameId: frame.frameId,
+      connectionId: frame.connectionId,
+      targetUrl: frame.targetUrl,
+      direction: frame.direction,
+      text: wsEvidence(frame).text,
+      rawHash: wsEvidence(frame).rawHash.slice(0, 12),
+      recordedAt: new Date(frame.receivedAtMs).toISOString(),
+      transport: frame.transport,
+    }));
+  }
+
+  listWsConnections(): readonly {
+    connectionId: string;
+    logicalSessionId: string;
+    targetUrl: string;
+    transport: ToolTransport;
+    state: 'closed' | 'failed' | 'imported';
+    openedAt: string;
+    sentFrames: number;
+    receivedFrames: number;
+    negotiatedSubprotocol?: string;
+  }[] {
+    return this.wsConnections.map((connection) => ({ ...connection }));
+  }
+
+  webSocketTransport(): { transport: ToolTransport; implementation: 'node-websocket' | 'fixture' | 'unavailable' } {
+    const transport = this.deps.webSocketTransport?.adapterKind ?? 'fixture';
+    return { transport, implementation: transport === 'real' ? 'node-websocket' : transport };
   }
 
   /**
@@ -3467,7 +3602,7 @@ export class BaselineFlowService {
   async sendWsMessages(
     operator: OperatorProfile,
     input: { readonly targetUrl: string; readonly messages: readonly string[]; readonly role?: string; readonly subprotocols?: readonly string[] },
-  ): Promise<{ adapterKind: AdapterKind; planHash: string; sent: number; rejected: 'size' | 'rate' | null; sessionCookieNames?: readonly string[]; negotiatedSubprotocol?: string }> {
+  ): Promise<{ planHash: string; sent: number; rejected: 'size' | 'rate' | null; transport: ToolTransport; connectionId?: string; logicalSessionId?: string; sessionCookieNames?: readonly string[]; negotiatedSubprotocol?: string }> {
     this.requirePermission(operator, 'run.manage');
     const adapter = this.requireToolAdapter('webSocketTransport');
     const adapterKind = adapter.adapterKind ?? 'real';
@@ -3495,16 +3630,88 @@ export class BaselineFlowService {
       sessionRevision: this.wsSessionRevision,
       subprotocols,
     });
-    if (input.messages.some((message) => Buffer.byteLength(message, 'utf8') > 1_000_000)) {
-      this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: 0, rejected: 'size' });
-      return { adapterKind, planHash: plan.planHash, sent: 0, rejected: 'size' };
+    const transport = this.deps.webSocketTransport?.adapterKind ?? 'fixture';
+    if (transport === 'unavailable') {
+      throw domainError('CapabilityUnavailable', 'websocket transport is not configured');
     }
-    const recordFrame = (direction: 'sent' | 'received', payload: string): void => {
-      const frame: WsFrame = { frameId: this.deps.ids.next('ws'), direction, payload, receivedAtMs: this.deps.clock.now().getTime() };
-      this.wsFrames.push(frame);
-      this.wsSeenFingerprints.add(`${frame.direction}:${frame.payload}`);
-    };
-    const transported = await adapter.exchange({
+    if (this.deps.webSocketTransport !== undefined) {
+      if (input.messages.some((message) => Buffer.byteLength(message, 'utf8') > 1_000_000)) {
+        this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: 0, rejected: 'size' });
+        return { planHash: plan.planHash, sent: 0, rejected: 'size', transport };
+      }
+      const connectionId = this.deps.ids.next('ws-connection');
+      const logicalSessionId = `ws-session-${hashStable('scopepilot2.ws.logical-session', { targetUrl: canonical, role: input.role ?? null, subprotocols }).slice(0, 16)}`;
+      const openedAt = this.deps.clock.now().toISOString();
+      const recordFrame = (direction: 'sent' | 'received', payload: string): void => {
+        const frame: WsFrame = { frameId: this.deps.ids.next('ws'), direction, payload, receivedAtMs: this.deps.clock.now().getTime() };
+        this.wsFrames.push({ ...frame, connectionId, targetUrl: canonical, transport });
+        this.wsSeenFingerprints.add(`${canonical}:${frame.direction}:${frame.payload}`);
+      };
+      let transported: Awaited<ReturnType<NonNullable<BaselineFlowDeps['webSocketTransport']>['exchange']>>;
+      try {
+        transported = await this.deps.webSocketTransport.exchange({
+          targetUrl: canonical,
+          messages: input.messages,
+          ...(subprotocols.length === 0 ? {} : { subprotocols }),
+          ...(appliedCookies === undefined ? {} : {
+            sessionCookies: appliedCookies.map((cookie) => ({
+              name: cookie.name,
+              value: cookie.value,
+              domain: cookie.domain,
+              path: cookie.path,
+            })),
+          }),
+          onSentFrame: (payload) => recordFrame('sent', payload),
+          onTextFrame: (payload) => recordFrame('received', payload),
+        });
+      } catch (cause) {
+        const frames = this.wsFrames.filter((frame) => frame.connectionId === connectionId);
+        this.wsConnections.push({ connectionId, logicalSessionId, targetUrl: canonical, transport, state: 'failed', openedAt, sentFrames: frames.filter((frame) => frame.direction === 'sent').length, receivedFrames: frames.filter((frame) => frame.direction === 'received').length });
+        throw cause;
+      }
+      const frames = this.wsFrames.filter((frame) => frame.connectionId === connectionId);
+      this.wsConnections.push({
+        connectionId,
+        logicalSessionId,
+        targetUrl: canonical,
+        transport,
+        state: 'closed',
+        openedAt,
+        sentFrames: frames.filter((frame) => frame.direction === 'sent').length,
+        receivedFrames: frames.filter((frame) => frame.direction === 'received').length,
+        ...(transported.negotiatedSubprotocol === undefined ? {} : { negotiatedSubprotocol: transported.negotiatedSubprotocol }),
+      });
+      this.record({ type: 'WsMessagesSent', at: this.deps.clock.now().toISOString(), targetUrl: canonical, sent: transported.sent });
+      return {
+        planHash: plan.planHash,
+        sent: transported.sent,
+        rejected: null,
+        transport,
+        connectionId,
+        logicalSessionId,
+        ...(transported.negotiatedSubprotocol === undefined ? {} : { negotiatedSubprotocol: transported.negotiatedSubprotocol }),
+        ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
+      };
+    }
+    const connectionId = this.deps.ids.next('ws-connection');
+    const logicalSessionId = `ws-session-${hashStable('scopepilot2.ws.logical-session', { targetUrl: canonical, role: input.role ?? null, subprotocols }).slice(0, 16)}`;
+    const openedAt = this.deps.clock.now().toISOString();
+    let virtualMs = 0;
+    const result = await sendWithPolicy(
+      input.messages,
+      { maxMessageBytes: 1_000_000, messagesPerSecond: 10, now: () => (virtualMs += 1000) },
+      {
+        send: async (message) => {
+          const frame: WsFrame = { frameId: this.deps.ids.next('ws'), direction: 'sent', payload: message, receivedAtMs: this.deps.clock.now().getTime() };
+          this.wsFrames.push({ ...frame, connectionId, targetUrl: canonical, transport });
+          this.wsSeenFingerprints.add(`${canonical}:${frame.direction}:${frame.payload}`);
+        },
+      },
+    );
+    this.wsConnections.push({ connectionId, logicalSessionId, targetUrl: canonical, transport, state: 'closed', openedAt, sentFrames: result.sent, receivedFrames: 0 });
+    this.record({
+      type: 'WsMessagesSent',
+      at: this.deps.clock.now().toISOString(),
       targetUrl: canonical,
       messages: input.messages,
       ...(subprotocols.length === 0 ? {} : { subprotocols }),
@@ -3523,9 +3730,11 @@ export class BaselineFlowService {
     return {
       adapterKind,
       planHash: plan.planHash,
-      sent: transported.sent,
-      rejected: null,
-      ...(transported.negotiatedSubprotocol === undefined ? {} : { negotiatedSubprotocol: transported.negotiatedSubprotocol }),
+      sent: result.sent,
+      rejected: result.rejected,
+      transport,
+      connectionId,
+      logicalSessionId,
       ...(appliedCookies === undefined ? {} : { sessionCookieNames: appliedCookies.map((cookie) => cookie.name) }),
     };
   }
